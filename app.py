@@ -4,12 +4,14 @@ import json
 import urllib.request
 import urllib.parse
 import ssl
+import random
+import string
 from datetime import date
 from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.1.2"
 
 # Members-only tiers require PSA Collectors Club membership
 PSA_FEES_ALL = {
@@ -115,6 +117,142 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+
+# ─── Admin panel ──────────────────────────────────────────────────────────────
+ADMIN_PASSWORD = get_secret("admin", "password")
+
+def gen_code():
+    chars = string.ascii_uppercase + string.digits
+    suffix = "".join(random.choices(chars, k=4)) + "-" + "".join(random.choices(chars, k=4))
+    return f"DFS-{suffix}"
+
+def admin_get_codes():
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/rest/v1/access_codes?select=id,code,name,active,usage_count,last_used,created_at&order=id.asc",
+        headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+    )
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=10) as r:
+            return json.loads(r.read().decode())
+    except Exception:
+        return []
+
+def admin_insert_code(code, name):
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    data = json.dumps({"code": code, "name": name}).encode()
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/rest/v1/access_codes",
+        data=data,
+        headers={
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=10):
+            return True
+    except Exception:
+        return False
+
+def admin_toggle_code(code_id, active):
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    data = json.dumps({"active": active}).encode()
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/rest/v1/access_codes?id=eq.{code_id}",
+        data=data,
+        headers={
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        },
+        method="PATCH",
+    )
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=10):
+            return True
+    except Exception:
+        return False
+
+if st.query_params.get("admin") == "true":
+    if not st.session_state.get("admin_authed"):
+        st.markdown(
+            """
+            <div style="max-width:380px; margin:80px auto; padding:36px 28px;
+                        background:#1e2130; border-radius:12px;
+                        border:1px solid #2e3250; text-align:center;">
+                <div style="font-size:2rem; margin-bottom:8px;">🔐</div>
+                <h2 style="margin-bottom:16px;">Admin Access</h2>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        a1, a2, a3 = st.columns([1, 2, 1])
+        with a2:
+            pw = st.text_input("Password", type="password", label_visibility="collapsed", placeholder="Admin password")
+            if st.button("Unlock", use_container_width=True, type="primary"):
+                if pw == ADMIN_PASSWORD:
+                    st.session_state.admin_authed = True
+                    st.rerun()
+                else:
+                    st.error("Incorrect password.")
+        st.stop()
+
+    # ── Admin dashboard ──
+    st.markdown("## 🔐 DFS Card Grader — Admin")
+    st.caption(f"v{APP_VERSION} · Access code management")
+    st.markdown("---")
+
+    codes = admin_get_codes()
+
+    st.markdown(f"### 👥 Access Codes ({len(codes)} total)")
+
+    for row in codes:
+        c1, c2, c3, c4, c5 = st.columns([2, 2, 1, 1, 1])
+        c1.markdown(f"**{row['name']}**")
+        c2.code(row["code"])
+        c3.markdown("🟢 Active" if row["active"] else "🔴 Inactive")
+        c4.markdown(f"Uses: **{row['usage_count']}**")
+        last = (row.get("last_used") or "Never")[:10]
+        c5.markdown(f"Last: {last}")
+
+        if row["active"]:
+            if st.button(f"Revoke", key=f"rev_{row['id']}"):
+                admin_toggle_code(row["id"], False)
+                st.success(f"Revoked {row['name']}")
+                st.rerun()
+        else:
+            if st.button(f"Reinstate", key=f"rei_{row['id']}"):
+                admin_toggle_code(row["id"], True)
+                st.success(f"Reinstated {row['name']}")
+                st.rerun()
+        st.markdown("---")
+
+    st.markdown("### ➕ Create New Access Code")
+    n1, n2, n3 = st.columns([2, 2, 1])
+    new_name = n1.text_input("Name", placeholder="e.g. John Smith")
+    new_code = n2.text_input("Code (auto-generated, editable)", value=gen_code())
+    if n3.button("Create", type="primary", use_container_width=True):
+        if new_name and new_code:
+            if admin_insert_code(new_code.strip().upper(), new_name.strip()):
+                st.success(f"✅ Created code for **{new_name}**: `{new_code.upper()}`")
+                st.rerun()
+            else:
+                st.error("Failed — code may already exist.")
+        else:
+            st.warning("Enter a name and code.")
+
+    st.stop()
 
 # ─── Access code gate ─────────────────────────────────────────────────────────
 def validate_code(code: str):
