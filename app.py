@@ -11,7 +11,7 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.1.5"
+APP_VERSION = "1.1.6"
 
 # Members-only tiers require PSA Collectors Club membership
 PSA_FEES_ALL = {
@@ -48,6 +48,10 @@ st.set_page_config(
 # ─── Mobile CSS ───────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
+/* ── Hide Streamlit toolbar (GitHub, edit, share icons) ── */
+[data-testid="stToolbar"] { display: none !important; }
+header[data-testid="stHeader"] { background: transparent !important; }
+
 /* ── Reduce desktop padding on wide layout ── */
 .block-container { padding-top: 1.5rem !important; }
 
