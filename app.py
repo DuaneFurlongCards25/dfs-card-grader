@@ -714,14 +714,7 @@ with tab1:
         desc = f"{sel.get('year','')} {sel.get('set_name','')} {sel.get('name','')} {sel.get('parallel') or ''}".strip()
 
         st.markdown("---")
-        name_js = json.dumps(selected)
-        st.markdown(f"""
-<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-  <span style="font-size:1.4rem;font-weight:700;color:#fafafa;">{selected}</span>
-  <button onclick="navigator.clipboard.writeText({name_js}).then(()=>{{this.textContent='✅';setTimeout(()=>this.textContent='📋',2000)}})"
-    style="background:#2e3250;color:#fff;border:none;border-radius:4px;padding:5px 10px;
-           cursor:pointer;font-size:0.78rem;white-space:nowrap;">📋</button>
-</div>""", unsafe_allow_html=True)
+        st.text_input("📋 Card name (tap → select all → copy)", value=selected, key="card_name_copy")
 
         m1, m2, m3 = st.columns(3)
         m1.metric("Gem Rate", fmt_gem(gem))
@@ -830,16 +823,7 @@ Gem Rate: {fmt_gem(gem)} | Raw: ${raw_cost:,.2f} | Gem 10 Avg: ${graded_price:,.
 Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI: {roi:.0f}%
 {v}"""
                 with st.expander("📋 Copy Analysis"):
-                    summary_js = json.dumps(summary)
-                    st.markdown(f"""
-<div style="position:relative; background:#0f1117; border-radius:8px; padding:16px; margin-bottom:4px;">
-<pre style="margin:0; color:#fafafa; font-size:0.88rem; white-space:pre-wrap; font-family:monospace;">{summary}</pre>
-<button onclick="navigator.clipboard.writeText({summary_js}).then(()=>{{this.textContent='✅ Copied!';setTimeout(()=>this.textContent='📋 Copy',2000)}}).catch(()=>this.textContent='❌ Try again')"
-  style="position:absolute;top:8px;right:8px;background:#2e3250;color:#fff;border:none;border-radius:4px;
-         padding:6px 12px;cursor:pointer;font-size:0.78rem;font-family:sans-serif;">
-  📋 Copy
-</button>
-</div>""", unsafe_allow_html=True)
+                    st.code(summary, language=None)
             else:
                 st.info("Enter a Gem 10 avg price above to get a GO/NO-GO decision")
 
