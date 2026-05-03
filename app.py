@@ -11,7 +11,7 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.1.4"
+APP_VERSION = "1.1.5"
 
 # Members-only tiers require PSA Collectors Club membership
 PSA_FEES_ALL = {
@@ -42,7 +42,7 @@ st.set_page_config(
     page_title="DFS Card Grader",
     page_icon="💎",
     layout="wide",
-    menu_items={"About": "DFS Card Grader — © 2025 Cardboard Edge LLC"},
+    menu_items={"About": "DFS Card Grader — © 2025 DFS Cards LLC"},
 )
 
 # ─── Mobile CSS ───────────────────────────────────────────────────────────────
@@ -366,11 +366,11 @@ if not st.session_state.get("agreed"):
                 values fluctuate — always verify data independently before submitting
                 cards for grading.<br><br>
                 All grading decisions and associated costs are <strong style="color:#fafafa;">
-                solely your responsibility</strong>. Cardboard Edge LLC assumes no liability
+                solely your responsibility</strong>. DFS Cards LLC assumes no liability
                 for financial outcomes resulting from use of this tool.<br><br>
                 <span style="font-size:0.8rem; color:#888;">
-                Cardboard Edge LLC · 5534 Saint Joe Road · Fort Wayne, IN 46835<br>
-                ©️ 2025 Cardboard Edge LLC. All rights reserved.
+                DFS Cards LLC · 8601 E Palo Verde Dr · Scottsdale, AZ 85250<br>
+                ©️ 2025 DFS Cards LLC. All rights reserved.
                 </span>
             </div>
         </div>
@@ -1116,10 +1116,10 @@ st.markdown(
         is pulled from third-party sources and may be incomplete, delayed, or inaccurate.
         Gem rates and market values fluctuate — always verify data independently before submitting cards for grading.
         All grading decisions and associated costs are solely your responsibility.
-        Cardboard Edge LLC assumes no liability for financial outcomes resulting from use of this tool.<br><br>
-        <strong style="color:#aaa;">Cardboard Edge LLC</strong><br>
-        5534 Saint Joe Road · Fort Wayne, IN 46835<br><br>
-        ©️ 2025 Cardboard Edge LLC. All rights reserved.
+        DFS Cards LLC assumes no liability for financial outcomes resulting from use of this tool.<br><br>
+        <strong style="color:#aaa;">DFS Cards LLC</strong><br>
+        8601 E Palo Verde Dr · Scottsdale, AZ 85250<br><br>
+        ©️ 2025 DFS Cards LLC. All rights reserved.
     </div>
     """,
     unsafe_allow_html=True,
