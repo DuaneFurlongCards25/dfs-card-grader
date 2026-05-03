@@ -11,7 +11,7 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 
 # Members-only tiers require PSA Collectors Club membership
 PSA_FEES_ALL = {
