@@ -11,7 +11,7 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.1.3"
 
 # Members-only tiers require PSA Collectors Club membership
 PSA_FEES_ALL = {
@@ -515,7 +515,9 @@ def fetch_ebay_sold(query: str, app_id: str, max_results: int = 15):
                 price = float(price_val)
             except Exception:
                 continue
-            results.append({"title": title, "price": price, "date": end_time[:10]})
+            image = item.get("galleryURL", [""])[0]
+            item_url = item.get("viewItemURL", [""])[0]
+            results.append({"title": title, "price": price, "date": end_time[:10], "image": image, "url": item_url})
         return results
     except Exception:
         return []
@@ -675,6 +677,28 @@ with tab1:
                 graded_sold = fetch_ebay_sold(desc + " PSA 10", ebay_key)
             raw_auto    = ebay_avg(raw_sold)
             graded_auto = ebay_avg(graded_sold)
+
+            # ── Card image gallery ──
+            all_images = [i for i in graded_sold + raw_sold if i.get("image")]
+            if all_images:
+                st.markdown("#### 🖼️ Recent eBay Listings")
+                seen, unique_imgs = set(), []
+                for item in all_images:
+                    if item["image"] not in seen:
+                        seen.add(item["image"])
+                        unique_imgs.append(item)
+                    if len(unique_imgs) == 6:
+                        break
+                img_cols = st.columns(len(unique_imgs))
+                for col, item in zip(img_cols, unique_imgs):
+                    with col:
+                        st.markdown(
+                            f'<a href="{item["url"]}" target="_blank">'
+                            f'<img src="{item["image"]}" style="width:100%;border-radius:6px;'
+                            f'border:1px solid #2e3250;" /></a>',
+                            unsafe_allow_html=True,
+                        )
+                        st.caption(f"${item['price']:,.2f} · {item['date']}")
 
             fc1, fc2 = st.columns(2)
             with fc1:
