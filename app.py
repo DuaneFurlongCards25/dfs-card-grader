@@ -1,0 +1,665 @@
+import streamlit as st
+import pandas as pd
+import json
+import urllib.request
+import urllib.parse
+import ssl
+from datetime import date
+from pathlib import Path
+import io
+
+# ─── Constants ────────────────────────────────────────────────────────────────
+PSA_FEES = {
+    "Economy (~45 days)": 22,
+    "Regular (~20 days)": 50,
+    "Express (~5 days)": 150,
+    "Super Express (~3 days)": 300,
+}
+EBAY_FEE = 0.1325
+
+# ─── Secrets ──────────────────────────────────────────────────────────────────
+def get_secret(section, key, default=""):
+    try:
+        return st.secrets[section][key]
+    except Exception:
+        return default
+
+SUPABASE_URL = get_secret("supabase", "url")
+SUPABASE_KEY = get_secret("supabase", "key")
+DEFAULT_EBAY_KEY = get_secret("ebay", "app_id")
+
+# ─── Page config ──────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="DFS Card Grader",
+    page_icon="💎",
+    layout="wide",
+    menu_items={"About": "DFS Card Grader — built for DFS Cards LLC"},
+)
+
+# ─── SSL ──────────────────────────────────────────────────────────────────────
+def ssl_ctx():
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+# ─── Supabase tracker ─────────────────────────────────────────────────────────
+TRACKER_COLS = [
+    "id", "date_added", "card_description", "year", "set_name", "parallel",
+    "raw_buy_price", "psa_tier", "psa_fee", "psa10_avg_price", "target_price",
+    "gem_rate", "go_no_go", "est_net", "est_roi",
+    "date_submitted", "status", "grade_returned",
+    "actual_sell_price", "actual_net", "actual_roi", "notes",
+]
+
+def sb_headers():
+    return {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+
+def sb_get():
+    if not SUPABASE_URL:
+        return []
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/rest/v1/grading_tracker?order=id.asc",
+        headers=sb_headers(),
+    )
+    try:
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
+            return json.loads(r.read().decode())
+    except Exception:
+        return []
+
+def sb_insert(row: dict):
+    if not SUPABASE_URL:
+        return
+    data = json.dumps(row).encode()
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/rest/v1/grading_tracker",
+        data=data,
+        headers=sb_headers(),
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
+            return json.loads(r.read().decode())
+    except Exception:
+        pass
+
+def sb_update(row_id: int, updates: dict):
+    if not SUPABASE_URL:
+        return
+    data = json.dumps(updates).encode()
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/rest/v1/grading_tracker?id=eq.{row_id}",
+        data=data,
+        headers={**sb_headers(), "Prefer": "return=minimal"},
+        method="PATCH",
+    )
+    try:
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
+            pass
+    except Exception:
+        pass
+
+def sb_delete(row_id: int):
+    if not SUPABASE_URL:
+        return
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/rest/v1/grading_tracker?id=eq.{row_id}",
+        headers=sb_headers(),
+        method="DELETE",
+    )
+    try:
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
+            pass
+    except Exception:
+        pass
+
+# ─── GemRate API ──────────────────────────────────────────────────────────────
+@st.cache_data(ttl=3600, show_spinner=False)
+def search_gemrate(query: str):
+    data = json.dumps({"query": query}).encode()
+    req = urllib.request.Request(
+        "https://www.gemrate.com/universal-search-query",
+        data=data,
+        headers={"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=12) as r:
+            return json.loads(r.read().decode())
+    except Exception:
+        return []
+
+# ─── eBay Finding API ─────────────────────────────────────────────────────────
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_ebay_sold(query: str, app_id: str, max_results: int = 15):
+    if not app_id:
+        return []
+    params = {
+        "OPERATION-NAME": "findCompletedItems",
+        "SERVICE-VERSION": "1.0.0",
+        "SECURITY-APPNAME": app_id,
+        "RESPONSE-DATA-FORMAT": "JSON",
+        "keywords": query,
+        "itemFilter(0).name": "SoldItemsOnly",
+        "itemFilter(0).value": "true",
+        "sortOrder": "EndTimeSoonest",
+        "paginationInput.entriesPerPage": str(max_results),
+    }
+    url = "https://svcs.ebay.com/services/search/FindingService/v1?" + urllib.parse.urlencode(params)
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=12) as r:
+            data = json.loads(r.read().decode())
+        items = (data.get("findCompletedItemsResponse", [{}])[0]
+                     .get("searchResult", [{}])[0]
+                     .get("item", []))
+        results = []
+        for item in items:
+            price_val = (item.get("sellingStatus", [{}])[0]
+                             .get("currentPrice", [{}])[0]
+                             .get("__value__", ""))
+            end_time = (item.get("listingInfo", [{}])[0]
+                            .get("endTime", [None])[0] or "")
+            title = item.get("title", [""])[0]
+            try:
+                price = float(price_val)
+            except Exception:
+                continue
+            results.append({"title": title, "price": price, "date": end_time[:10]})
+        return results
+    except Exception:
+        return []
+
+def ebay_avg(sold_items):
+    if not sold_items:
+        return None
+    prices = sorted(x["price"] for x in sold_items)
+    if len(prices) >= 6:
+        cut = max(1, len(prices) // 10)
+        prices = prices[cut:-cut]
+    return round(sum(prices) / len(prices), 2)
+
+# ─── URL builders ─────────────────────────────────────────────────────────────
+def gemrate_url(gid):
+    return f"https://www.gemrate.com/card/{gid}"
+
+def ebay_raw_url(desc):
+    q = urllib.parse.quote_plus(desc + " raw")
+    return f"https://www.ebay.com/sch/i.html?_nkw={q}&LH_BIN=1&_sop=15"
+
+def ebay_graded_sold_url(desc):
+    q = urllib.parse.quote_plus(desc + " PSA 10")
+    return f"https://www.ebay.com/sch/i.html?_nkw={q}&LH_Sold=1&LH_Complete=1"
+
+def ebay_graded_buy_url(desc):
+    q = urllib.parse.quote_plus(desc + " PSA 10")
+    return f"https://www.ebay.com/sch/i.html?_nkw={q}&LH_BIN=1&_sop=15"
+
+# ─── ROI logic ────────────────────────────────────────────────────────────────
+def target_price(raw_cost, psa_tier, roi=4.0):
+    fee = PSA_FEES.get(psa_tier, 50)
+    return (raw_cost * roi + fee) / (1 - EBAY_FEE)
+
+def calc_net_roi(raw_cost, psa_tier, graded_price):
+    fee = PSA_FEES.get(psa_tier, 50)
+    net = graded_price * (1 - EBAY_FEE) - fee - raw_cost
+    roi = (net / raw_cost * 100) if raw_cost > 0 else 0
+    return round(net, 2), round(roi, 1)
+
+def verdict(raw_cost, psa_tier, gem_rate, graded_price, min_gem, roi_target):
+    if gem_rate is None or gem_rate < min_gem:
+        return "❌ NO-GO", "red", f"Gem rate {gem_rate or 0:.1f}% below {min_gem:.0f}% floor"
+    tgt = target_price(raw_cost, psa_tier, roi_target)
+    net, roi = calc_net_roi(raw_cost, psa_tier, graded_price)
+    if graded_price >= tgt:
+        return "✅ GO", "green", f"Gem 10 avg ${graded_price:,.0f} clears ${tgt:,.0f} target | Net ~${net:,.0f} | ROI ~{roi:.0f}%"
+    return "❌ NO-GO", "red", f"Gem 10 avg ${graded_price:,.0f} needs ${tgt:,.0f} for {roi_target:.0f}× | ROI only ~{roi:.0f}%"
+
+def fmt_gem(g):
+    if g is None:
+        return "—"
+    return "<0.1%" if g < 0.05 else f"{g:.1f}%"
+
+def gem_signal(g):
+    if g is None or g < 40:
+        return "🔴"
+    if g < 60:
+        return "🟡"
+    return "🟢"
+
+# ─── Sidebar ──────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("## 💎 DFS Card Grader")
+    st.caption("Gem rate research + grading ROI calculator")
+    st.markdown("---")
+    st.markdown("### ⚙️ Settings")
+    roi_target = st.number_input("ROI target (×)", min_value=1.0, max_value=20.0, value=4.0, step=0.5)
+    min_gem = st.number_input("Min gem rate (%)", min_value=0.0, max_value=100.0, value=40.0, step=5.0)
+    default_tier = st.selectbox("Default grading tier", list(PSA_FEES.keys()), index=0)
+
+    st.markdown("---")
+    st.markdown("### eBay API Key")
+    st.caption("Get a free App ID at [developer.ebay.com](https://developer.ebay.com) to enable automatic price lookup.")
+    ebay_key = st.text_input("eBay App ID", value=DEFAULT_EBAY_KEY, type="password", placeholder="YourApp-PRD-...")
+    if ebay_key:
+        st.success("eBay API connected ✓")
+    else:
+        st.warning("No key — prices entered manually")
+
+    st.markdown("---")
+    st.markdown("**Grading fees**")
+    for tier, fee in PSA_FEES.items():
+        st.caption(f"{tier.split('(')[0].strip()}: ${fee}")
+    st.caption(f"eBay sell fee: {EBAY_FEE*100:.2f}%")
+
+# ─── Tabs ─────────────────────────────────────────────────────────────────────
+tab1, tab2, tab3 = st.tabs(["🔍 Card Research", "📦 Inventory Check", "📬 Submission Tracker"])
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 1 — Card Research
+# ══════════════════════════════════════════════════════════════════════════════
+with tab1:
+    st.markdown("## 🔍 Card Research")
+    st.markdown("Search any card — owned or not. Get gem rate, graded value comps, and eBay links.")
+
+    col_q, col_btn = st.columns([5, 1])
+    with col_q:
+        query = st.text_input("Search", placeholder="e.g.  Steph Curry Paradox  |  Luka Doncic Prizm RC  |  Wemby Optic", label_visibility="collapsed")
+    with col_btn:
+        do_search = st.button("Search", use_container_width=True, type="primary")
+
+    if query and (do_search or st.session_state.get("last_q") != query):
+        st.session_state.last_q = query
+        with st.spinner("Searching GemRate..."):
+            st.session_state.gr_results = search_gemrate(query)
+
+    results = st.session_state.get("gr_results", [])
+
+    if results:
+        st.markdown(f"**{len(results)} result(s) from GemRate**")
+        rows = [{
+            "Signal": gem_signal(r.get("gem_rate")),
+            "Year": r.get("year", ""),
+            "Set": r.get("set_name", ""),
+            "Player": r.get("name", ""),
+            "Parallel": r.get("parallel") or "Base",
+            "#": r.get("card_number", ""),
+            "Grader": r.get("population_type", ""),
+            "Total Pop": f"{r.get('total_population', 0):,}",
+            "Gem Copies": f"{r.get('gems', 0):,}",
+            "Gem Rate": fmt_gem(r.get("gem_rate")),
+        } for r in results]
+
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=280)
+
+        opts = [
+            f"{r.get('year','')} {r.get('set_name','')} {r.get('name','')} "
+            f"{r.get('parallel') or 'Base'} #{r.get('card_number','')}"
+            for r in results
+        ]
+        selected = st.selectbox("Select card to analyze", opts)
+        sel = results[opts.index(selected)]
+        gem = sel.get("gem_rate")
+        desc = f"{sel.get('year','')} {sel.get('set_name','')} {sel.get('name','')} {sel.get('parallel') or ''}".strip()
+
+        st.markdown("---")
+        st.markdown(f"### {selected}")
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Gem Rate", fmt_gem(gem))
+        m2.metric("Total Pop", f"{sel.get('total_population', 0):,}")
+        m3.metric("Gem Copies", f"{sel.get('gems', 0):,}")
+        st.markdown(f"[📊 Full pop report on GemRate]({gemrate_url(sel.get('gemrate_id',''))})")
+
+        st.markdown("#### ROI Analysis")
+
+        # Auto-fetch eBay prices
+        raw_sold, graded_sold = [], []
+        raw_auto, graded_auto = None, None
+        if ebay_key:
+            with st.spinner("Fetching eBay sold prices..."):
+                raw_sold    = fetch_ebay_sold(desc + " raw", ebay_key)
+                graded_sold = fetch_ebay_sold(desc + " PSA 10", ebay_key)
+            raw_auto    = ebay_avg(raw_sold)
+            graded_auto = ebay_avg(graded_sold)
+
+            fc1, fc2 = st.columns(2)
+            with fc1:
+                st.markdown("**Raw — recent eBay solds**")
+                if raw_sold:
+                    df_r = pd.DataFrame(raw_sold)[["date", "price", "title"]]
+                    df_r["price"] = df_r["price"].map("${:,.2f}".format)
+                    df_r.columns = ["Date", "Price", "Title"]
+                    st.dataframe(df_r, use_container_width=True, hide_index=True, height=180)
+                    if raw_auto:
+                        st.markdown(f"**Avg (trimmed): ${raw_auto:,.2f}**")
+                else:
+                    st.info("No raw solds found — try a broader search")
+            with fc2:
+                st.markdown("**Gem 10 — recent eBay solds**")
+                if graded_sold:
+                    df_g = pd.DataFrame(graded_sold)[["date", "price", "title"]]
+                    df_g["price"] = df_g["price"].map("${:,.2f}".format)
+                    df_g.columns = ["Date", "Price", "Title"]
+                    st.dataframe(df_g, use_container_width=True, hide_index=True, height=180)
+                    if graded_auto:
+                        st.markdown(f"**Avg (trimmed): ${graded_auto:,.2f}**")
+                else:
+                    st.info("No graded 10 solds found")
+
+        ra1, ra2, ra3 = st.columns(3)
+        with ra1:
+            raw_cost = st.number_input(
+                "Raw buy price ($)", min_value=0.0,
+                value=float(raw_auto) if raw_auto else 50.0,
+                step=5.0, key="t1_raw",
+            )
+        with ra2:
+            tier = st.selectbox("Grading tier", list(PSA_FEES.keys()),
+                                index=list(PSA_FEES.keys()).index(default_tier), key="t1_tier")
+        with ra3:
+            graded_price = st.number_input(
+                "Gem 10 avg price ($)", min_value=0.0,
+                value=float(graded_auto) if graded_auto else 0.0,
+                step=10.0, key="t1_graded",
+            )
+
+        if raw_cost > 0:
+            fee = PSA_FEES[tier]
+            tgt = target_price(raw_cost, tier, roi_target)
+            bd1, bd2, bd3, bd4 = st.columns(4)
+            bd1.metric("Raw card", f"${raw_cost:,.2f}")
+            bd2.metric(f"Grading fee", f"${fee}")
+            bd3.metric(f"Target Gem 10 price ({roi_target:.0f}×)", f"${tgt:,.0f}")
+            bd4.metric("eBay fees", f"${graded_price * EBAY_FEE:,.2f}" if graded_price else "—")
+
+            if graded_price > 0:
+                v, color, msg = verdict(raw_cost, tier, gem, graded_price, min_gem, roi_target)
+                net, roi = calc_net_roi(raw_cost, tier, graded_price)
+                if color == "green":
+                    st.success(f"{v} — {msg}")
+                else:
+                    st.error(f"{v} — {msg}")
+                r1, r2 = st.columns(2)
+                r1.metric("Est. Net Profit", f"${net:,.0f}")
+                r2.metric("Est. ROI", f"{roi:.0f}%")
+            else:
+                st.info("Enter a Gem 10 avg price above to get a GO/NO-GO decision")
+
+        st.markdown("#### eBay Links")
+        l1, l2, l3 = st.columns(3)
+        l1.markdown(f"[🛒 Buy Raw on eBay]({ebay_raw_url(desc)})")
+        l2.markdown(f"[📈 Gem 10 Sold Comps]({ebay_graded_sold_url(desc)})")
+        l3.markdown(f"[💎 Buy Gem 10 on eBay]({ebay_graded_buy_url(desc)})")
+
+        st.markdown("---")
+        if st.button("➕ Add to Submission Tracker", type="secondary"):
+            if raw_cost <= 0:
+                st.warning("Enter a raw buy price first")
+            else:
+                fee = PSA_FEES[tier]
+                tgt = target_price(raw_cost, tier, roi_target)
+                net, roi = calc_net_roi(raw_cost, tier, graded_price) if graded_price > 0 else (None, None)
+                v, _, _ = verdict(raw_cost, tier, gem, graded_price, min_gem, roi_target) if graded_price > 0 else ("Pending", "", "")
+                sb_insert({
+                    "date_added": date.today().isoformat(),
+                    "card_description": selected,
+                    "year": sel.get("year", ""),
+                    "set_name": sel.get("set_name", ""),
+                    "parallel": sel.get("parallel") or "Base",
+                    "raw_buy_price": raw_cost,
+                    "psa_tier": tier,
+                    "psa_fee": fee,
+                    "psa10_avg_price": graded_price or None,
+                    "target_price": round(tgt, 2),
+                    "gem_rate": round(gem, 2) if gem else None,
+                    "go_no_go": v,
+                    "est_net": net,
+                    "est_roi": f"{roi:.0f}%" if roi is not None else None,
+                    "status": "Queued",
+                })
+                st.success("Added to Submission Tracker ✓")
+
+    elif query:
+        st.warning("No results found — try player name + set name (e.g. 'Curry Prizm')")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 2 — Inventory Check
+# ══════════════════════════════════════════════════════════════════════════════
+with tab2:
+    st.markdown("## 📦 Inventory Check")
+    st.markdown("Upload your `DFS_Cards_Operations_Workbook.xlsx` to flag grading candidates.")
+
+    uploaded = st.file_uploader("Upload workbook", type=["xlsx"], label_visibility="collapsed")
+
+    if uploaded:
+        try:
+            xl = pd.ExcelFile(uploaded)
+            sheet = st.selectbox("Sheet", xl.sheet_names, index=xl.sheet_names.index("Inventory & Aging") if "Inventory & Aging" in xl.sheet_names else 0)
+            inv = pd.read_excel(uploaded, sheet_name=sheet, header=2)
+            inv.columns = [str(c).strip() for c in inv.columns]
+
+            # Try to normalize column names
+            if "Card Description" not in inv.columns:
+                inv.columns = ["Acquired", "Listed Date", "Source", "Card Description",
+                               "Category", "Cost Basis ($)", "Listed Price ($)",
+                               "Status", "Days Listed", "Aging Flag", "Next Action"]
+
+            inv = inv[inv["Card Description"].notna()]
+            inv = inv[~inv["Card Description"].astype(str).str.startswith("💡")]
+            inv = inv[~inv["Acquired"].astype(str).str.startswith("SUMMARY", na=True)]
+            inv = inv.reset_index(drop=True)
+
+            st.success(f"Loaded {len(inv)} cards")
+            show_cols = [c for c in ["Card Description", "Category", "Cost Basis ($)", "Listed Price ($)", "Status"] if c in inv.columns]
+            st.dataframe(inv[show_cols], use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+            st.markdown("### Analyze a card")
+            descs = inv["Card Description"].dropna().tolist()
+            sel_card = st.selectbox("Select card", descs)
+            sel_row = inv[inv["Card Description"] == sel_card].iloc[0]
+            try:
+                cost_basis = float(sel_row.get("Cost Basis ($)", 0))
+            except Exception:
+                cost_basis = 0.0
+
+            ic1, ic2 = st.columns(2)
+            inv_raw  = ic1.number_input("Cost basis ($)", value=cost_basis, min_value=0.0, step=5.0, key="inv_raw")
+            inv_tier = ic2.selectbox("Grading tier", list(PSA_FEES.keys()), key="inv_tier")
+
+            if st.button("🔎 Search GemRate", key="inv_search"):
+                with st.spinner("Searching..."):
+                    st.session_state.inv_results = search_gemrate(sel_card)
+                    st.session_state.inv_card = sel_card
+
+            inv_results = st.session_state.get("inv_results", [])
+            if inv_results and st.session_state.get("inv_card") == sel_card:
+                inv_opts = [
+                    f"{r.get('year','')} {r.get('set_name','')} {r.get('name','')} {r.get('parallel') or 'Base'} #{r.get('card_number','')}"
+                    for r in inv_results
+                ]
+                inv_match = st.selectbox("Best GemRate match", inv_opts, key="inv_match")
+                inv_sel = inv_results[inv_opts.index(inv_match)]
+                gem_i = inv_sel.get("gem_rate")
+                desc_i = f"{inv_sel.get('year','')} {inv_sel.get('set_name','')} {inv_sel.get('name','')} {inv_sel.get('parallel') or ''}".strip()
+
+                g1, g2, g3 = st.columns(3)
+                g1.metric("Gem Rate", fmt_gem(gem_i))
+                g2.metric("Total Pop", f"{inv_sel.get('total_population', 0):,}")
+                g3.metric("Gem Copies", f"{inv_sel.get('gems', 0):,}")
+                st.markdown(f"[📊 GemRate pop report]({gemrate_url(inv_sel.get('gemrate_id',''))})")
+
+                inv_graded_auto = None
+                if ebay_key:
+                    with st.spinner("Fetching eBay comps..."):
+                        inv_g10 = fetch_ebay_sold(desc_i + " PSA 10", ebay_key)
+                    inv_graded_auto = ebay_avg(inv_g10)
+                    if inv_graded_auto:
+                        st.metric("Gem 10 eBay avg", f"${inv_graded_auto:,.2f}")
+
+                inv_graded = st.number_input("Gem 10 avg price ($)", min_value=0.0,
+                                             value=float(inv_graded_auto) if inv_graded_auto else 0.0,
+                                             step=10.0, key="inv_graded")
+                st.markdown(f"[📈 eBay Gem 10 sold comps]({ebay_graded_sold_url(desc_i)})")
+
+                if inv_graded > 0 and inv_raw > 0:
+                    v_i, color_i, msg_i = verdict(inv_raw, inv_tier, gem_i, inv_graded, min_gem, roi_target)
+                    net_i, roi_i = calc_net_roi(inv_raw, inv_tier, inv_graded)
+                    if color_i == "green":
+                        st.success(f"{v_i} — {msg_i}")
+                    else:
+                        st.error(f"{v_i} — {msg_i}")
+
+                    if st.button("➕ Add to Submission Tracker", key="inv_add"):
+                        fee_i = PSA_FEES[inv_tier]
+                        tgt_i = target_price(inv_raw, inv_tier, roi_target)
+                        sb_insert({
+                            "date_added": date.today().isoformat(),
+                            "card_description": sel_card,
+                            "year": inv_sel.get("year", ""),
+                            "set_name": inv_sel.get("set_name", ""),
+                            "parallel": inv_sel.get("parallel") or "Base",
+                            "raw_buy_price": inv_raw,
+                            "psa_tier": inv_tier,
+                            "psa_fee": fee_i,
+                            "psa10_avg_price": inv_graded,
+                            "target_price": round(tgt_i, 2),
+                            "gem_rate": round(gem_i, 2) if gem_i else None,
+                            "go_no_go": v_i,
+                            "est_net": net_i,
+                            "est_roi": f"{roi_i:.0f}%",
+                            "status": "Queued",
+                        })
+                        st.success("Added ✓")
+        except Exception as e:
+            st.error(f"Error reading file: {e}")
+    else:
+        st.info("Upload your workbook above to get started")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 3 — Submission Tracker
+# ══════════════════════════════════════════════════════════════════════════════
+with tab3:
+    st.markdown("## 📬 Submission Tracker")
+
+    if not SUPABASE_URL:
+        st.warning("Supabase not configured — tracker unavailable in this environment")
+    else:
+        rows = sb_get()
+        if not rows:
+            st.info("No submissions yet. Add cards from the Card Research or Inventory Check tabs.")
+        else:
+            df = pd.DataFrame(rows)
+
+            # Summary
+            total  = len(df)
+            queued = len(df[df["status"] == "Queued"])
+            sent   = len(df[df["status"] == "Submitted"])
+            rcvd   = len(df[df["status"] == "Received"])
+            goes   = len(df[df["go_no_go"].str.startswith("✅", na=False)])
+            s1, s2, s3, s4, s5 = st.columns(5)
+            s1.metric("Total", total)
+            s2.metric("Queued", queued)
+            s3.metric("Submitted", sent)
+            s4.metric("Received", rcvd)
+            s5.metric("GO Decisions", goes)
+
+            st.markdown("---")
+            display_cols = [c for c in [
+                "id", "date_added", "card_description", "raw_buy_price", "psa_tier",
+                "gem_rate", "go_no_go", "est_net", "est_roi",
+                "status", "date_submitted", "grade_returned",
+                "actual_sell_price", "actual_net", "actual_roi", "notes"
+            ] if c in df.columns]
+
+            edited = st.data_editor(
+                df[display_cols],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "id": st.column_config.NumberColumn("ID", disabled=True),
+                    "status": st.column_config.SelectboxColumn("Status", options=["Queued", "Submitted", "Received", "Sold"]),
+                    "date_added": st.column_config.DateColumn("Added"),
+                    "date_submitted": st.column_config.DateColumn("Submitted"),
+                    "raw_buy_price": st.column_config.NumberColumn("Raw $", format="$%.2f"),
+                    "psa10_avg_price": st.column_config.NumberColumn("Gem 10 Avg $", format="$%.2f"),
+                    "target_price": st.column_config.NumberColumn("Target $", format="$%.2f"),
+                    "est_net": st.column_config.NumberColumn("Est Net $", format="$%.2f"),
+                    "actual_sell_price": st.column_config.NumberColumn("Actual Sell $", format="$%.2f"),
+                    "actual_net": st.column_config.NumberColumn("Actual Net $", format="$%.2f"),
+                    "go_no_go": st.column_config.TextColumn("Decision", disabled=True),
+                },
+                num_rows="dynamic",
+            )
+
+            if st.button("💾 Save changes", type="primary"):
+                for _, row in edited.iterrows():
+                    row_id = int(row.get("id", 0))
+                    if row_id:
+                        updates = {k: (None if pd.isna(v) else v) for k, v in row.items() if k != "id"}
+                        sb_update(row_id, updates)
+                st.success("Saved ✓")
+                st.rerun()
+
+            # ROI summary for received cards
+            rcvd_df = df[df["status"].isin(["Received", "Sold"])].copy()
+            if len(rcvd_df) > 0:
+                st.markdown("---")
+                st.markdown("### 📊 Actual returns")
+                try:
+                    invested = pd.to_numeric(rcvd_df["raw_buy_price"], errors="coerce").sum()
+                    net_total = pd.to_numeric(rcvd_df["actual_net"], errors="coerce").sum()
+                    avg_roi = (net_total / invested * 100) if invested > 0 else 0
+                    r1, r2, r3 = st.columns(3)
+                    r1.metric("Total Invested", f"${invested:,.0f}")
+                    r2.metric("Total Net", f"${net_total:,.0f}")
+                    r3.metric("Avg ROI", f"{avg_roi:.0f}%")
+                except Exception:
+                    pass
+
+        # Manual add
+        st.markdown("---")
+        st.markdown("### ➕ Add manually")
+        with st.expander("Add a card"):
+            a1, a2 = st.columns(2)
+            m_desc = a1.text_input("Card description", key="m_desc")
+            m_raw  = a2.number_input("Raw buy price ($)", min_value=0.0, step=5.0, key="m_raw")
+            a3, a4 = st.columns(2)
+            m_tier = a3.selectbox("Grading tier", list(PSA_FEES.keys()), key="m_tier")
+            m_gem  = a4.number_input("Gem rate (%)", min_value=0.0, max_value=100.0, key="m_gem")
+            a5, a6 = st.columns(2)
+            m_g10  = a5.number_input("Gem 10 avg price ($)", min_value=0.0, step=5.0, key="m_g10")
+            m_notes = a6.text_input("Notes", key="m_notes")
+
+            if st.button("Add", key="m_add"):
+                if m_desc and m_raw > 0:
+                    fee_m = PSA_FEES[m_tier]
+                    tgt_m = target_price(m_raw, m_tier, roi_target)
+                    net_m, roi_m = calc_net_roi(m_raw, m_tier, m_g10) if m_g10 > 0 else (None, None)
+                    v_m, _, _ = verdict(m_raw, m_tier, m_gem or None, m_g10, min_gem, roi_target) if m_g10 > 0 else ("Pending", "", "")
+                    sb_insert({
+                        "date_added": date.today().isoformat(),
+                        "card_description": m_desc,
+                        "raw_buy_price": m_raw,
+                        "psa_tier": m_tier,
+                        "psa_fee": fee_m,
+                        "psa10_avg_price": m_g10 or None,
+                        "target_price": round(tgt_m, 2),
+                        "gem_rate": m_gem or None,
+                        "go_no_go": v_m,
+                        "est_net": net_m,
+                        "est_roi": f"{roi_m:.0f}%" if roi_m is not None else None,
+                        "status": "Queued",
+                        "notes": m_notes,
+                    })
+                    st.success("Added ✓")
+                    st.rerun()
+                else:
+                    st.warning("Need a description and buy price")
