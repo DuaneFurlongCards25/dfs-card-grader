@@ -9,7 +9,7 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.1.0"
 
 # Members-only tiers require PSA Collectors Club membership
 PSA_FEES_ALL = {
@@ -43,11 +43,84 @@ st.set_page_config(
     menu_items={"About": "DFS Card Grader — built for DFS Cards LLC"},
 )
 
+# ─── Mobile CSS ───────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+/* ── Reduce desktop padding on wide layout ── */
+.block-container { padding-top: 1.5rem !important; }
+
+@media (max-width: 768px) {
+    /* Tighten page padding */
+    .block-container {
+        padding: 0.75rem 0.75rem 2rem !important;
+    }
+
+    /* Stack every column row vertically */
+    [data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap !important;
+        gap: 0.25rem !important;
+    }
+    [data-testid="column"] {
+        width: 100% !important;
+        flex: 1 1 100% !important;
+        min-width: 100% !important;
+    }
+
+    /* Bigger tap targets for buttons */
+    .stButton > button {
+        min-height: 48px !important;
+        font-size: 1rem !important;
+        width: 100% !important;
+    }
+
+    /* Full-width inputs */
+    .stTextInput > div, .stNumberInput > div, .stSelectbox > div {
+        width: 100% !important;
+    }
+    .stTextInput input, .stNumberInput input {
+        font-size: 1rem !important;
+        min-height: 44px !important;
+    }
+
+    /* Shrink tab labels so all 3 fit on one row */
+    .stTabs [data-baseweb="tab"] {
+        font-size: 0.75rem !important;
+        padding: 6px 8px !important;
+    }
+
+    /* Metrics: show 2-up on mobile instead of cramped 4-up */
+    [data-testid="metric-container"] {
+        min-width: 45% !important;
+    }
+
+    /* Download button full width */
+    .stDownloadButton > button {
+        width: 100% !important;
+        min-height: 48px !important;
+    }
+
+    /* Disclaimer card mobile padding */
+    div[data-testid="stMarkdownContainer"] > div[style*="max-width:680px"] {
+        margin: 20px auto !important;
+        padding: 24px 16px !important;
+    }
+
+    /* Dataframes: allow horizontal scroll instead of squishing */
+    [data-testid="stDataFrame"] {
+        overflow-x: auto !important;
+    }
+
+    /* Hide sidebar toggle label on very small screens */
+    .st-emotion-cache-eczf16 { font-size: 0 !important; }
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ─── Disclaimer gate ──────────────────────────────────────────────────────────
 if not st.session_state.get("agreed"):
     st.markdown(
         """
-        <div style="max-width:680px; margin:80px auto; padding:40px;
+        <div style="max-width:680px; margin:40px auto; padding:32px 24px;
                     background:#1e2130; border-radius:12px;
                     border:1px solid #2e3250; text-align:center;">
             <div style="font-size:2.5rem; margin-bottom:8px;">💎</div>
