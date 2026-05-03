@@ -9,7 +9,7 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 
 # Members-only tiers require PSA Collectors Club membership
 PSA_FEES_ALL = {
@@ -115,6 +115,96 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+
+# ─── Access code gate ─────────────────────────────────────────────────────────
+def validate_code(code: str):
+    """Returns (name, valid) by checking Supabase access_codes table."""
+    if not SUPABASE_URL:
+        return None, False
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    url = (f"{SUPABASE_URL}/rest/v1/access_codes"
+           f"?code=eq.{urllib.parse.quote(code.strip().upper())}&active=eq.true&select=id,name,usage_count")
+    req = urllib.request.Request(url, headers={
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+    })
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=10) as r:
+            rows = json.loads(r.read().decode())
+        if rows:
+            return rows[0]["name"], rows[0]["id"]
+        return None, False
+    except Exception:
+        return None, False
+
+def record_code_use(code_id: int):
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    import datetime
+    data = json.dumps({
+        "usage_count": f"usage_count + 1",
+        "last_used": datetime.datetime.utcnow().isoformat() + "Z",
+    }).encode()
+    # Use RPC-style raw SQL via PostgREST
+    rpc_data = json.dumps({"p_id": code_id}).encode()
+    # Simpler: just PATCH with a fresh read-modify-write
+    url = f"{SUPABASE_URL}/rest/v1/access_codes?id=eq.{code_id}"
+    # Fetch current count first
+    req = urllib.request.Request(url + "&select=usage_count", headers={
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+    })
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=10) as r:
+            current = json.loads(r.read().decode())[0]["usage_count"]
+        import datetime as dt
+        patch = json.dumps({
+            "usage_count": current + 1,
+            "last_used": dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }).encode()
+        req2 = urllib.request.Request(url, data=patch, headers={
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        }, method="PATCH")
+        with urllib.request.urlopen(req2, context=ctx, timeout=10):
+            pass
+    except Exception:
+        pass
+
+if not st.session_state.get("access_granted"):
+    st.markdown(
+        """
+        <div style="max-width:420px; margin:60px auto; padding:36px 28px;
+                    background:#1e2130; border-radius:12px;
+                    border:1px solid #2e3250; text-align:center;">
+            <div style="font-size:2.2rem; margin-bottom:8px;">💎</div>
+            <h2 style="margin-bottom:4px;">DFS Card Grader</h2>
+            <p style="color:#aaa; font-size:0.85rem; margin-bottom:24px;">
+                Enter your access code to continue.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    gc1, gc2, gc3 = st.columns([1, 2, 1])
+    with gc2:
+        entered_code = st.text_input("Access Code", placeholder="DFS-XXXX-XXXX", label_visibility="collapsed")
+        if st.button("Enter", use_container_width=True, type="primary"):
+            name, code_id = validate_code(entered_code)
+            if name and code_id:
+                st.session_state.access_granted = True
+                st.session_state.access_name = name
+                st.session_state.access_code_id = code_id
+                record_code_use(code_id)
+                st.rerun()
+            else:
+                st.error("Invalid or inactive access code.")
+    st.stop()
 
 # ─── Disclaimer gate ──────────────────────────────────────────────────────────
 if not st.session_state.get("agreed"):
@@ -353,6 +443,9 @@ def gem_signal(g):
 with st.sidebar:
     st.markdown("## 💎 DFS Card Grader")
     st.caption(f"Gem rate research + grading ROI calculator · v{APP_VERSION}")
+    access_name = st.session_state.get("access_name", "")
+    if access_name:
+        st.markdown(f"👤 **{access_name}**")
     st.markdown("---")
     st.markdown("### ⚙️ Settings")
     roi_target = st.number_input("ROI target (×)", min_value=1.0, max_value=20.0, value=4.0, step=0.5)
