@@ -9,7 +9,7 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 
 # Members-only tiers require PSA Collectors Club membership
 PSA_FEES_ALL = {
@@ -21,6 +21,7 @@ PSA_FEES_ALL = {
     "Super Express (~7 days)":              {"fee": 299.00},
     "Walk-Through (~7 days, $10k insured)": {"fee": 599.00},
 }
+PSA_FEES = {k: v["fee"] for k, v in PSA_FEES_ALL.items()}
 EBAY_FEE = 0.1325
 
 # ─── Secrets ──────────────────────────────────────────────────────────────────
@@ -263,8 +264,6 @@ with st.sidebar:
     for tier, info in PSA_FEES_ALL.items():
         st.caption(f"${info['fee']:.2f} — {tier.split('(')[0].strip()}")
     st.caption(f"eBay sell fee: {EBAY_FEE*100:.2f}%")
-
-PSA_FEES = {k: v["fee"] for k, v in PSA_FEES_ALL.items()}
 
 # ─── Tabs ─────────────────────────────────────────────────────────────────────
 tab1, tab2, tab3 = st.tabs(["🔍 Card Research", "📦 Inventory Check", "📬 Submission Tracker"])
