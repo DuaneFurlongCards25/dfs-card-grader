@@ -11,13 +11,13 @@ import io
 # ─── Constants ────────────────────────────────────────────────────────────────
 # Members-only tiers require PSA Collectors Club membership
 PSA_FEES_ALL = {
-    "Value Bulk (~75 days)":                 {"fee": 32.99,  "members_only": True},
-    "Value Plus (~45 days)":                 {"fee": 49.99,  "members_only": False},
-    "Value Max (~35 days)":                  {"fee": 64.99,  "members_only": False},
-    "Regular (~25 days)":                    {"fee": 79.99,  "members_only": False},
-    "Express (~15 days)":                    {"fee": 149.00, "members_only": False},
-    "Super Express (~7 days)":               {"fee": 299.00, "members_only": False},
-    "Walk-Through (~7 days, $10k insured)":  {"fee": 599.00, "members_only": False},
+    "Value Bulk (~75 days)":                {"fee": 32.99},
+    "Value Plus (~45 days)":                {"fee": 49.99},
+    "Value Max (~35 days)":                 {"fee": 64.99},
+    "Regular (~25 days)":                   {"fee": 79.99},
+    "Express (~15 days)":                   {"fee": 149.00},
+    "Super Express (~7 days)":              {"fee": 299.00},
+    "Walk-Through (~7 days, $10k insured)": {"fee": 599.00},
 }
 EBAY_FEE = 0.1325
 
@@ -248,14 +248,6 @@ with st.sidebar:
     default_tier = st.selectbox("Default grading tier", list(PSA_FEES.keys()), index=0)
 
     st.markdown("---")
-    is_member = st.toggle("PSA Collectors Club member", value=False,
-                          help="Unlocks Value, Value Plus, and Value Max tiers")
-    if is_member:
-        st.success("Member tiers unlocked ✓")
-    else:
-        st.caption("Non-member: Regular and above only")
-
-    st.markdown("---")
     st.markdown("### eBay API Key")
     st.caption("Get a free App ID at [developer.ebay.com](https://developer.ebay.com) to enable automatic price lookup.")
     ebay_key = st.text_input("eBay App ID", value=DEFAULT_EBAY_KEY, type="password", placeholder="YourApp-PRD-...")
@@ -267,17 +259,10 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("**Grading fees**")
     for tier, info in PSA_FEES_ALL.items():
-        label = tier.split("(")[0].strip()
-        tag = " ⭐ members" if info["members_only"] else ""
-        style = "" if (is_member or not info["members_only"]) else " ~~"
-        st.caption(f"${info['fee']:.2f} — {label}{tag}")
+        st.caption(f"${info['fee']:.2f} — {tier.split('(')[0].strip()}")
     st.caption(f"eBay sell fee: {EBAY_FEE*100:.2f}%")
 
-# Build active fee dict based on membership
-PSA_FEES = {
-    k: v["fee"] for k, v in PSA_FEES_ALL.items()
-    if is_member or not v["members_only"]
-}
+PSA_FEES = {k: v["fee"] for k, v in PSA_FEES_ALL.items()}
 
 # ─── Tabs ─────────────────────────────────────────────────────────────────────
 tab1, tab2, tab3 = st.tabs(["🔍 Card Research", "📦 Inventory Check", "📬 Submission Tracker"])
