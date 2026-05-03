@@ -11,7 +11,7 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.1.6"
+APP_VERSION = "1.1.7"
 
 # Members-only tiers require PSA Collectors Club membership
 PSA_FEES_ALL = {
@@ -52,8 +52,8 @@ st.markdown("""
 [data-testid="stToolbar"] { display: none !important; }
 header[data-testid="stHeader"] { background: transparent !important; }
 
-/* ── Reduce desktop padding on wide layout ── */
-.block-container { padding-top: 1.5rem !important; }
+/* ── Page padding ── */
+.block-container { padding-top: 2.5rem !important; }
 
 @media (max-width: 768px) {
     /* Tighten page padding */
