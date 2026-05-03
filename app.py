@@ -343,6 +343,9 @@ if not st.session_state.get("access_granted"):
                 st.session_state.access_name = name
                 st.session_state.access_code_id = code_id
                 record_code_use(code_id)
+                # Owner skips disclaimer
+                if entered_code.strip().upper() == "DFS-MASTER":
+                    st.session_state.agreed = True
                 st.rerun()
             else:
                 st.error("Invalid or inactive access code.")
