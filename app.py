@@ -11,7 +11,7 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 
 # Members-only tiers require PSA Collectors Club membership
 PSA_FEES_ALL = {
@@ -472,8 +472,7 @@ def sb_delete(row_id: int):
         pass
 
 # ─── GemRate API ──────────────────────────────────────────────────────────────
-@st.cache_data(ttl=3600, show_spinner=False)
-def search_gemrate(query: str):
+def _gemrate_single(query: str):
     data = json.dumps({"query": query}).encode()
     req = urllib.request.Request(
         "https://www.gemrate.com/universal-search-query",
@@ -486,6 +485,52 @@ def search_gemrate(query: str):
             return json.loads(r.read().decode())
     except Exception:
         return []
+
+def _build_queries(query: str):
+    """Expand user query into multiple GemRate-friendly variants."""
+    q = query.strip()
+    queries = [q]
+    ql = q.lower()
+
+    # auto / autograph expansion
+    if "auto" in ql and "autograph" not in ql:
+        queries.append(q.lower().replace("auto", "autograph").strip())
+        queries.append(q + " rookie autograph")
+
+    # rc → rookie
+    if " rc" in ql or ql.endswith(" rc"):
+        queries.append(q.lower().replace(" rc", " rookie").strip())
+
+    # rookie without auto → add autograph variant
+    if "rookie" in ql and "auto" not in ql and "autograph" not in ql:
+        queries.append(q + " autograph")
+
+    # prizm / optic / chrome shortcuts
+    for shorthand, full in [("prizm", "Prizm"), ("optic", "Optic"), ("chrome", "Chrome")]:
+        if shorthand in ql and full not in q:
+            queries.append(q.replace(shorthand, full))
+
+    return list(dict.fromkeys(queries))  # dedupe while preserving order
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def search_gemrate(query: str):
+    queries = _build_queries(query)
+    seen_ids = set()
+    combined = []
+    for q in queries:
+        for r in _gemrate_single(q):
+            gid = r.get("gemrate_id") or r.get("id") or str(r)
+            if gid not in seen_ids:
+                seen_ids.add(gid)
+                combined.append(r)
+    # Sort: prioritise results where set_name or parallel contains user keywords
+    ql = query.lower()
+    keywords = [w for w in ql.split() if len(w) > 2]
+    def relevance(r):
+        text = f"{r.get('set_name','')} {r.get('parallel','')} {r.get('name','')}".lower()
+        return sum(1 for kw in keywords if kw in text)
+    combined.sort(key=relevance, reverse=True)
+    return combined
 
 # ─── eBay Finding API ─────────────────────────────────────────────────────────
 @st.cache_data(ttl=1800, show_spinner=False)
