@@ -10,10 +10,13 @@ import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 PSA_FEES = {
-    "Economy (~45 days)": 22,
-    "Regular (~20 days)": 50,
-    "Express (~5 days)": 150,
-    "Super Express (~3 days)": 300,
+    "Value (~75 days)": 32.99,
+    "Value Plus (~45 days)": 49.99,
+    "Value Max (~35 days)": 64.99,
+    "Regular (~25 days)": 79.99,
+    "Express (~15 days)": 149.00,
+    "Super Express (~7 days)": 299.00,
+    "Walk-Through (~7 days, $10k insured)": 599.00,
 }
 EBAY_FEE = 0.1325
 
