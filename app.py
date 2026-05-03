@@ -9,7 +9,7 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 
 # Members-only tiers require PSA Collectors Club membership
 PSA_FEES_ALL = {
@@ -42,6 +42,42 @@ st.set_page_config(
     layout="wide",
     menu_items={"About": "DFS Card Grader — built for DFS Cards LLC"},
 )
+
+# ─── Disclaimer gate ──────────────────────────────────────────────────────────
+if not st.session_state.get("agreed"):
+    st.markdown(
+        """
+        <div style="max-width:680px; margin:80px auto; padding:40px;
+                    background:#1e2130; border-radius:12px;
+                    border:1px solid #2e3250; text-align:center;">
+            <div style="font-size:2.5rem; margin-bottom:8px;">💎</div>
+            <h2 style="margin-bottom:4px;">DFS Card Grader</h2>
+            <p style="color:#aaa; font-size:0.85rem; margin-bottom:24px;">
+                Please read and accept the disclaimer before continuing.
+            </p>
+            <div style="text-align:left; background:#0f1117; border-radius:8px;
+                        padding:20px; margin-bottom:24px;
+                        font-size:0.88rem; color:#ccc; line-height:1.7;">
+                <strong style="color:#fafafa;">Disclaimer</strong><br><br>
+                DFS Card Grader is a research and decision-support tool only.
+                All pricing data (GemRate, eBay) is pulled from third-party sources
+                and may be incomplete, delayed, or inaccurate. Gem rates and market
+                values fluctuate — always verify data independently before submitting
+                cards for grading.<br><br>
+                All grading decisions and associated costs are <strong style="color:#fafafa;">
+                solely your responsibility</strong>. DFS Cards LLC assumes no liability
+                for financial outcomes resulting from use of this tool.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    col_l, col_btn, col_r = st.columns([2, 2, 2])
+    with col_btn:
+        if st.button("✅ I Understand & Agree", use_container_width=True, type="primary"):
+            st.session_state.agreed = True
+            st.rerun()
+    st.stop()
 
 # ─── SSL ──────────────────────────────────────────────────────────────────────
 def ssl_ctx():
@@ -737,3 +773,13 @@ with tab3:
                     st.rerun()
                 else:
                     st.warning("Need a description and buy price")
+
+# ─── Footer disclaimer ────────────────────────────────────────────────────────
+st.markdown("---")
+st.caption(
+    "**Disclaimer:** DFS Card Grader is a research and decision-support tool only. "
+    "All pricing data (GemRate, eBay) is pulled from third-party sources and may be incomplete, "
+    "delayed, or inaccurate. Gem rates and market values fluctuate — always verify data independently "
+    "before submitting cards for grading. All grading decisions and associated costs are solely your "
+    "responsibility. DFS Cards LLC assumes no liability for financial outcomes resulting from use of this tool."
+)
