@@ -9,6 +9,8 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
+APP_VERSION = "1.0.1"
+
 # Members-only tiers require PSA Collectors Club membership
 PSA_FEES_ALL = {
     "Value Bulk (~75 days)":                {"fee": 32.99},
@@ -240,7 +242,7 @@ def gem_signal(g):
 # ─── Sidebar ──────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## 💎 DFS Card Grader")
-    st.caption("Gem rate research + grading ROI calculator")
+    st.caption(f"Gem rate research + grading ROI calculator · v{APP_VERSION}")
     st.markdown("---")
     st.markdown("### ⚙️ Settings")
     roi_target = st.number_input("ROI target (×)", min_value=1.0, max_value=20.0, value=4.0, step=0.5)
