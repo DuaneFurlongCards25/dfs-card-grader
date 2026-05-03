@@ -11,7 +11,7 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.1.7"
+APP_VERSION = "1.2.0"
 
 # Members-only tiers require PSA Collectors Club membership
 PSA_FEES_ALL = {
@@ -616,7 +616,7 @@ with st.sidebar:
     st.caption(f"eBay sell fee: {EBAY_FEE*100:.2f}%")
 
 # ─── Tabs ─────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3 = st.tabs(["🔍 Card Research", "📦 Inventory Check", "📬 Submission Tracker"])
+tab1, tab2, tab3, tab4 = st.tabs(["🔍 Card Research", "📦 Inventory Check", "📬 Submission Tracker", "📥 Downloads"])
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — Card Research
@@ -1109,6 +1109,82 @@ with tab3:
                     st.rerun()
                 else:
                     st.warning("Need a description and buy price")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 4 — Downloads
+# ══════════════════════════════════════════════════════════════════════════════
+with tab4:
+    st.markdown("## 📥 Downloads")
+    st.markdown("Tools to run your grading operation — built to work alongside the app.")
+    st.markdown("---")
+
+    # ── Operations Kit ──
+    kit_path = Path(__file__).parent / "DFS_Card_Grader_Kit.xlsx"
+    current_user = st.session_state.get("access_name", "")
+    kit_unlocked = current_user == "Robert Bass"
+
+    if kit_path.exists():
+        with open(kit_path, "rb") as f:
+            kit_bytes = f.read()
+
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            st.markdown("### 📊 DFS Card Grader — Operations Kit")
+            st.markdown("""
+A comprehensive Excel workbook built to run alongside this app. Includes:
+
+- **PSA Fee Schedule** — all 7 tiers with eBay fee calculations
+- **Grading ROI Calculator** — input a card, get instant GO/NO-GO with target price and net profit
+- **Grading Tracker** — full 21-column submission log matching your tracker in this app
+- **Grading Candidates** — shortlist cards from your inventory for PSA consideration
+- **Inventory & Aging** — track every card with cost basis, days listed, and aging flags
+- **Sales Log** — log every sale with fees, shipping, and net margin
+- **Target Card List** — your buy list with max buy price and sell targets
+- **Channel Fees Calculator** — live fee routing across all your sales channels
+- **Consignment Tracker** — log DcSports, PWCC, Probstein submissions
+- **Path to $40k** — monthly revenue projection model
+- **+ 14 more sheets** covering capital velocity, lot evaluation, HeyStack priority scoring, and more
+""")
+        with c2:
+            st.markdown("<div style='padding-top:48px'></div>", unsafe_allow_html=True)
+            if kit_unlocked:
+                st.download_button(
+                    label="⬇️ Download Operations Kit",
+                    data=kit_bytes,
+                    file_name="DFS_Card_Grader_Operations_Kit.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    type="primary",
+                )
+                st.caption("Excel (.xlsx) · Works with Excel, Google Sheets, and Numbers")
+            else:
+                st.button("🔒 Operations Kit", use_container_width=True, disabled=True)
+                st.caption("Coming soon — available as a premium add-on")
+
+    st.markdown("---")
+
+    # ── Inventory Template ──
+    i1, i2 = st.columns([2, 1])
+    with i1:
+        st.markdown("### 📋 Inventory Template")
+        st.markdown("""
+A simple CSV template to get started tracking your inventory.
+Upload it in the **Inventory Check** tab to search GemRate and get GO/NO-GO decisions on your cards.
+
+- 11 columns: Card Description, Player, Year, Set, Parallel, Card Number, Category, Cost Basis, Listed Price, Source, Notes
+- 3 example rows included to show the format
+""")
+    with i2:
+        st.markdown("<div style='padding-top:48px'></div>", unsafe_allow_html=True)
+
+        st.download_button(
+            label="⬇️ Download Template",
+            data=make_template_csv(),
+            file_name="dfs_card_inventory_template.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+        st.caption("CSV · Opens in Excel, Google Sheets, or Numbers")
 
 # ─── Footer ───────────────────────────────────────────────────────────────────
 st.markdown("---")
