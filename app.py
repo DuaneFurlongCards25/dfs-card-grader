@@ -432,50 +432,117 @@ with tab1:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — Inventory Check
 # ══════════════════════════════════════════════════════════════════════════════
+
+TEMPLATE_COLS = [
+    "Card Description", "Player", "Year", "Set", "Parallel",
+    "Card Number", "Category", "Cost Basis ($)", "Listed Price ($)",
+    "Source", "Notes"
+]
+
+TEMPLATE_EXAMPLE = [
+    ["2021 Topps Chrome Julio Rodriguez Auto RC", "Julio Rodriguez", "2021", "Topps Chrome", "Base", "RA-JR", "Baseball", 68, 155, "Whatnot", ""],
+    ["2024 Panini Prizm Luka Doncic Silver", "Luka Doncic", "2024", "Panini Prizm", "Silver", "10", "Basketball", 120, 280, "eBay Lot", ""],
+    ["2023 Bowman Chrome Patrick Bailey Auto", "Patrick Bailey", "2023", "Bowman Chrome", "Base", "CDA-PB", "Baseball", 25, 55, "Card Show", ""],
+]
+
+def make_template_csv():
+    import io
+    buf = io.StringIO()
+    df = pd.DataFrame(TEMPLATE_EXAMPLE, columns=TEMPLATE_COLS)
+    df.to_csv(buf, index=False)
+    return buf.getvalue().encode()
+
+def load_inventory(uploaded_file):
+    """Load inventory from either the DFS workbook or the standard template CSV/XLSX."""
+    name = uploaded_file.name.lower()
+    try:
+        if name.endswith(".csv"):
+            df = pd.read_csv(uploaded_file)
+            df.columns = [c.strip() for c in df.columns]
+            return df, "template"
+        else:
+            xl = pd.ExcelFile(uploaded_file)
+            # Detect file type by sheet names
+            if "Inventory & Aging" in xl.sheet_names:
+                # DFS Operations Workbook
+                df = pd.read_excel(uploaded_file, sheet_name="Inventory & Aging", header=2)
+                df.columns = [str(c).strip() for c in df.columns]
+                if "Card Description" not in df.columns:
+                    df.columns = ["Acquired", "Listed Date", "Source", "Card Description",
+                                  "Category", "Cost Basis ($)", "Listed Price ($)",
+                                  "Status", "Days Listed", "Aging Flag", "Next Action"]
+                df = df[df["Card Description"].notna()]
+                df = df[~df["Card Description"].astype(str).str.startswith("💡")]
+                df = df[~df["Acquired"].astype(str).str.startswith("SUMMARY", na=True)]
+                return df.reset_index(drop=True), "workbook"
+            else:
+                # Standard template XLSX (first sheet)
+                df = pd.read_excel(uploaded_file, sheet_name=0)
+                df.columns = [str(c).strip() for c in df.columns]
+                return df.reset_index(drop=True), "template"
+    except Exception as e:
+        return None, str(e)
+
 with tab2:
     st.markdown("## 📦 Inventory Check")
-    st.markdown("Upload your `DFS_Cards_Operations_Workbook.xlsx` to flag grading candidates.")
 
-    uploaded = st.file_uploader("Upload workbook", type=["xlsx"], label_visibility="collapsed")
+    # Two-column header: description + template download
+    h1, h2 = st.columns([3, 1])
+    with h1:
+        st.markdown("Upload your inventory to find grading candidates. Use the template below or upload your DFS Operations Workbook directly.")
+    with h2:
+        st.download_button(
+            label="⬇️ Download Template",
+            data=make_template_csv(),
+            file_name="dfs_card_inventory_template.csv",
+            mime="text/csv",
+            help="Fill this out and upload it below",
+            use_container_width=True,
+        )
+
+    st.markdown("""
+**How it works:**
+1. Download the template → fill in your cards → save
+2. Upload it below → select a card → search GemRate → get GO/NO-GO
+3. Add grading candidates directly to the Submission Tracker
+""")
+
+    uploaded = st.file_uploader(
+        "Upload inventory (CSV template or DFS Workbook .xlsx)",
+        type=["csv", "xlsx"],
+        label_visibility="visible",
+    )
 
     if uploaded:
-        try:
-            xl = pd.ExcelFile(uploaded)
-            sheet = st.selectbox("Sheet", xl.sheet_names, index=xl.sheet_names.index("Inventory & Aging") if "Inventory & Aging" in xl.sheet_names else 0)
-            inv = pd.read_excel(uploaded, sheet_name=sheet, header=2)
-            inv.columns = [str(c).strip() for c in inv.columns]
+        inv, source = load_inventory(uploaded)
 
-            # Try to normalize column names
-            if "Card Description" not in inv.columns:
-                inv.columns = ["Acquired", "Listed Date", "Source", "Card Description",
-                               "Category", "Cost Basis ($)", "Listed Price ($)",
-                               "Status", "Days Listed", "Aging Flag", "Next Action"]
+        if inv is None:
+            st.error(f"Could not read file: {source}")
+        else:
+            st.success(f"Loaded **{len(inv)} cards** {'from DFS Workbook' if source == 'workbook' else 'from inventory template'}")
 
-            inv = inv[inv["Card Description"].notna()]
-            inv = inv[~inv["Card Description"].astype(str).str.startswith("💡")]
-            inv = inv[~inv["Acquired"].astype(str).str.startswith("SUMMARY", na=True)]
-            inv = inv.reset_index(drop=True)
-
-            st.success(f"Loaded {len(inv)} cards")
-            show_cols = [c for c in ["Card Description", "Category", "Cost Basis ($)", "Listed Price ($)", "Status"] if c in inv.columns]
+            show_cols = [c for c in ["Card Description", "Player", "Year", "Set", "Parallel",
+                                     "Category", "Cost Basis ($)", "Listed Price ($)", "Source"] if c in inv.columns]
             st.dataframe(inv[show_cols], use_container_width=True, hide_index=True)
 
             st.markdown("---")
-            st.markdown("### Analyze a card")
+            st.markdown("### Analyze a card for grading")
+
             descs = inv["Card Description"].dropna().tolist()
-            sel_card = st.selectbox("Select card", descs)
+            sel_card = st.selectbox("Select card from your inventory", descs)
             sel_row = inv[inv["Card Description"] == sel_card].iloc[0]
+
             try:
-                cost_basis = float(sel_row.get("Cost Basis ($)", 0))
+                cost_basis = float(sel_row.get("Cost Basis ($)", 0) or 0)
             except Exception:
                 cost_basis = 0.0
 
             ic1, ic2 = st.columns(2)
-            inv_raw  = ic1.number_input("Cost basis ($)", value=cost_basis, min_value=0.0, step=5.0, key="inv_raw")
+            inv_raw  = ic1.number_input("Cost basis / buy price ($)", value=cost_basis, min_value=0.0, step=5.0, key="inv_raw")
             inv_tier = ic2.selectbox("Grading tier", list(PSA_FEES.keys()), key="inv_tier")
 
-            if st.button("🔎 Search GemRate", key="inv_search"):
-                with st.spinner("Searching..."):
+            if st.button("🔎 Search GemRate for this card", key="inv_search"):
+                with st.spinner("Searching GemRate..."):
                     st.session_state.inv_results = search_gemrate(sel_card)
                     st.session_state.inv_card = sel_card
 
@@ -504,9 +571,11 @@ with tab2:
                     if inv_graded_auto:
                         st.metric("Gem 10 eBay avg", f"${inv_graded_auto:,.2f}")
 
-                inv_graded = st.number_input("Gem 10 avg price ($)", min_value=0.0,
-                                             value=float(inv_graded_auto) if inv_graded_auto else 0.0,
-                                             step=10.0, key="inv_graded")
+                inv_graded = st.number_input(
+                    "Gem 10 avg price ($)", min_value=0.0,
+                    value=float(inv_graded_auto) if inv_graded_auto else 0.0,
+                    step=10.0, key="inv_graded",
+                )
                 st.markdown(f"[📈 eBay Gem 10 sold comps]({ebay_graded_sold_url(desc_i)})")
 
                 if inv_graded > 0 and inv_raw > 0:
@@ -537,11 +606,9 @@ with tab2:
                             "est_roi": f"{roi_i:.0f}%",
                             "status": "Queued",
                         })
-                        st.success("Added ✓")
-        except Exception as e:
-            st.error(f"Error reading file: {e}")
+                        st.success("Added to Tracker ✓")
     else:
-        st.info("Upload your workbook above to get started")
+        st.info("👆 Upload your inventory file above to get started, or download the template first.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — Submission Tracker
