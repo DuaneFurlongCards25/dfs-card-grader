@@ -11,7 +11,7 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.2.3"
 
 # Members-only tiers require PSA Collectors Club membership
 PSA_FEES_ALL = {
@@ -813,6 +813,15 @@ with tab1:
                 r1, r2 = st.columns(2)
                 r1.metric("Est. Net Profit", f"${net:,.0f}")
                 r2.metric("Est. ROI", f"{roi:.0f}%")
+
+                # Copy summary
+                player_name = sel.get("name", selected)
+                summary = f"""{player_name}
+Gem Rate: {fmt_gem(gem)} | Raw: ${raw_cost:,.2f} | Gem 10 Avg: ${graded_price:,.2f}
+Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI: {roi:.0f}%
+{v}"""
+                with st.expander("📋 Copy Analysis"):
+                    st.code(summary, language=None)
             else:
                 st.info("Enter a Gem 10 avg price above to get a GO/NO-GO decision")
 
