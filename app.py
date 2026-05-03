@@ -815,8 +815,7 @@ with tab1:
                 r2.metric("Est. ROI", f"{roi:.0f}%")
 
                 # Copy summary
-                player_name = sel.get("name", selected)
-                summary = f"""{player_name}
+                summary = f"""{query}
 Gem Rate: {fmt_gem(gem)} | Raw: ${raw_cost:,.2f} | Gem 10 Avg: ${graded_price:,.2f}
 Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI: {roi:.0f}%
 {v}"""
