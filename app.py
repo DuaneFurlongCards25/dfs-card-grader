@@ -535,11 +535,65 @@ def search_gemrate(query: str):
     combined.sort(key=relevance, reverse=True)
     return combined
 
+# ─── eBay scraper fallback (no API key required) ──────────────────────────────
+import re as _re
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _scrape_ebay_sold(query: str, max_results: int = 15):
+    q = urllib.parse.quote_plus(query)
+    url = (f"https://www.ebay.com/sch/i.html?_nkw={q}"
+           f"&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=25")
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=15) as r:
+            html = r.read().decode("utf-8", errors="ignore")
+    except Exception:
+        return []
+
+    # Each listing lives in a <li class="s-item ..."> block
+    items = _re.split(r'class="s-item["\s]', html)
+    results = []
+    for chunk in items[1:]:
+        # Title
+        tm = _re.search(r's-item__title[^>]*>([^<]{5,})<', chunk)
+        title = tm.group(1).strip() if tm else ""
+        if not title or title.lower() in ("shop on ebay", "results matching fewer words"):
+            continue
+        # Price — handle ranges like "$12.00 to $15.00" by taking the first
+        pm = _re.search(r'\$\s*([\d,]+\.?\d*)', chunk)
+        if not pm:
+            continue
+        try:
+            price = float(pm.group(1).replace(",", ""))
+        except ValueError:
+            continue
+        if price <= 0:
+            continue
+        # Image
+        im = _re.search(r's-item__image-img[^>]+src="([^"]+)"', chunk)
+        image = im.group(1) if im else ""
+        # Link
+        lm = _re.search(r'href="(https://www\.ebay\.com/itm/[^"]+)"', chunk)
+        item_url = lm.group(1).split("?")[0] if lm else ""
+        results.append({"title": title, "price": price, "date": "", "image": image, "url": item_url})
+        if len(results) >= max_results:
+            break
+    return results
+
 # ─── eBay Finding API ─────────────────────────────────────────────────────────
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_ebay_sold(query: str, app_id: str, max_results: int = 15):
     if not app_id:
-        return []
+        return _scrape_ebay_sold(query, max_results)
     params = {
         "OPERATION-NAME": "findCompletedItems",
         "SERVICE-VERSION": "1.0.0",
@@ -724,61 +778,61 @@ with tab1:
 
         st.markdown("#### ROI Analysis")
 
-        # Auto-fetch eBay prices
+        # Auto-fetch eBay prices (API key or scraper fallback)
         raw_sold, graded_sold = [], []
         raw_auto, graded_auto = None, None
-        if ebay_key:
-            with st.spinner("Fetching eBay sold prices..."):
-                raw_sold    = fetch_ebay_sold(desc + " raw", ebay_key)
-                graded_sold = fetch_ebay_sold(desc + " PSA 10", ebay_key)
+        spinner_label = "Fetching eBay sold prices..." if ebay_key else "Pulling eBay sold comps..."
+        with st.spinner(spinner_label):
+            raw_sold    = fetch_ebay_sold(desc + " raw", ebay_key)
+            graded_sold = fetch_ebay_sold(desc + " PSA 10", ebay_key)
             raw_auto    = ebay_avg(raw_sold)
             graded_auto = ebay_avg(graded_sold)
 
-            # ── Card image gallery ──
-            all_images = [i for i in graded_sold + raw_sold if i.get("image")]
-            if all_images:
-                st.markdown("#### 🖼️ Recent eBay Listings")
-                seen, unique_imgs = set(), []
-                for item in all_images:
-                    if item["image"] not in seen:
-                        seen.add(item["image"])
-                        unique_imgs.append(item)
-                    if len(unique_imgs) == 6:
-                        break
-                img_cols = st.columns(len(unique_imgs))
-                for col, item in zip(img_cols, unique_imgs):
-                    with col:
-                        st.markdown(
-                            f'<a href="{item["url"]}" target="_blank">'
-                            f'<img src="{item["image"]}" style="width:100%;border-radius:6px;'
-                            f'border:1px solid #2e3250;" /></a>',
-                            unsafe_allow_html=True,
-                        )
-                        st.caption(f"${item['price']:,.2f} · {item['date']}")
+        # ── Card image gallery ──
+        all_images = [i for i in graded_sold + raw_sold if i.get("image")]
+        if all_images:
+            st.markdown("#### 🖼️ Recent eBay Listings")
+            seen, unique_imgs = set(), []
+            for item in all_images:
+                if item["image"] not in seen:
+                    seen.add(item["image"])
+                    unique_imgs.append(item)
+                if len(unique_imgs) == 6:
+                    break
+            img_cols = st.columns(len(unique_imgs))
+            for col, item in zip(img_cols, unique_imgs):
+                with col:
+                    st.markdown(
+                        f'<a href="{item["url"]}" target="_blank">'
+                        f'<img src="{item["image"]}" style="width:100%;border-radius:6px;'
+                        f'border:1px solid #2e3250;" /></a>',
+                        unsafe_allow_html=True,
+                    )
+                    st.caption(f"${item['price']:,.2f}")
 
-            fc1, fc2 = st.columns(2)
-            with fc1:
-                st.markdown("**Raw — recent eBay solds**")
-                if raw_sold:
-                    df_r = pd.DataFrame(raw_sold)[["date", "price", "title"]]
-                    df_r["price"] = df_r["price"].map("${:,.2f}".format)
-                    df_r.columns = ["Date", "Price", "Title"]
-                    st.dataframe(df_r, use_container_width=True, hide_index=True, height=180)
-                    if raw_auto:
-                        st.markdown(f"**Avg (trimmed): ${raw_auto:,.2f}**")
-                else:
-                    st.info("No raw solds found — try a broader search")
-            with fc2:
-                st.markdown("**Gem 10 — recent eBay solds**")
-                if graded_sold:
-                    df_g = pd.DataFrame(graded_sold)[["date", "price", "title"]]
-                    df_g["price"] = df_g["price"].map("${:,.2f}".format)
-                    df_g.columns = ["Date", "Price", "Title"]
-                    st.dataframe(df_g, use_container_width=True, hide_index=True, height=180)
-                    if graded_auto:
-                        st.markdown(f"**Avg (trimmed): ${graded_auto:,.2f}**")
-                else:
-                    st.info("No graded 10 solds found")
+        fc1, fc2 = st.columns(2)
+        with fc1:
+            st.markdown("**Raw — recent eBay solds**")
+            if raw_sold:
+                df_r = pd.DataFrame(raw_sold)[["price", "title"]]
+                df_r["price"] = df_r["price"].map("${:,.2f}".format)
+                df_r.columns = ["Price", "Title"]
+                st.dataframe(df_r, use_container_width=True, hide_index=True, height=180)
+                if raw_auto:
+                    st.markdown(f"**Avg (trimmed): ${raw_auto:,.2f}**")
+            else:
+                st.info("No raw solds found — try a broader search")
+        with fc2:
+            st.markdown("**Gem 10 — recent eBay solds**")
+            if graded_sold:
+                df_g = pd.DataFrame(graded_sold)[["price", "title"]]
+                df_g["price"] = df_g["price"].map("${:,.2f}".format)
+                df_g.columns = ["Price", "Title"]
+                st.dataframe(df_g, use_container_width=True, hide_index=True, height=180)
+                if graded_auto:
+                    st.markdown(f"**Avg (trimmed): ${graded_auto:,.2f}**")
+            else:
+                st.info("No graded 10 solds found")
 
         ra1, ra2, ra3 = st.columns(3)
         with ra1:
