@@ -647,11 +647,11 @@ def gemrate_url(gid):
 
 def ebay_raw_url(desc):
     q = urllib.parse.quote_plus(desc + " raw")
-    return f"https://www.ebay.com/sch/i.html?_nkw={q}&LH_BIN=1&_sop=15"
+    return f"https://www.ebay.com/sch/i.html?_nkw={q}&LH_Sold=1&LH_Complete=1&_sop=13"
 
 def ebay_graded_sold_url(desc):
     q = urllib.parse.quote_plus(desc + " PSA 10")
-    return f"https://www.ebay.com/sch/i.html?_nkw={q}&LH_Sold=1&LH_Complete=1"
+    return f"https://www.ebay.com/sch/i.html?_nkw={q}&LH_Sold=1&LH_Complete=1&_sop=13"
 
 def ebay_graded_buy_url(desc):
     q = urllib.parse.quote_plus(desc + " PSA 10")
@@ -883,11 +883,11 @@ Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI: {roi:.0f}%
             else:
                 st.info("Enter a Gem 10 avg price above to get a GO/NO-GO decision")
 
-        st.markdown("#### eBay Links")
-        l1, l2, l3 = st.columns(3)
-        l1.markdown(f"[🛒 Buy Raw on eBay]({ebay_raw_url(desc)})")
-        l2.markdown(f"[📈 Gem 10 Sold Comps]({ebay_graded_sold_url(desc)})")
-        l3.markdown(f"[💎 Buy Gem 10 on eBay]({ebay_graded_buy_url(desc)})")
+        st.markdown("#### eBay Sold Comps")
+        st.caption("Recent completed sales — use these to set your raw buy price and PSA 10 sell price above.")
+        l1, l2 = st.columns(2)
+        l1.markdown(f"[📦 Raw Sold Comps]({ebay_raw_url(desc)})")
+        l2.markdown(f"[💎 PSA 10 Sold Comps]({ebay_graded_sold_url(desc)})")
 
         st.markdown("---")
         if st.button("➕ Add to Submission Tracker", type="secondary"):
