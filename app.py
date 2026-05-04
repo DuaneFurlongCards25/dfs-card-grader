@@ -778,61 +778,63 @@ with tab1:
 
         st.markdown("#### ROI Analysis")
 
-        # Auto-fetch eBay prices (API key or scraper fallback)
+        # eBay live prices — requires API key
         raw_sold, graded_sold = [], []
         raw_auto, graded_auto = None, None
-        spinner_label = "Fetching eBay sold prices..." if ebay_key else "Pulling eBay sold comps..."
-        with st.spinner(spinner_label):
-            raw_sold    = fetch_ebay_sold(desc + " raw", ebay_key)
-            graded_sold = fetch_ebay_sold(desc + " PSA 10", ebay_key)
-            raw_auto    = ebay_avg(raw_sold)
-            graded_auto = ebay_avg(graded_sold)
+        if ebay_key:
+            with st.spinner("Fetching eBay sold prices..."):
+                raw_sold    = fetch_ebay_sold(desc + " raw", ebay_key)
+                graded_sold = fetch_ebay_sold(desc + " PSA 10", ebay_key)
+                raw_auto    = ebay_avg(raw_sold)
+                graded_auto = ebay_avg(graded_sold)
 
-        # ── Card image gallery ──
-        all_images = [i for i in graded_sold + raw_sold if i.get("image")]
-        if all_images:
-            st.markdown("#### 🖼️ Recent eBay Listings")
-            seen, unique_imgs = set(), []
-            for item in all_images:
-                if item["image"] not in seen:
-                    seen.add(item["image"])
-                    unique_imgs.append(item)
-                if len(unique_imgs) == 6:
-                    break
-            img_cols = st.columns(len(unique_imgs))
-            for col, item in zip(img_cols, unique_imgs):
-                with col:
-                    st.markdown(
-                        f'<a href="{item["url"]}" target="_blank">'
-                        f'<img src="{item["image"]}" style="width:100%;border-radius:6px;'
-                        f'border:1px solid #2e3250;" /></a>',
-                        unsafe_allow_html=True,
-                    )
-                    st.caption(f"${item['price']:,.2f}")
+            # ── Card image gallery ──
+            all_images = [i for i in graded_sold + raw_sold if i.get("image")]
+            if all_images:
+                st.markdown("#### 🖼️ Recent eBay Listings")
+                seen, unique_imgs = set(), []
+                for item in all_images:
+                    if item["image"] not in seen:
+                        seen.add(item["image"])
+                        unique_imgs.append(item)
+                    if len(unique_imgs) == 6:
+                        break
+                img_cols = st.columns(len(unique_imgs))
+                for col, item in zip(img_cols, unique_imgs):
+                    with col:
+                        st.markdown(
+                            f'<a href="{item["url"]}" target="_blank">'
+                            f'<img src="{item["image"]}" style="width:100%;border-radius:6px;'
+                            f'border:1px solid #2e3250;" /></a>',
+                            unsafe_allow_html=True,
+                        )
+                        st.caption(f"${item['price']:,.2f}")
 
-        fc1, fc2 = st.columns(2)
-        with fc1:
-            st.markdown("**Raw — recent eBay solds**")
-            if raw_sold:
-                df_r = pd.DataFrame(raw_sold)[["price", "title"]]
-                df_r["price"] = df_r["price"].map("${:,.2f}".format)
-                df_r.columns = ["Price", "Title"]
-                st.dataframe(df_r, use_container_width=True, hide_index=True, height=180)
-                if raw_auto:
-                    st.markdown(f"**Avg (trimmed): ${raw_auto:,.2f}**")
-            else:
-                st.info("No raw solds found — try a broader search")
-        with fc2:
-            st.markdown("**Gem 10 — recent eBay solds**")
-            if graded_sold:
-                df_g = pd.DataFrame(graded_sold)[["price", "title"]]
-                df_g["price"] = df_g["price"].map("${:,.2f}".format)
-                df_g.columns = ["Price", "Title"]
-                st.dataframe(df_g, use_container_width=True, hide_index=True, height=180)
-                if graded_auto:
-                    st.markdown(f"**Avg (trimmed): ${graded_auto:,.2f}**")
-            else:
-                st.info("No graded 10 solds found")
+            fc1, fc2 = st.columns(2)
+            with fc1:
+                st.markdown("**Raw — recent eBay solds**")
+                if raw_sold:
+                    df_r = pd.DataFrame(raw_sold)[["price", "title"]]
+                    df_r["price"] = df_r["price"].map("${:,.2f}".format)
+                    df_r.columns = ["Price", "Title"]
+                    st.dataframe(df_r, use_container_width=True, hide_index=True, height=180)
+                    if raw_auto:
+                        st.markdown(f"**Avg (trimmed): ${raw_auto:,.2f}**")
+                else:
+                    st.info("No raw solds found — try a broader search")
+            with fc2:
+                st.markdown("**Gem 10 — recent eBay solds**")
+                if graded_sold:
+                    df_g = pd.DataFrame(graded_sold)[["price", "title"]]
+                    df_g["price"] = df_g["price"].map("${:,.2f}".format)
+                    df_g.columns = ["Price", "Title"]
+                    st.dataframe(df_g, use_container_width=True, hide_index=True, height=180)
+                    if graded_auto:
+                        st.markdown(f"**Avg (trimmed): ${graded_auto:,.2f}**")
+                else:
+                    st.info("No graded 10 solds found")
+        else:
+            st.info("📊 Live eBay sold prices will appear here once the API is connected. Use the links below to check comps manually.")
 
         ra1, ra2, ra3 = st.columns(3)
         with ra1:
