@@ -726,10 +726,11 @@ tab1, tab2, tab3, tab4 = st.tabs(["🔍 Card Research", "📦 Inventory Check", 
 with tab1:
     st.markdown("## 🔍 Card Research")
     st.markdown("Search any card — owned or not. Get gem rate, graded value comps, and eBay links.")
+    st.caption("Tip: include the full set name for best results — e.g. *Steph Curry Topps Chrome Paradox* not just *Steph Curry Paradox*")
 
     col_q, col_btn = st.columns([5, 1])
     with col_q:
-        query = st.text_input("Search", placeholder="e.g.  Steph Curry Paradox  |  Luka Doncic Prizm RC  |  Wemby Optic", label_visibility="collapsed")
+        query = st.text_input("Search", placeholder="e.g.  Curry Topps Chrome Paradox  |  Luka Prizm RC auto  |  Wemby Optic", label_visibility="collapsed")
     with col_btn:
         do_search = st.button("Search", use_container_width=True, type="primary")
 
