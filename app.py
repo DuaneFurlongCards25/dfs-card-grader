@@ -757,6 +757,9 @@ with tab1:
 
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=280)
 
+        gr_search_url = f"https://www.gemrate.com/search?q={urllib.parse.quote_plus(query)}"
+        st.caption(f"Don't see the card? [Search directly on GemRate ↗]({gr_search_url}) — their database may use a different set name.")
+
         opts = [
             f"{r.get('year','')} {r.get('set_name','')} {r.get('name','')} "
             f"{r.get('parallel') or 'Base'} #{r.get('card_number','')}"
@@ -918,7 +921,8 @@ Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI: {roi:.0f}%
                 st.success("Added to Submission Tracker ✓")
 
     elif query:
-        st.warning("No results found — try player name + set name (e.g. 'Curry Prizm')")
+        gr_search_url = f"https://www.gemrate.com/search?q={urllib.parse.quote_plus(query)}"
+        st.warning(f"No results found — GemRate may not have this set indexed yet. Try a different search term or [search directly on GemRate ↗]({gr_search_url})")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — Inventory Check
