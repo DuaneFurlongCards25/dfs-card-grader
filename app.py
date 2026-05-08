@@ -746,12 +746,15 @@ def ebay_graded_buy_url(desc):
 # ─── ROI logic ────────────────────────────────────────────────────────────────
 def target_price(raw_cost, psa_tier, roi=4.0):
     fee = PSA_FEES.get(psa_tier, 50)
-    return (raw_cost * roi + fee) / (1 - EBAY_FEE)
+    total_cost = raw_cost + fee
+    # Target sell price so that net received after eBay = roi × total cost
+    return (total_cost * roi) / (1 - EBAY_FEE)
 
 def calc_net_roi(raw_cost, psa_tier, graded_price):
     fee = PSA_FEES.get(psa_tier, 50)
-    net = graded_price * (1 - EBAY_FEE) - fee - raw_cost
-    roi = (net / raw_cost * 100) if raw_cost > 0 else 0
+    total_cost = raw_cost + fee
+    net = graded_price * (1 - EBAY_FEE) - total_cost
+    roi = (net / total_cost * 100) if total_cost > 0 else 0
     return round(net, 2), round(roi, 1)
 
 def verdict(raw_cost, psa_tier, gem_rate, graded_price, min_gem, roi_target):
