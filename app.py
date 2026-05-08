@@ -339,18 +339,24 @@ if not st.session_state.get("access_granted"):
     with gc2:
         entered_code = st.text_input("Access Code", placeholder="DFS-XXXX-XXXX", label_visibility="collapsed")
         if st.button("Enter", use_container_width=True, type="primary"):
-            name, code_id = validate_code(entered_code)
-            if name and code_id:
+            clean_code = entered_code.strip().upper()
+            # Owner bypass — never touches Supabase
+            if clean_code == "DFS-MASTER":
                 st.session_state.access_granted = True
-                st.session_state.access_name = name
-                st.session_state.access_code_id = code_id
-                record_code_use(code_id)
-                # Owner skips disclaimer
-                if entered_code.strip().upper() == "DFS-MASTER":
-                    st.session_state.agreed = True
+                st.session_state.access_name = "Duane"
+                st.session_state.access_code_id = 1
+                st.session_state.agreed = True
                 st.rerun()
             else:
-                st.error("Invalid or inactive access code.")
+                name, code_id = validate_code(entered_code)
+                if name and code_id:
+                    st.session_state.access_granted = True
+                    st.session_state.access_name = name
+                    st.session_state.access_code_id = code_id
+                    record_code_use(code_id)
+                    st.rerun()
+                else:
+                    st.error("Invalid or inactive access code.")
     st.stop()
 
 # ─── Disclaimer gate ──────────────────────────────────────────────────────────
