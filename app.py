@@ -890,15 +890,28 @@ with tab1:
                         ch_trend_dir, ch_trend_pct = calculate_trend(history)
 
             if ch_raw_avg or ch_psa10_avg or ch_raw_sales or ch_psa10_sales:
+                def _fmt_sale_row(s):
+                    p = _extract_price(s)
+                    if not p:
+                        return None
+                    raw_date = s.get("sale_date", "")
+                    try:
+                        import datetime as _dt
+                        d = _dt.datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+                        date_str = d.strftime("%-m/%-d/%y")
+                    except Exception:
+                        date_str = raw_date[:10] if raw_date else ""
+                    sale_type = s.get("sale_type", "") or ""
+                    type_label = "🏷 BIN" if "bin" in sale_type.lower() or sale_type == "" else \
+                                 "🔨 Auction" if "auction" in sale_type.lower() else \
+                                 "💬 Offer" if "offer" in sale_type.lower() else sale_type
+                    return {"Price": f"${p:,.2f}", "Date": date_str, "Type": type_label}
+
                 fc1, fc2 = st.columns(2)
                 with fc1:
                     st.markdown("**📦 Raw — recent sold comps**")
                     if ch_raw_sales:
-                        rows_r = []
-                        for s in ch_raw_sales[:15]:
-                            p = _extract_price(s)
-                            if p:
-                                rows_r.append({"Price": f"${p:,.2f}", "Date": s.get("date") or s.get("sold_date","")})
+                        rows_r = [r for s in ch_raw_sales[:15] if (r := _fmt_sale_row(s))]
                         if rows_r:
                             st.dataframe(pd.DataFrame(rows_r), use_container_width=True, hide_index=True, height=200)
                     if ch_raw_avg:
@@ -908,11 +921,7 @@ with tab1:
                 with fc2:
                     st.markdown("**💎 PSA 10 — recent sold comps**")
                     if ch_psa10_sales:
-                        rows_g = []
-                        for s in ch_psa10_sales[:15]:
-                            p = _extract_price(s)
-                            if p:
-                                rows_g.append({"Price": f"${p:,.2f}", "Date": s.get("date") or s.get("sold_date","")})
+                        rows_g = [r for s in ch_psa10_sales[:15] if (r := _fmt_sale_row(s))]
                         if rows_g:
                             st.dataframe(pd.DataFrame(rows_g), use_container_width=True, hide_index=True, height=200)
                     if ch_psa10_avg:
@@ -920,11 +929,7 @@ with tab1:
                     elif not ch_psa10_sales:
                         st.info("No PSA 10 comps found")
             if ch_raw_sales or ch_psa10_sales:
-                st.caption("⚠️ eBay Best Offer accepted listings show the asking price, not the actual amount paid — real comps may be lower. Use fixed-price (BIN) sales for the most accurate picture.")
-                # Temporary debug — remove after confirming date field name
-                sample = (ch_raw_sales or ch_psa10_sales)[0]
-                with st.expander("🔧 Debug: raw sale object keys"):
-                    st.json(sample)
+                st.caption("⚠️ Comp avg includes all sale types. 🏷 BIN = fixed price (most reliable). 💬 Offer = accepted below ask. 🔨 Auction = bidding (use with caution).")
             elif CARDHEDGER_KEY:
                 st.info("No CardHedger match found for this card — enter prices manually below.")
         else:
