@@ -789,15 +789,6 @@ with st.sidebar:
     default_tier = st.selectbox("Default grading tier", list(PSA_FEES.keys()), index=0)
 
     st.markdown("---")
-    st.markdown("### eBay API Key")
-    st.caption("Get a free App ID at [developer.ebay.com](https://developer.ebay.com) to enable automatic price lookup.")
-    ebay_key = st.text_input("eBay App ID", value=DEFAULT_EBAY_KEY, type="password", placeholder="YourApp-PRD-...")
-    if ebay_key:
-        st.success("eBay API connected ✓")
-    else:
-        st.warning("No key — prices entered manually")
-
-    st.markdown("---")
     st.markdown("**Grading fees**")
     for tier, info in PSA_FEES_ALL.items():
         st.caption(f"${info['fee']:.2f} — {tier.split('(')[0].strip()}")
@@ -1162,12 +1153,6 @@ with tab2:
                 st.markdown(f"[📊 GemRate pop report]({gemrate_url(inv_sel.get('gemrate_id',''))})")
 
                 inv_graded_auto = None
-                if ebay_key:
-                    with st.spinner("Fetching eBay comps..."):
-                        inv_g10 = fetch_ebay_sold(desc_i + " PSA 10", ebay_key)
-                    inv_graded_auto = ebay_avg(inv_g10)
-                    if inv_graded_auto:
-                        st.metric("Gem 10 eBay avg", f"${inv_graded_auto:,.2f}")
 
                 inv_graded = st.number_input(
                     "Gem 10 avg price ($)", min_value=0.0,
