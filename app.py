@@ -921,6 +921,10 @@ with tab1:
                         st.info("No PSA 10 comps found")
             if ch_raw_sales or ch_psa10_sales:
                 st.caption("⚠️ eBay Best Offer accepted listings show the asking price, not the actual amount paid — real comps may be lower. Use fixed-price (BIN) sales for the most accurate picture.")
+                # Temporary debug — remove after confirming date field name
+                sample = (ch_raw_sales or ch_psa10_sales)[0]
+                with st.expander("🔧 Debug: raw sale object keys"):
+                    st.json(sample)
             elif CARDHEDGER_KEY:
                 st.info("No CardHedger match found for this card — enter prices manually below.")
         else:
