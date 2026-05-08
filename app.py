@@ -36,6 +36,8 @@ def get_secret(section, key, default=""):
 SUPABASE_URL = get_secret("supabase", "url")
 SUPABASE_KEY = get_secret("supabase", "key")
 DEFAULT_EBAY_KEY = get_secret("ebay", "app_id")
+CARDHEDGER_KEY = get_secret("cardhedger", "api_key")
+CARDHEDGER_BASE = "https://api.cardhedger.com"
 
 # ─── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -641,6 +643,84 @@ def ebay_avg(sold_items):
         prices = prices[cut:-cut]
     return round(sum(prices) / len(prices), 2)
 
+# ─── CardHedger API ───────────────────────────────────────────────────────────
+def _ch_post(endpoint: str, payload: dict):
+    if not CARDHEDGER_KEY:
+        return None
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        f"{CARDHEDGER_BASE}{endpoint}", data=data,
+        headers={"X-API-Key": CARDHEDGER_KEY, "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=15) as r:
+            return json.loads(r.read().decode())
+    except Exception:
+        return None
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def ch_search(query: str):
+    result = _ch_post("/v1/cards/card-search", {"search": query, "page": 1, "page_size": 5})
+    if not result:
+        return []
+    for key in ("cards", "data", "results", "items"):
+        if key in result and isinstance(result[key], list):
+            return result[key]
+    return result if isinstance(result, list) else []
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def ch_comps(card_id, grade: str):
+    return _ch_post("/v1/cards/comps", {
+        "card_id": card_id, "grade": grade,
+        "count": 20, "include_raw_prices": True,
+    }) or {}
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def ch_price_history(card_id, grade: str, days: int = 90):
+    return _ch_post("/v1/cards/prices-by-card", {
+        "card_id": card_id, "grade": grade, "days": days,
+    }) or {}
+
+def _extract_price(p):
+    for k in ("price", "sale_price", "sold_price", "value", "amount"):
+        try:
+            v = float(p[k])
+            if v > 0:
+                return v
+        except Exception:
+            pass
+    return None
+
+def calculate_trend(history_data):
+    """Return (direction, pct_change) from CardHedger price history."""
+    prices = []
+    if isinstance(history_data, list):
+        prices = history_data
+    elif isinstance(history_data, dict):
+        for key in ("prices", "data", "sales", "history", "results"):
+            if key in history_data and isinstance(history_data[key], list):
+                prices = history_data[key]
+                break
+    vals = [_extract_price(p) for p in prices]
+    vals = [v for v in vals if v]
+    if len(vals) < 4:
+        return None, 0.0
+    mid = len(vals) // 2
+    older_avg = sum(vals[:mid]) / mid
+    recent_avg = sum(vals[mid:]) / (len(vals) - mid)
+    if older_avg == 0:
+        return None, 0.0
+    pct = ((recent_avg - older_avg) / older_avg) * 100
+    direction = "up" if pct > 5 else "down" if pct < -5 else "flat"
+    return direction, pct
+
+def trend_badge(direction, pct):
+    if direction == "up":
+        return f"📈 Trending Up +{pct:.0f}%"
+    elif direction == "down":
+        return f"📉 Trending Down {pct:.0f}%"
+    return f"➡️ Flat ({pct:+.0f}%)"
+
 # ─── URL builders ─────────────────────────────────────────────────────────────
 def gemrate_url(gid):
     return f"https://www.gemrate.com/card/{gid}"
@@ -782,63 +862,73 @@ with tab1:
 
         st.markdown("#### ROI Analysis")
 
-        # eBay live prices — requires API key
-        raw_sold, graded_sold = [], []
-        raw_auto, graded_auto = None, None
-        if ebay_key:
-            with st.spinner("Fetching eBay sold prices..."):
-                raw_sold    = fetch_ebay_sold(desc + " raw", ebay_key)
-                graded_sold = fetch_ebay_sold(desc + " PSA 10", ebay_key)
-                raw_auto    = ebay_avg(raw_sold)
-                graded_auto = ebay_avg(graded_sold)
+        # ── CardHedger: live sold comps + trend ───────────────────────────────
+        ch_raw_avg = None
+        ch_psa10_avg = None
+        ch_trend_dir = None
+        ch_trend_pct = 0.0
+        ch_raw_sales = []
+        ch_psa10_sales = []
+        ch_card_name = ""
 
-            # ── Card image gallery ──
-            all_images = [i for i in graded_sold + raw_sold if i.get("image")]
-            if all_images:
-                st.markdown("#### 🖼️ Recent eBay Listings")
-                seen, unique_imgs = set(), []
-                for item in all_images:
-                    if item["image"] not in seen:
-                        seen.add(item["image"])
-                        unique_imgs.append(item)
-                    if len(unique_imgs) == 6:
-                        break
-                img_cols = st.columns(len(unique_imgs))
-                for col, item in zip(img_cols, unique_imgs):
-                    with col:
-                        st.markdown(
-                            f'<a href="{item["url"]}" target="_blank">'
-                            f'<img src="{item["image"]}" style="width:100%;border-radius:6px;'
-                            f'border:1px solid #2e3250;" /></a>',
-                            unsafe_allow_html=True,
-                        )
-                        st.caption(f"${item['price']:,.2f}")
+        if CARDHEDGER_KEY:
+            with st.spinner("Fetching live sold comps & trend data..."):
+                ch_matches = ch_search(desc)
+                if ch_matches:
+                    ch_card = ch_matches[0]
+                    ch_id = ch_card.get("card_id") or ch_card.get("id")
+                    ch_card_name = ch_card.get("name") or ch_card.get("title") or ""
+                    if ch_id:
+                        raw_data  = ch_comps(ch_id, "Raw")
+                        psa_data  = ch_comps(ch_id, "PSA 10")
+                        ch_raw_avg   = raw_data.get("comp_price") or raw_data.get("average") or raw_data.get("mean")
+                        ch_psa10_avg = psa_data.get("comp_price") or psa_data.get("average") or psa_data.get("mean")
+                        for k in ("raw_prices", "sales", "comps", "data"):
+                            if k in raw_data and isinstance(raw_data[k], list):
+                                ch_raw_sales = raw_data[k]; break
+                        for k in ("raw_prices", "sales", "comps", "data"):
+                            if k in psa_data and isinstance(psa_data[k], list):
+                                ch_psa10_sales = psa_data[k]; break
+                        history = ch_price_history(ch_id, "PSA 10", days=90)
+                        ch_trend_dir, ch_trend_pct = calculate_trend(history)
 
-            fc1, fc2 = st.columns(2)
-            with fc1:
-                st.markdown("**Raw — recent eBay solds**")
-                if raw_sold:
-                    df_r = pd.DataFrame(raw_sold)[["price", "title"]]
-                    df_r["price"] = df_r["price"].map("${:,.2f}".format)
-                    df_r.columns = ["Price", "Title"]
-                    st.dataframe(df_r, use_container_width=True, hide_index=True, height=180)
-                    if raw_auto:
-                        st.markdown(f"**Avg (trimmed): ${raw_auto:,.2f}**")
-                else:
-                    st.info("No raw solds found — try a broader search")
-            with fc2:
-                st.markdown("**Gem 10 — recent eBay solds**")
-                if graded_sold:
-                    df_g = pd.DataFrame(graded_sold)[["price", "title"]]
-                    df_g["price"] = df_g["price"].map("${:,.2f}".format)
-                    df_g.columns = ["Price", "Title"]
-                    st.dataframe(df_g, use_container_width=True, hide_index=True, height=180)
-                    if graded_auto:
-                        st.markdown(f"**Avg (trimmed): ${graded_auto:,.2f}**")
-                else:
-                    st.info("No graded 10 solds found")
+            if ch_raw_avg or ch_psa10_avg or ch_raw_sales or ch_psa10_sales:
+                fc1, fc2 = st.columns(2)
+                with fc1:
+                    st.markdown("**📦 Raw — recent sold comps**")
+                    if ch_raw_sales:
+                        rows_r = []
+                        for s in ch_raw_sales[:15]:
+                            p = _extract_price(s)
+                            if p:
+                                rows_r.append({"Price": f"${p:,.2f}", "Date": s.get("date") or s.get("sold_date","")})
+                        if rows_r:
+                            st.dataframe(pd.DataFrame(rows_r), use_container_width=True, hide_index=True, height=200)
+                    if ch_raw_avg:
+                        st.markdown(f"**Comp avg: ${ch_raw_avg:,.2f}**")
+                    elif not ch_raw_sales:
+                        st.info("No raw comps found")
+                with fc2:
+                    st.markdown("**💎 PSA 10 — recent sold comps**")
+                    if ch_psa10_sales:
+                        rows_g = []
+                        for s in ch_psa10_sales[:15]:
+                            p = _extract_price(s)
+                            if p:
+                                rows_g.append({"Price": f"${p:,.2f}", "Date": s.get("date") or s.get("sold_date","")})
+                        if rows_g:
+                            st.dataframe(pd.DataFrame(rows_g), use_container_width=True, hide_index=True, height=200)
+                    if ch_psa10_avg:
+                        st.markdown(f"**Comp avg: ${ch_psa10_avg:,.2f}**")
+                    elif not ch_psa10_sales:
+                        st.info("No PSA 10 comps found")
+            elif CARDHEDGER_KEY:
+                st.info("No CardHedger match found for this card — enter prices manually below.")
         else:
-            st.info("📊 Live eBay sold prices will appear here once the API is connected. Use the links below to check comps manually.")
+            st.info("📊 Live sold comps will appear here once the CardHedger API is connected.")
+
+        raw_auto    = ch_raw_avg
+        graded_auto = ch_psa10_avg
 
         ra1, ra2, ra3 = st.columns(3)
         with ra1:
@@ -873,9 +963,13 @@ with tab1:
                     st.success(f"{v} — {msg}")
                 else:
                     st.error(f"{v} — {msg}")
-                r1, r2 = st.columns(2)
+                r1, r2, r3 = st.columns(3)
                 r1.metric("Est. Net Profit", f"${net:,.0f}")
                 r2.metric("Est. ROI", f"{roi:.0f}%")
+                if ch_trend_dir:
+                    badge = trend_badge(ch_trend_dir, ch_trend_pct)
+                    color_map = {"up": "normal", "down": "inverse", "flat": "off"}
+                    r3.metric("90-Day Trend", badge)
 
                 # Copy summary
                 summary = f"""{query}
