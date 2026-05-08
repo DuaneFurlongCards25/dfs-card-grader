@@ -944,19 +944,22 @@ with tab1:
         ra1, ra2, ra3 = st.columns(3)
         with ra1:
             raw_cost = st.number_input(
-                "Raw buy price ($)", min_value=0.0,
+                "Your cost for the raw card ($)", min_value=0.0,
                 value=float(raw_auto) if raw_auto else 50.0,
                 step=5.0, key="t1_raw",
             )
+            st.caption("What you paid (or plan to pay) for the ungraded card. Pre-filled from live comps — update to your actual price.")
         with ra2:
             tier = st.selectbox("Grading tier", list(PSA_FEES.keys()),
                                 index=list(PSA_FEES.keys()).index(default_tier), key="t1_tier")
+            st.caption("PSA service level you'll submit under. Sets the grading fee used in the ROI calculation.")
         with ra3:
             graded_price = st.number_input(
-                "Gem 10 avg price ($)", min_value=0.0,
+                "Expected PSA 10 sell price ($)", min_value=0.0,
                 value=float(graded_auto) if graded_auto else 0.0,
                 step=10.0, key="t1_graded",
             )
+            st.caption("The price you expect to sell a PSA 10 for on eBay. Pre-filled from live comps — adjust up or down based on your read of the market.")
 
         if raw_cost > 0:
             fee = PSA_FEES[tier]
