@@ -995,11 +995,13 @@ Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI: {roi:.0f}%
             else:
                 st.info("Enter a Gem 10 avg price above to get a GO/NO-GO decision")
 
-        st.markdown("#### eBay Sold Comps")
-        st.caption("Fixed-price completed sales only (Best Offer excluded) — use these to set your raw buy price and PSA 10 sell price above.")
-        l1, l2 = st.columns(2)
+        st.markdown("#### eBay Links")
+        st.caption("Fixed-price completed sales only (Best Offer excluded) — use sold comps to set your raw buy price and PSA 10 sell price above.")
+        l1, l2, l3 = st.columns(3)
         l1.markdown(f"[📦 Raw Sold Comps]({ebay_raw_url(desc)})")
         l2.markdown(f"[💎 PSA 10 Sold Comps]({ebay_graded_sold_url(desc)})")
+        _ebay_buy_raw = f"https://www.ebay.com/sch/i.html?_nkw={urllib.parse.quote_plus(desc)}&LH_BIN=1&_sop=15&_sacat=212"
+        l3.markdown(f"[🛒 Buy Raw Now]({_ebay_buy_raw})")
 
         st.markdown("---")
         if st.button("➕ Add to Submission Tracker", type="secondary"):
@@ -1091,14 +1093,17 @@ with tab2:
     st.markdown("## 📦 Inventory Check")
 
     # Two-column header: description + template download
+    _is_owner = st.session_state.get("access_name", "") == "Duane"
+    _wb_label = "DFS Operations Workbook" if _is_owner else "your Operations Workbook"
+
     h1, h2 = st.columns([3, 1])
     with h1:
-        st.markdown("Upload your inventory to find grading candidates. Use the template below or upload your DFS Operations Workbook directly.")
+        st.markdown(f"Upload your inventory to find grading candidates. Use the template below or upload {_wb_label} (.xlsx) directly.")
     with h2:
         st.download_button(
             label="⬇️ Download Template",
             data=make_template_csv(),
-            file_name="dfs_card_inventory_template.csv",
+            file_name="card_inventory_template.csv",
             mime="text/csv",
             help="Fill this out and upload it below",
             use_container_width=True,
@@ -1106,13 +1111,13 @@ with tab2:
 
     st.markdown("""
 **How it works:**
-1. Download the template → fill in your cards → save
+1. Download the template → fill in your cards → save as CSV, or upload your Operations Workbook (.xlsx) directly
 2. Upload it below → select a card → search GemRate → get GO/NO-GO
 3. Add grading candidates directly to the Submission Tracker
 """)
 
     uploaded = st.file_uploader(
-        "Upload inventory (CSV template or DFS Workbook .xlsx)",
+        "Upload inventory (CSV template or Operations Workbook .xlsx)",
         type=["csv", "xlsx"],
         label_visibility="visible",
     )
@@ -1123,7 +1128,8 @@ with tab2:
         if inv is None:
             st.error(f"Could not read file: {source}")
         else:
-            st.success(f"Loaded **{len(inv)} cards** {'from DFS Workbook' if source == 'workbook' else 'from inventory template'}")
+            _source_label = (_wb_label if source == "workbook" else "inventory template")
+            st.success(f"Loaded **{len(inv)} cards** from {_source_label}")
 
             show_cols = [c for c in ["Card Description", "Player", "Year", "Set", "Parallel",
                                      "Category", "Cost Basis ($)", "Listed Price ($)", "Source"] if c in inv.columns]
@@ -1399,7 +1405,7 @@ Upload it in the **Inventory Check** tab to search GemRate and get GO/NO-GO deci
         st.download_button(
             label="⬇️ Download Template",
             data=make_template_csv(),
-            file_name="dfs_card_inventory_template.csv",
+            file_name="card_inventory_template.csv",
             mime="text/csv",
             use_container_width=True,
         )
