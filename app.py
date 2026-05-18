@@ -11,7 +11,21 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.2.4"
+APP_VERSION = "1.2.5"
+
+RELEASE_NOTES = {
+    "1.2.5": {
+        "emoji": "📦",
+        "title": "Shipping costs + true total ROI",
+        "items": [
+            ("📦", "Shipping costs added — set your per-card cost to PSA and return in Settings. Now baked into every ROI calculation."),
+            ("⏳", "Time cost of capital — see the hidden fee of slow grading tiers. A $500 card at Value tier for 154 days costs you ~$27 you can't deploy elsewhere."),
+            ("🔄", "Auto-fallback to CardHedger — when GemRate is offline, live PSA 10 / Raw prices load automatically from CardHedger."),
+            ("💎", "Card images now show in search results."),
+            ("📋", "PSA fees & turnaround times updated to May 2025 pricing (Super Express $349, all times extended)."),
+        ],
+    },
+}
 
 # PSA current pricing & turnaround (updated May 2025)
 # days = midpoint of business-day range; calendar days ≈ days × 1.4
@@ -907,44 +921,40 @@ def psa_pop_url(desc):
     return f"https://www.psacertify.com/s/search?q={q}"
 
 # ─── ROI logic ────────────────────────────────────────────────────────────────
-def calc_opp_cost(raw_cost, psa_tier, opp_rate: float) -> float:
+def calc_opp_cost(raw_cost, psa_tier, opp_rate: float, ship_cost: float = 0.0) -> float:
     """Return the opportunity cost of having money locked up at PSA.
 
-    Explanation in plain English:
-      When your card sits at PSA for months, that cash can't be used elsewhere.
-      This is the 'invisible fee' — e.g. $200 tied up for 5 months at 15%
-      annual return = ~$12.50 you could have earned. No other tool shows this.
-
+    All upfront cash (card + grading fee + shipping) is locked up during the wait,
+    so all of it earns zero return for that period.
     opp_rate: annual return % you expect elsewhere (e.g. 12.0 = 12%/yr)
     """
     if opp_rate <= 0:
         return 0.0
     fee = PSA_FEES.get(psa_tier, 50)
     biz_days = PSA_DAYS.get(psa_tier, 60)
-    cal_days = biz_days * 1.4            # convert business days → calendar days
-    capital_at_risk = raw_cost + fee     # both amounts are locked up at PSA
+    cal_days = biz_days * 1.4
+    capital_at_risk = raw_cost + fee + ship_cost   # everything paid upfront is locked
     return round(capital_at_risk * (opp_rate / 100) * (cal_days / 365), 2)
 
-def target_price(raw_cost, psa_tier, roi=4.0, opp_rate=0.0):
+def target_price(raw_cost, psa_tier, roi=4.0, opp_rate=0.0, ship_cost=0.0):
     fee = PSA_FEES.get(psa_tier, 50)
-    opp = calc_opp_cost(raw_cost, psa_tier, opp_rate)
-    total_cost = raw_cost + fee + opp
-    # Target sell price so that net received after eBay = roi × total cost
+    opp = calc_opp_cost(raw_cost, psa_tier, opp_rate, ship_cost)
+    total_cost = raw_cost + fee + ship_cost + opp
     return (total_cost * roi) / (1 - EBAY_FEE)
 
-def calc_net_roi(raw_cost, psa_tier, graded_price, opp_rate=0.0):
+def calc_net_roi(raw_cost, psa_tier, graded_price, opp_rate=0.0, ship_cost=0.0):
     fee = PSA_FEES.get(psa_tier, 50)
-    opp = calc_opp_cost(raw_cost, psa_tier, opp_rate)
-    total_cost = raw_cost + fee + opp
+    opp = calc_opp_cost(raw_cost, psa_tier, opp_rate, ship_cost)
+    total_cost = raw_cost + fee + ship_cost + opp
     net = graded_price * (1 - EBAY_FEE) - total_cost
     roi = (net / total_cost * 100) if total_cost > 0 else 0
     return round(net, 2), round(roi, 1)
 
-def verdict(raw_cost, psa_tier, gem_rate, graded_price, min_gem, roi_target, opp_rate=0.0):
+def verdict(raw_cost, psa_tier, gem_rate, graded_price, min_gem, roi_target, opp_rate=0.0, ship_cost=0.0):
     if gem_rate is None or gem_rate < min_gem:
         return "❌ NO-GO", "red", f"Gem rate {gem_rate or 0:.1f}% below {min_gem:.0f}% floor"
-    tgt = target_price(raw_cost, psa_tier, roi_target, opp_rate)
-    net, roi = calc_net_roi(raw_cost, psa_tier, graded_price, opp_rate)
+    tgt = target_price(raw_cost, psa_tier, roi_target, opp_rate, ship_cost)
+    net, roi = calc_net_roi(raw_cost, psa_tier, graded_price, opp_rate, ship_cost)
     if graded_price >= tgt:
         return "✅ GO", "green", f"Gem 10 avg ${graded_price:,.0f} clears ${tgt:,.0f} target | Net ~${net:,.0f} | ROI ~{roi:.0f}%"
     return "❌ NO-GO", "red", f"Gem 10 avg ${graded_price:,.0f} needs ${tgt:,.0f} for {roi_target:.0f}× | ROI only ~{roi:.0f}%"
@@ -982,20 +992,36 @@ with st.sidebar:
     default_tier = st.selectbox("Default grading tier", list(PSA_FEES.keys()), index=0)
 
     st.markdown("---")
+    st.markdown("**📦 Shipping Costs**")
+    st.caption("Split your total shipping cost across the cards in the submission.")
+    _sc1, _sc2 = st.columns(2)
+    with _sc1:
+        ship_to = st.number_input(
+            "To PSA ($/card)", min_value=0.0, value=3.00, step=0.50,
+            help="e.g. $30 priority box ÷ 10 cards = $3/card"
+        )
+    with _sc2:
+        ship_return = st.number_input(
+            "Return ($/card)", min_value=0.0, value=2.50, step=0.50,
+            help="PSA return shipping divided by cards in order"
+        )
+    ship_cost = round(ship_to + ship_return, 2)
+    st.caption(f"Total shipping per card: **${ship_cost:.2f}**")
+
+    st.markdown("---")
     st.markdown("**⏳ Time Cost of Capital**")
     st.caption(
-        "Your card sits at PSA for months — that cash can't be working elsewhere. "
-        "Set your expected annual return to see the true hidden cost (no other app shows this)."
+        "While your card sits at PSA, that cash earns nothing. "
+        "Set your expected annual return to reveal the true hidden cost."
     )
     opp_rate = st.slider(
         "Opportunity cost rate (% / year)",
         min_value=0.0, max_value=50.0, value=12.0, step=1.0,
-        help="e.g. 12% = if your $200 card is at PSA for 5 months, that's ~$10 in hidden cost added to the analysis",
+        help="e.g. 12%/yr: $649 locked at Express (~35 days) = $7.47 hidden cost",
     )
     if opp_rate > 0:
-        # Show a live example for the selected tier
         _ex_raw, _ex_tier = 200.0, default_tier
-        _ex_opp = calc_opp_cost(_ex_raw, _ex_tier, opp_rate)
+        _ex_opp = calc_opp_cost(_ex_raw, _ex_tier, opp_rate, ship_cost)
         _ex_days = int(PSA_DAYS.get(_ex_tier, 60) * 1.4)
         st.caption(f"→ $200 card · {_ex_days} cal. days · **${_ex_opp:.2f} hidden cost**")
 
@@ -1005,6 +1031,38 @@ with st.sidebar:
         biz = info['days']
         st.caption(f"${info['fee']:.2f} · ~{biz} biz days · insured to ${info['max_insured']:,} — {tier.split('(')[0].strip()}")
     st.caption(f"eBay sell fee: {EBAY_FEE*100:.2f}%")
+
+# ─── What's New dialog ────────────────────────────────────────────────────────
+_WN_KEY = f"wn_seen_{APP_VERSION}"
+
+@st.dialog("🎉 What's New in DFS Card Grader", width="large")
+def _show_whats_new():
+    notes = RELEASE_NOTES.get(APP_VERSION, {})
+    st.markdown(
+        f'<div style="display:inline-block;background:#1e2130;border:1px solid #2e3250;'
+        f'border-radius:8px;padding:4px 12px;font-size:0.75rem;color:#7c8db5;'
+        f'margin-bottom:12px">v{APP_VERSION}</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(f"### {notes.get('emoji','🎉')} {notes.get('title','Updates')}")
+    st.markdown("")
+    for icon, text in notes.get("items", []):
+        st.markdown(
+            f'<div style="display:flex;gap:10px;align-items:flex-start;'
+            f'margin-bottom:10px;padding:10px 14px;background:#1e2130;'
+            f'border-radius:8px;border:1px solid #2e3250">'
+            f'<span style="font-size:1.2rem;line-height:1.4">{icon}</span>'
+            f'<span style="font-size:0.9rem;color:#c8d3e8;line-height:1.5">{text}</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    st.markdown("")
+    if st.button("Got it, let's go →", type="primary", use_container_width=True):
+        st.session_state[_WN_KEY] = True
+        st.rerun()
+
+if not st.session_state.get(_WN_KEY) and APP_VERSION in RELEASE_NOTES:
+    _show_whats_new()
 
 # ─── Dashboard KPI tiles ──────────────────────────────────────────────────────
 if not is_beta and SUPABASE_URL:
@@ -1271,42 +1329,43 @@ with tab1:
 
         if raw_cost > 0:
             fee      = PSA_FEES[tier]
-            opp      = calc_opp_cost(raw_cost, tier, opp_rate)
-            tgt      = target_price(raw_cost, tier, roi_target, opp_rate)
+            opp      = calc_opp_cost(raw_cost, tier, opp_rate, ship_cost)
+            tgt      = target_price(raw_cost, tier, roi_target, opp_rate, ship_cost)
             cal_days = int(PSA_DAYS.get(tier, 60) * 1.4)
-            bd1, bd2, bd3, bd4, bd5 = st.columns(5)
-            bd1.metric("Raw card",                         f"${raw_cost:,.2f}")
-            bd2.metric("Grading fee",                      f"${fee:.2f}")
-            bd3.metric(f"⏳ Time cost ({cal_days} cal. days)", f"${opp:,.2f}",
-                       help=f"At {opp_rate:.0f}%/yr, ${raw_cost+fee:,.0f} locked up for {cal_days} days = ${opp:,.2f} you can't deploy elsewhere")
-            bd4.metric(f"Target PSA 10 ({roi_target:.0f}×)", f"${tgt:,.0f}")
-            bd5.metric("eBay fees",                        f"${graded_price * EBAY_FEE:,.2f}" if graded_price else "—")
+            total_in = raw_cost + fee + ship_cost + opp
+            bd1, bd2, bd3, bd4, bd5, bd6 = st.columns(6)
+            bd1.metric("Raw card",                             f"${raw_cost:,.2f}")
+            bd2.metric("Grading fee",                         f"${fee:.2f}")
+            bd3.metric("Shipping (to + return)",              f"${ship_cost:.2f}",
+                       help="Per-card shipping to PSA + return. Set in sidebar ⚙️")
+            bd4.metric(f"⏳ Time cost ({cal_days} days)",     f"${opp:,.2f}",
+                       help=f"At {opp_rate:.0f}%/yr, ${raw_cost+fee+ship_cost:,.0f} locked for {cal_days} days = ${opp:,.2f} you can't redeploy")
+            bd5.metric(f"Target PSA 10 ({roi_target:.0f}×)",  f"${tgt:,.0f}")
+            bd6.metric("eBay fees",                           f"${graded_price * EBAY_FEE:,.2f}" if graded_price else "—")
 
-            if opp > 0:
-                st.caption(
-                    f"💡 **Time cost explained:** Your ${raw_cost+fee:,.0f} is locked at PSA for ~{cal_days} calendar days. "
-                    f"At {opp_rate:.0f}%/yr that's **${opp:,.2f} you can't use to flip other cards** — "
-                    f"treated as a real cost in the ROI below. Most apps ignore this."
-                )
+            st.caption(
+                f"💡 **True total cost: ${total_in:,.2f}** — raw ${raw_cost:,.2f} + grading ${fee:.2f} + "
+                f"shipping ${ship_cost:.2f} + time cost ${opp:,.2f}. "
+                f"Most apps only count the grading fee."
+            )
 
             if graded_price > 0:
-                v, color, msg = verdict(raw_cost, tier, gem, graded_price, min_gem, roi_target, opp_rate)
-                net, roi = calc_net_roi(raw_cost, tier, graded_price, opp_rate)
+                v, color, msg = verdict(raw_cost, tier, gem, graded_price, min_gem, roi_target, opp_rate, ship_cost)
+                net, roi = calc_net_roi(raw_cost, tier, graded_price, opp_rate, ship_cost)
                 if color == "green":
                     st.success(f"{v} — {msg}")
                 else:
                     st.error(f"{v} — {msg}")
                 r1, r2, r3 = st.columns(3)
-                r1.metric("Est. Net Profit", f"${net:,.0f}", help="After raw cost, grading fee, time cost, and eBay fees")
+                r1.metric("Est. Net Profit", f"${net:,.0f}", help="After ALL costs: raw, grading, shipping, time cost, and eBay fees")
                 r2.metric("Est. ROI",        f"{roi:.0f}%")
                 if ch_trend_dir:
                     r3.metric("90-Day Trend", trend_badge(ch_trend_dir, ch_trend_pct))
 
-                # Copy summary
                 summary = f"""{query}
 Gem Rate: {fmt_gem(gem)} | Raw: ${raw_cost:,.2f} | Gem 10 Avg: ${graded_price:,.2f}
-Grading fee: ${fee:.2f} | Time cost ({cal_days} days @ {opp_rate:.0f}%/yr): ${opp:,.2f}
-Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI: {roi:.0f}%
+Grading fee: ${fee:.2f} | Shipping: ${ship_cost:.2f} | Time cost ({cal_days} days @ {opp_rate:.0f}%/yr): ${opp:,.2f}
+True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI: {roi:.0f}%
 {v}"""
                 with st.expander("📋 Copy Analysis"):
                     st.code(summary, language=None)
@@ -1356,9 +1415,9 @@ Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI: {roi:.0f}%
                 st.warning("Enter a raw buy price first")
             else:
                 fee = PSA_FEES[tier]
-                tgt = target_price(raw_cost, tier, roi_target, opp_rate)
-                net, roi = calc_net_roi(raw_cost, tier, graded_price, opp_rate) if graded_price > 0 else (None, None)
-                v, _, _ = verdict(raw_cost, tier, gem, graded_price, min_gem, roi_target, opp_rate) if graded_price > 0 else ("Pending", "", "")
+                tgt = target_price(raw_cost, tier, roi_target, opp_rate, ship_cost)
+                net, roi = calc_net_roi(raw_cost, tier, graded_price, opp_rate, ship_cost) if graded_price > 0 else (None, None)
+                v, _, _ = verdict(raw_cost, tier, gem, graded_price, min_gem, roi_target, opp_rate, ship_cost) if graded_price > 0 else ("Pending", "", "")
                 sb_insert({
                     "date_added": date.today().isoformat(),
                     "card_description": selected,
@@ -1476,39 +1535,41 @@ Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI: {roi:.0f}%
 
         if raw_cost > 0:
             fee      = PSA_FEES[tier]
-            opp      = calc_opp_cost(raw_cost, tier, opp_rate)
-            tgt      = target_price(raw_cost, tier, roi_target, opp_rate)
+            opp      = calc_opp_cost(raw_cost, tier, opp_rate, ship_cost)
+            tgt      = target_price(raw_cost, tier, roi_target, opp_rate, ship_cost)
             cal_days = int(PSA_DAYS.get(tier, 60) * 1.4)
-            bd1, bd2, bd3, bd4, bd5 = st.columns(5)
-            bd1.metric("Raw card",                             f"${raw_cost:,.2f}")
-            bd2.metric("Grading fee",                         f"${fee:.2f}")
-            bd3.metric(f"⏳ Time cost ({cal_days} cal. days)", f"${opp:,.2f}",
-                       help=f"At {opp_rate:.0f}%/yr, ${raw_cost+fee:,.0f} locked up for {cal_days} days = ${opp:,.2f} hidden cost")
-            bd4.metric(f"Target PSA 10 ({roi_target:.0f}×)",  f"${tgt:,.0f}")
-            bd5.metric("eBay fees",                           f"${graded_price * EBAY_FEE:,.2f}" if graded_price else "—")
+            total_in = raw_cost + fee + ship_cost + opp
+            bd1, bd2, bd3, bd4, bd5, bd6 = st.columns(6)
+            bd1.metric("Raw card",                            f"${raw_cost:,.2f}")
+            bd2.metric("Grading fee",                        f"${fee:.2f}")
+            bd3.metric("Shipping (to + return)",             f"${ship_cost:.2f}",
+                       help="Per-card shipping to PSA + return. Set in sidebar ⚙️")
+            bd4.metric(f"⏳ Time cost ({cal_days} days)",    f"${opp:,.2f}",
+                       help=f"At {opp_rate:.0f}%/yr, ${raw_cost+fee+ship_cost:,.0f} locked for {cal_days} days")
+            bd5.metric(f"Target PSA 10 ({roi_target:.0f}×)", f"${tgt:,.0f}")
+            bd6.metric("eBay fees",                          f"${graded_price * EBAY_FEE:,.2f}" if graded_price else "—")
 
-            if opp > 0:
-                st.caption(
-                    f"💡 **Time cost:** Your ${raw_cost+fee:,.0f} sits at PSA for ~{cal_days} calendar days. "
-                    f"At {opp_rate:.0f}%/yr that's **${opp:,.2f} you can't flip into other cards** — baked into the ROI below."
-                )
+            st.caption(
+                f"💡 **True total cost: ${total_in:,.2f}** — raw ${raw_cost:,.2f} + grading ${fee:.2f} + "
+                f"shipping ${ship_cost:.2f} + time cost ${opp:,.2f}. "
+                f"Most apps only count the grading fee."
+            )
 
             if graded_price > 0:
-                net, roi = calc_net_roi(raw_cost, tier, graded_price, opp_rate)
-                # ROI verdict without gem rate check
+                net, roi = calc_net_roi(raw_cost, tier, graded_price, opp_rate, ship_cost)
                 if graded_price >= tgt:
                     st.success(f"✅ GO — PSA 10 avg ${graded_price:,.0f} clears ${tgt:,.0f} target | Net ~${net:,.0f} | ROI ~{roi:.0f}% *(verify gem rate on PSA pop before submitting)*")
                 else:
                     st.error(f"❌ NO-GO — PSA 10 avg ${graded_price:,.0f} needs ${tgt:,.0f} for {roi_target:.0f}× | ROI only ~{roi:.0f}%")
                 r1, r2 = st.columns(2)
-                r1.metric("Est. Net Profit", f"${net:,.0f}", help="After raw cost, grading fee, time cost, and eBay fees")
+                r1.metric("Est. Net Profit", f"${net:,.0f}", help="After ALL costs: raw, grading, shipping, time cost, and eBay fees")
                 r2.metric("Est. ROI",        f"{roi:.0f}%")
 
                 summary_fb = f"""{desc}
 Source: CardHedger | Gem Rate: N/A (GemRate offline)
 Raw: ${raw_cost:,.2f} | PSA 10 Avg: ${graded_price:,.2f}
-Grading fee: ${fee:.2f} | Time cost ({cal_days} days @ {opp_rate:.0f}%/yr): ${opp:,.2f}
-Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI: {roi:.0f}%"""
+Grading fee: ${fee:.2f} | Shipping: ${ship_cost:.2f} | Time cost ({cal_days} days @ {opp_rate:.0f}%/yr): ${opp:,.2f}
+True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI: {roi:.0f}%"""
                 with st.expander("📋 Copy Analysis"):
                     st.code(summary_fb, language=None)
             else:
@@ -1549,8 +1610,8 @@ Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI: {roi:.0f}%"""
                 st.warning("Enter a raw buy price first")
             else:
                 fee = PSA_FEES[tier]
-                tgt = target_price(raw_cost, tier, roi_target, opp_rate)
-                net, roi_val = calc_net_roi(raw_cost, tier, graded_price, opp_rate) if graded_price > 0 else (None, None)
+                tgt = target_price(raw_cost, tier, roi_target, opp_rate, ship_cost)
+                net, roi_val = calc_net_roi(raw_cost, tier, graded_price, opp_rate, ship_cost) if graded_price > 0 else (None, None)
                 v_fb = "✅ GO" if graded_price > 0 and graded_price >= tgt else "❌ NO-GO"
                 sb_insert({
                     "date_added":       date.today().isoformat(),
