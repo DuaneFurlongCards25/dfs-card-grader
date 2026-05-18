@@ -751,6 +751,14 @@ def ch_search(query: str):
             return result[key]
     return result if isinstance(result, list) else []
 
+@st.cache_data(ttl=600, show_spinner=False)
+def ch_card_match(query: str):
+    """AI-powered best-match search — returns card with prices by grade."""
+    result = _ch_post("/v1/cards/card-match", {"query": query, "page": 1, "page_size": 5})
+    if not result or "match" not in result:
+        return None
+    return result["match"]
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def ch_comps(card_id, grade: str):
     return _ch_post("/v1/cards/comps", {
@@ -1006,6 +1014,7 @@ with tab1:
         if st.button("🔄 Clear", use_container_width=True, help="Clear cached results and retry"):
             st.cache_data.clear()
             st.session_state.pop("gr_results", None)
+            st.session_state.pop("ch_match_result", None)
             st.session_state.pop("last_q", None)
             st.rerun()
 
@@ -1034,8 +1043,15 @@ with tab1:
         st.session_state.last_q = query
         with st.spinner("Searching GemRate..."):
             st.session_state.gr_results = search_gemrate(query)
+        # If GemRate returned nothing, fall back to CardHedger AI match
+        if not st.session_state.gr_results and CARDHEDGER_KEY:
+            with st.spinner("GemRate unavailable — fetching prices from CardHedger..."):
+                st.session_state.ch_match_result = ch_card_match(query)
+        else:
+            st.session_state.pop("ch_match_result", None)
 
     results = st.session_state.get("gr_results", [])
+    ch_match_data = st.session_state.get("ch_match_result")
 
     if results:
         st.markdown(f"**{len(results)} result(s) from GemRate**")
@@ -1216,7 +1232,7 @@ Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI: {roi:.0f}%
         st.markdown("#### 🔍 Card Finder Links")
         st.caption("All the links you need — buy raw, check sold comps, verify gem rate, or look up the PSA pop report.")
 
-        _link_style = (
+        _link_style = (  # noqa: F841  (also used in CardHedger fallback block below)
             "display:inline-flex;align-items:center;gap:6px;padding:8px 14px;"
             "border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;"
             "border:1px solid;margin:3px;"
@@ -1278,9 +1294,180 @@ Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI: {roi:.0f}%
                 })
                 st.success("Added to Submission Tracker ✓")
 
+    elif ch_match_data:
+        # ── CardHedger AI-match fallback (GemRate unavailable) ───────────────
+        confidence  = ch_match_data.get("confidence", 0)
+        reasoning   = ch_match_data.get("reasoning", "")
+        desc        = ch_match_data.get("description", query)
+        player      = ch_match_data.get("player", "")
+        set_name    = ch_match_data.get("set", "")
+        variant     = ch_match_data.get("variant", "")
+        prices_list = ch_match_data.get("prices", [])
+
+        # Build price map
+        price_map = {}
+        for p in prices_list:
+            try:
+                price_map[p["grade"]] = float(p["price"])
+            except Exception:
+                pass
+        ch_psa10 = price_map.get("PSA 10")
+        ch_psa9  = price_map.get("PSA 9")
+        ch_raw   = price_map.get("Raw")
+
+        _link_style_fb = (
+            "display:inline-flex;align-items:center;gap:6px;padding:8px 14px;"
+            "border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;"
+            "border:1px solid;margin:3px;"
+        )
+
+        st.info(
+            "💎 **Showing live CardHedger prices** — GemRate is currently unavailable. "
+            "Gem rate (PSA pop) cannot be checked right now; ROI calculation still works.",
+            icon="ℹ️",
+        )
+
+        st.markdown(f"### {desc}")
+        ci1, ci2, ci3 = st.columns(3)
+        ci1.markdown(f"**Set:** {set_name}")
+        ci2.markdown(f"**Variant:** {variant}")
+        ci3.markdown(f"**AI Match confidence:** {confidence * 100:.0f}%")
+
+        st.markdown("#### 💰 Market Prices (CardHedger)")
+        if prices_list:
+            price_rows_fb = [{"Grade": p.get("grade", ""), "Avg Market Price": f"${float(p.get('price', 0)):,.2f}"} for p in prices_list]
+            st.dataframe(pd.DataFrame(price_rows_fb), use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+        st.text_input("📋 Card name (tap → select all → copy)", value=desc, key="card_name_copy")
+
+        fb1, fb2, fb3 = st.columns(3)
+        with fb1:
+            st.markdown("**Gem Rate (PSA 10)**")
+            st.markdown('<span style="color:#94a3b8;font-size:14px">N/A — GemRate offline</span>', unsafe_allow_html=True)
+        if ch_psa10:
+            fb2.metric("PSA 10 Avg", f"${ch_psa10:,.2f}")
+        if ch_psa9:
+            fb3.metric("PSA 9 Avg", f"${ch_psa9:,.2f}")
+
+        st.markdown("#### ROI Analysis")
+
+        ra1, ra2, ra3 = st.columns(3)
+        with ra1:
+            raw_cost = st.number_input(
+                "Your cost for the raw card ($)", min_value=0.0,
+                value=float(ch_raw) if ch_raw else 50.0,
+                step=5.0, key="t1_raw",
+            )
+            st.caption("Pre-filled from CardHedger live raw avg — update to your actual price.")
+        with ra2:
+            tier = st.selectbox("Grading tier", list(PSA_FEES.keys()),
+                                index=list(PSA_FEES.keys()).index(default_tier), key="t1_tier")
+            st.caption("PSA service level you'll submit under.")
+        with ra3:
+            graded_price = st.number_input(
+                "Expected PSA 10 sell price ($)", min_value=0.0,
+                value=float(ch_psa10) if ch_psa10 else 0.0,
+                step=10.0, key="t1_graded",
+            )
+            st.caption("Pre-filled from CardHedger PSA 10 avg — adjust as needed.")
+
+        if raw_cost > 0:
+            fee     = PSA_FEES[tier]
+            tgt     = target_price(raw_cost, tier, roi_target)
+            bd1, bd2, bd3, bd4 = st.columns(4)
+            bd1.metric("Raw card",                     f"${raw_cost:,.2f}")
+            bd2.metric("Grading fee",                  f"${fee}")
+            bd3.metric(f"Target Gem 10 ({roi_target:.0f}×)", f"${tgt:,.0f}")
+            bd4.metric("eBay fees",                    f"${graded_price * EBAY_FEE:,.2f}" if graded_price else "—")
+
+            if graded_price > 0:
+                net, roi = calc_net_roi(raw_cost, tier, graded_price)
+                # ROI verdict without gem rate check
+                if graded_price >= tgt:
+                    st.success(f"✅ GO — PSA 10 avg ${graded_price:,.0f} clears ${tgt:,.0f} target | Net ~${net:,.0f} | ROI ~{roi:.0f}% *(verify gem rate on PSA pop before submitting)*")
+                else:
+                    st.error(f"❌ NO-GO — PSA 10 avg ${graded_price:,.0f} needs ${tgt:,.0f} for {roi_target:.0f}× | ROI only ~{roi:.0f}%")
+                r1, r2 = st.columns(2)
+                r1.metric("Est. Net Profit", f"${net:,.0f}")
+                r2.metric("Est. ROI",        f"{roi:.0f}%")
+
+                summary_fb = f"""{desc}
+Source: CardHedger | Gem Rate: N/A (GemRate offline)
+Raw: ${raw_cost:,.2f} | PSA 10 Avg: ${graded_price:,.2f}
+Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI: {roi:.0f}%"""
+                with st.expander("📋 Copy Analysis"):
+                    st.code(summary_fb, language=None)
+            else:
+                st.info("Enter a PSA 10 price above to get a GO/NO-GO decision")
+
+        st.markdown("#### 🔍 Card Finder Links")
+        st.markdown(
+            f"""<div style="display:flex;flex-wrap:wrap;gap:2px;margin-bottom:8px">
+              <a href="{ebay_buy_bin_url(desc)}" target="_blank"
+                 style="{_link_style_fb}color:#e5a310;border-color:rgba(229,163,16,.4);background:rgba(229,163,16,.08)">
+                 🛒 Buy Raw (BIN)</a>
+              <a href="{ebay_buy_auction_url(desc)}" target="_blank"
+                 style="{_link_style_fb}color:#e5a310;border-color:rgba(229,163,16,.4);background:rgba(229,163,16,.08)">
+                 ⚡ Buy Raw (Auction)</a>
+              <a href="{ebay_raw_sold_all_url(desc)}" target="_blank"
+                 style="{_link_style_fb}color:#94a3b8;border-color:rgba(148,163,184,.3);background:rgba(148,163,184,.06)">
+                 📊 Raw Sold Comps</a>
+              <a href="{ebay_graded_sold_url(desc)}" target="_blank"
+                 style="{_link_style_fb}color:#22c55e;border-color:rgba(34,197,94,.4);background:rgba(34,197,94,.08)">
+                 🔴 PSA 10 Sold Comps</a>
+              <a href="{ebay_psa9_sold_url(desc)}" target="_blank"
+                 style="{_link_style_fb}color:#f59e0b;border-color:rgba(245,158,11,.4);background:rgba(245,158,11,.08)">
+                 🟡 PSA 9 Sold Comps</a>
+              <a href="{psa_pop_url(desc)}" target="_blank"
+                 style="{_link_style_fb}color:#7c5cfc;border-color:rgba(124,92,252,.4);background:rgba(124,92,252,.08)">
+                 🏆 PSA Pop Report</a>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
+        if reasoning:
+            with st.expander("🤖 AI Match Reasoning"):
+                st.caption(reasoning)
+
+        st.markdown("---")
+        if st.button("➕ Add to Submission Tracker", type="secondary"):
+            if raw_cost <= 0:
+                st.warning("Enter a raw buy price first")
+            else:
+                fee = PSA_FEES[tier]
+                tgt = target_price(raw_cost, tier, roi_target)
+                net, roi_val = calc_net_roi(raw_cost, tier, graded_price) if graded_price > 0 else (None, None)
+                v_fb = "✅ GO" if graded_price > 0 and graded_price >= tgt else "❌ NO-GO"
+                sb_insert({
+                    "date_added":       date.today().isoformat(),
+                    "card_description": desc,
+                    "year":             "",
+                    "set_name":         set_name or "",
+                    "parallel":         variant or "Base",
+                    "raw_buy_price":    raw_cost,
+                    "psa_tier":         tier,
+                    "psa_fee":          fee,
+                    "psa10_avg_price":  graded_price or None,
+                    "target_price":     round(tgt, 2),
+                    "gem_rate":         None,
+                    "go_no_go":         v_fb,
+                    "est_net":          net,
+                    "est_roi":          f"{roi_val:.0f}%" if roi_val is not None else None,
+                    "status":           "Queued",
+                })
+                st.success("Added to Submission Tracker ✓")
+
     elif query:
         gr_search_url = f"https://www.gemrate.com/search?q={urllib.parse.quote_plus(query)}"
-        st.warning(f"No results found — GemRate may not have this set indexed yet. Try a different search term or [search directly on GemRate ↗]({gr_search_url})")
+        if CARDHEDGER_KEY:
+            st.warning(
+                f"No results found on GemRate or CardHedger for **{query}**. "
+                "Try adjusting the search — include player name, set, year, and parallel "
+                "*(e.g. Cooper Flagg 2025 Topps Chrome Rookie)*."
+            )
+        else:
+            st.warning(f"No results found — GemRate may not have this set indexed yet. Try a different search term or [search directly on GemRate ↗]({gr_search_url})")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — Inventory Check
