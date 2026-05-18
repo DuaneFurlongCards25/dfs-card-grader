@@ -571,10 +571,25 @@ def _build_queries(query: str):
     if "rookie" in ql and "auto" not in ql and "autograph" not in ql:
         queries.append(q + " autograph")
 
-    # prizm / optic / chrome shortcuts
-    for shorthand, full in [("prizm", "Prizm"), ("optic", "Optic"), ("chrome", "Chrome")]:
-        if shorthand in ql and full not in q:
-            queries.append(q.replace(shorthand, full))
+    # Prizm → Panini Prizm (GemRate indexes with manufacturer name)
+    if "prizm" in ql and "panini" not in ql:
+        queries.append(q.replace("Prizm", "Panini Prizm").replace("prizm", "Panini Prizm"))
+
+    # Optic → Panini Optic
+    if "optic" in ql and "panini" not in ql:
+        queries.append(q.replace("Optic", "Panini Optic").replace("optic", "Panini Optic"))
+
+    # Chrome → Topps Chrome (if not Bowman Chrome already)
+    if "chrome" in ql and "topps" not in ql and "bowman" not in ql:
+        queries.append(q.replace("Chrome", "Topps Chrome").replace("chrome", "Topps Chrome"))
+
+    # Bowman Chrome prospect autograph variant
+    if "bowman" in ql and "chrome" in ql and "autograph" not in ql:
+        queries.append(q + " autograph")
+
+    # Draft Picks → Prizm Draft Picks (Panini)
+    if "draft picks" in ql and "panini" not in ql:
+        queries.append("Panini " + q)
 
     return list(dict.fromkeys(queries))  # dedupe while preserving order
 
@@ -784,18 +799,19 @@ def trend_badge(direction, pct):
 
 # ─── Quick search target list ─────────────────────────────────────────────────
 QUICK_SEARCHES = [
+    ("🏀", "Cooper Flagg Topps Chrome Rookie"),
+    ("🏀", "Steph Curry Topps Chrome Paradox Refractor"),
+    ("🏀", "Caitlin Clark Panini Prizm WNBA Rookie"),
     ("🏀", "Luka Doncic Panini Prizm Silver Rookie"),
     ("🏀", "Zion Williamson Panini Prizm Rookie"),
-    ("🏀", "Steph Curry Topps Chrome Paradox"),
-    ("🏀", "Caitlin Clark Panini Prizm WNBA"),
-    ("🏀", "Victor Wembanyama Panini Prizm Rookie"),
-    ("🏈", "Patrick Mahomes Panini Prizm Rookie"),
-    ("🏈", "Justin Jefferson Panini Prizm Rookie"),
+    ("🏈", "Cam Ward Panini Prizm Draft Picks Rookie"),
+    ("🏈", "Ashton Jeanty Panini Prizm Draft Picks Rookie"),
+    ("🏈", "Travis Hunter Panini Prizm Draft Picks Rookie"),
     ("🏈", "Drake Maye Panini Prizm Rookie"),
-    ("🏈", "Ja'Marr Chase Panini Prizm Rookie"),
+    ("🏈", "Shedeur Sanders Panini Prizm Draft Picks Rookie"),
     ("⚾", "Paul Skenes Topps Chrome Rookie"),
+    ("⚾", "Aaron Judge Topps"),
     ("⚾", "Elly De La Cruz Bowman Chrome Rookie"),
-    ("⚾", "Jackson Holliday Bowman Chrome Prospect"),
 ]
 
 # ─── Gem rate visual helpers ──────────────────────────────────────────────────
