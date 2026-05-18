@@ -27,7 +27,7 @@ RELEASE_NOTES = {
     },
 }
 
-# PSA current pricing & turnaround (updated May 2025)
+# PSA current pricing & turnaround (updated May 18, 2026)
 # days = midpoint of business-day range; calendar days ≈ days × 1.4
 PSA_FEES_ALL = {
     "Value (100-120 days)":      {"fee": 32.99,  "days": 110, "max_insured":  500},
@@ -1029,7 +1029,7 @@ with st.sidebar:
         st.caption(f"→ $200 card · {_ex_days} cal. days · **${_ex_opp:.2f} hidden cost**")
 
     st.markdown("---")
-    st.markdown("**Grading fees (updated May 2025)**")
+    st.markdown("**Grading fees (updated May 18, 2026)**")
     for tier, info in PSA_FEES_ALL.items():
         biz = info['days']
         st.caption(f"${info['fee']:.2f} · ~{biz} biz days · insured to ${info['max_insured']:,} — {tier.split('(')[0].strip()}")
