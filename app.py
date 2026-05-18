@@ -784,19 +784,18 @@ def trend_badge(direction, pct):
 
 # ─── Quick search target list ─────────────────────────────────────────────────
 QUICK_SEARCHES = [
-    ("🏀", "Cooper Flagg 2025 Topps Chrome RC Mavericks"),
-    ("🏀", "Steph Curry 2025 Topps Chrome Paradox Refractor"),
-    ("🏀", "Caitlin Clark 2024 Prizm WNBA"),
-    ("🏀", "Luka Doncic 2018 Prizm Silver RC"),
-    ("🏀", "Zion Williamson 2019 Prizm RC"),
-    ("🏈", "Cam Ward 2025 Prizm Draft Picks RC"),
-    ("🏈", "Ashton Jeanty 2025 Prizm Draft Picks RC"),
-    ("🏈", "Travis Hunter 2025 Prizm Draft Picks RC"),
-    ("🏈", "Drake Maye 2025 Prizm Draft Picks RC"),
-    ("🏈", "Shedeur Sanders 2025 Prizm Draft Picks RC"),
-    ("⚾", "Paul Skenes 2025 Topps Chrome RC"),
-    ("⚾", "Aaron Judge 2026 Topps"),
-    ("⚾", "Elly De La Cruz 2024 Bowman Chrome RC"),
+    ("🏀", "Luka Doncic Panini Prizm Silver Rookie"),
+    ("🏀", "Zion Williamson Panini Prizm Rookie"),
+    ("🏀", "Steph Curry Topps Chrome Paradox"),
+    ("🏀", "Caitlin Clark Panini Prizm WNBA"),
+    ("🏀", "Victor Wembanyama Panini Prizm Rookie"),
+    ("🏈", "Patrick Mahomes Panini Prizm Rookie"),
+    ("🏈", "Justin Jefferson Panini Prizm Rookie"),
+    ("🏈", "Drake Maye Panini Prizm Rookie"),
+    ("🏈", "Ja'Marr Chase Panini Prizm Rookie"),
+    ("⚾", "Paul Skenes Topps Chrome Rookie"),
+    ("⚾", "Elly De La Cruz Bowman Chrome Rookie"),
+    ("⚾", "Jackson Holliday Bowman Chrome Prospect"),
 ]
 
 # ─── Gem rate visual helpers ──────────────────────────────────────────────────
