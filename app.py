@@ -539,18 +539,25 @@ def sb_delete(row_id: int):
 
 # ─── GemRate API ──────────────────────────────────────────────────────────────
 def _gemrate_single(query: str):
-    data = json.dumps({"query": query}).encode()
-    req = urllib.request.Request(
-        "https://www.gemrate.com/universal-search-query",
-        data=data,
-        headers={"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=12) as r:
-            return json.loads(r.read().decode())
-    except Exception:
-        return []
+    data = json.dumps({"query": query, "limit": 10}).encode()
+    headers_list = [
+        # Try multiple User-Agent strings — GemRate may block common bot UAs
+        {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", "Content-Type": "application/json", "Accept": "application/json"},
+        {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", "Content-Type": "application/json", "Accept": "application/json"},
+    ]
+    for hdrs in headers_list:
+        req = urllib.request.Request(
+            "https://www.gemrate.com/universal-search-query",
+            data=data, headers=hdrs, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, context=ssl_ctx(), timeout=15) as r:
+                result = json.loads(r.read().decode())
+                if result:  # got real data — stop trying
+                    return result
+        except Exception:
+            continue
+    return []
 
 def _build_queries(query: str):
     """Expand user query into multiple GemRate-friendly variants."""
@@ -593,7 +600,7 @@ def _build_queries(query: str):
 
     return list(dict.fromkeys(queries))  # dedupe while preserving order
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def search_gemrate(query: str):
     queries = _build_queries(query)
     seen_ids = set()
@@ -939,6 +946,43 @@ with st.sidebar:
         st.caption(f"${info['fee']:.2f} — {tier.split('(')[0].strip()}")
     st.caption(f"eBay sell fee: {EBAY_FEE*100:.2f}%")
 
+# ─── Dashboard KPI tiles ──────────────────────────────────────────────────────
+if not is_beta and SUPABASE_URL:
+    _dash_rows = sb_get()
+    _df_d = pd.DataFrame(_dash_rows) if _dash_rows else pd.DataFrame()
+    _total   = len(_df_d)
+    _go      = len(_df_d[_df_d["go_no_go"].str.startswith("✅", na=False)]) if not _df_d.empty else 0
+    _pending = len(_df_d[_df_d["status"] == "Submitted"]) if not _df_d.empty else 0
+    _returned= len(_df_d[_df_d["status"].isin(["Received","Sold"])]) if not _df_d.empty else 0
+    try:
+        _go_mask  = _df_d["go_no_go"].str.startswith("✅", na=False)
+        _sub_cost = pd.to_numeric(_df_d.loc[_go_mask, "psa_fee"], errors="coerce").sum()
+        _est_net  = pd.to_numeric(_df_d.loc[_go_mask, "est_net"], errors="coerce").sum()
+    except Exception:
+        _sub_cost = _est_net = 0
+
+    def _kpi(label, value, sub, color):
+        return (
+            f'<div style="background:#1e2130;border:1px solid #2e3250;border-radius:10px;padding:16px 18px">'
+            f'<div style="font-size:0.68rem;color:#7c8db5;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">{label}</div>'
+            f'<div style="font-size:1.9rem;font-weight:700;color:{color};line-height:1.1">{value}</div>'
+            f'<div style="font-size:0.7rem;color:#556;margin-top:5px">{sub}</div>'
+            f'</div>'
+        )
+
+    st.markdown(
+        f'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;margin-bottom:20px">'
+        + _kpi("Cards in Tracker",    _total,              "in submission tracker",   "#4f8ef7")
+        + _kpi("Flagged: Submit",     _go,                 "pass your ROI threshold", "#22c55e")
+        + _kpi("Est. Submission Cost",f"${_sub_cost:,.0f}","for GO cards",            "#f59e0b")
+        + _kpi("Est. Net Profit",     f"${_est_net:,.0f}", "if all grade PSA 10",     "#22c55e")
+        + _kpi("Pending at PSA",      _pending,            "cards submitted",         "#4f8ef7")
+        + _kpi("Grades Returned",     _returned,           "received back",           "#22c55e")
+        + _kpi("ROI Threshold",       f"{roi_target:.0f}×","minimum to flag submit",  "#f59e0b")
+        + '</div>',
+        unsafe_allow_html=True,
+    )
+
 # ─── Tabs ─────────────────────────────────────────────────────────────────────
 if is_beta:
     st.info("🔓 **Beta Preview** — You have access to Card Research and Inventory Check. Submission Tracker and Downloads unlock with a full membership.", icon="💎")
@@ -953,11 +997,17 @@ with tab1:
     st.markdown("Search any card — owned or not. Get gem rate, graded value comps, and eBay links.")
     st.caption("Tip: include the full set name for best results — e.g. *Steph Curry Topps Chrome Paradox* not just *Steph Curry Paradox*")
 
-    col_q, col_btn = st.columns([5, 1])
+    col_q, col_btn, col_clr = st.columns([5, 1, 1])
     with col_q:
         query = st.text_input("Search", placeholder="e.g.  Curry Topps Chrome Paradox  |  Luka Prizm RC auto  |  Wemby Optic", label_visibility="collapsed")
     with col_btn:
         do_search = st.button("Search", use_container_width=True, type="primary")
+    with col_clr:
+        if st.button("🔄 Clear", use_container_width=True, help="Clear cached results and retry"):
+            st.cache_data.clear()
+            st.session_state.pop("gr_results", None)
+            st.session_state.pop("last_q", None)
+            st.rerun()
 
     # ── Quick search buttons ──────────────────────────────────────────────────
     with st.expander("⚡ Quick Search — Target Card List", expanded=False):
