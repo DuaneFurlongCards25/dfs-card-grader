@@ -146,11 +146,16 @@ def admin_get_codes():
     except Exception:
         return []
 
-def admin_insert_code(code, name):
+def admin_insert_code(code, name, trial_days=None):
+    import datetime as _dt
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
-    data = json.dumps({"code": code, "name": name}).encode()
+    payload = {"code": code, "name": name}
+    if trial_days and trial_days > 0:
+        exp = _dt.datetime.utcnow() + _dt.timedelta(days=trial_days)
+        payload["expires_at"] = exp.strftime("%Y-%m-%dT%H:%M:%SZ")
+    data = json.dumps(payload).encode()
     req = urllib.request.Request(
         f"{SUPABASE_URL}/rest/v1/access_codes",
         data=data,
@@ -223,14 +228,33 @@ if st.query_params.get("admin") == "true":
 
     st.markdown(f"### 👥 Access Codes ({len(codes)} total)")
 
+    import datetime as _dt
+    now_utc = _dt.datetime.utcnow().replace(tzinfo=_dt.timezone.utc)
+
     for row in codes:
-        c1, c2, c3, c4, c5 = st.columns([2, 2, 1, 1, 1])
+        c1, c2, c3, c4, c5, c6 = st.columns([2, 2, 1, 1, 1, 2])
         c1.markdown(f"**{row['name']}**")
         c2.code(row["code"])
         c3.markdown("🟢 Active" if row["active"] else "🔴 Inactive")
         c4.markdown(f"Uses: **{row['usage_count']}**")
         last = (row.get("last_used") or "Never")[:10]
         c5.markdown(f"Last: {last}")
+        # Expiry display
+        exp_raw = row.get("expires_at")
+        if exp_raw:
+            try:
+                exp_dt = _dt.datetime.fromisoformat(exp_raw.replace("Z", "+00:00"))
+                days_left = (exp_dt - now_utc).days
+                if days_left < 0:
+                    c6.markdown("🔴 **Expired**")
+                elif days_left == 0:
+                    c6.markdown("🟡 **Expires today**")
+                else:
+                    c6.markdown(f"⏳ {days_left}d left ({exp_dt.strftime('%b %d')})")
+            except Exception:
+                c6.markdown(f"Expires: {exp_raw[:10]}")
+        else:
+            c6.markdown("♾️ No expiry")
 
         if row["active"]:
             if st.button(f"Revoke", key=f"rev_{row['id']}"):
@@ -245,13 +269,18 @@ if st.query_params.get("admin") == "true":
         st.markdown("---")
 
     st.markdown("### ➕ Create New Access Code")
-    n1, n2, n3 = st.columns([2, 2, 1])
+    n1, n2, n3, n4 = st.columns([2, 2, 1, 1])
     new_name = n1.text_input("Name", placeholder="e.g. John Smith")
+    _default_code = "BETA-" + gen_code()[4:] if True else gen_code()  # start with BETA- suggested
     new_code = n2.text_input("Code (auto-generated, editable)", value=gen_code())
-    if n3.button("Create", type="primary", use_container_width=True):
+    trial_days = n3.number_input("Trial days", min_value=0, max_value=365, value=7,
+                                  help="0 = no expiry (full member). 7 = 7-day beta trial.")
+    if n4.button("Create", type="primary", use_container_width=True):
         if new_name and new_code:
-            if admin_insert_code(new_code.strip().upper(), new_name.strip()):
-                st.success(f"✅ Created code for **{new_name}**: `{new_code.upper()}`")
+            days = int(trial_days) if trial_days > 0 else None
+            if admin_insert_code(new_code.strip().upper(), new_name.strip(), trial_days=days):
+                exp_note = f" · expires in {days} days" if days else " · no expiry"
+                st.success(f"✅ Created code for **{new_name}**: `{new_code.upper()}`{exp_note}")
                 st.rerun()
             else:
                 st.error("Failed — code may already exist.")
@@ -262,14 +291,15 @@ if st.query_params.get("admin") == "true":
 
 # ─── Access code gate ─────────────────────────────────────────────────────────
 def validate_code(code: str):
-    """Returns (name, valid) by checking Supabase access_codes table."""
+    """Returns (name, code_id, error_key) — error_key is None on success, 'expired' or 'invalid' otherwise."""
     if not SUPABASE_URL:
-        return None, False
+        return None, False, "invalid"
+    import datetime as _dt
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     url = (f"{SUPABASE_URL}/rest/v1/access_codes"
-           f"?code=eq.{urllib.parse.quote(code.strip().upper())}&active=eq.true&select=id,name,usage_count")
+           f"?code=eq.{urllib.parse.quote(code.strip().upper())}&active=eq.true&select=id,name,usage_count,expires_at")
     req = urllib.request.Request(url, headers={
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -278,10 +308,20 @@ def validate_code(code: str):
         with urllib.request.urlopen(req, context=ctx, timeout=10) as r:
             rows = json.loads(r.read().decode())
         if rows:
-            return rows[0]["name"], rows[0]["id"]
-        return None, False
+            row = rows[0]
+            # Check expiry if set
+            expires_at = row.get("expires_at")
+            if expires_at:
+                try:
+                    exp = _dt.datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+                    if _dt.datetime.now(_dt.timezone.utc) > exp:
+                        return None, False, "expired"
+                except Exception:
+                    pass
+            return row["name"], row["id"], None
+        return None, False, "invalid"
     except Exception:
-        return None, False
+        return None, False, "invalid"
 
 def record_code_use(code_id: int):
     ctx = ssl.create_default_context()
@@ -346,15 +386,30 @@ if not st.session_state.get("access_granted"):
                 st.session_state.access_name = "Duane"
                 st.session_state.access_code_id = 1
                 st.session_state.agreed = True
+                st.session_state.is_beta = False
                 st.rerun()
             else:
-                name, code_id = validate_code(entered_code)
+                name, code_id, err = validate_code(entered_code)
                 if name and code_id:
                     st.session_state.access_granted = True
                     st.session_state.access_name = name
                     st.session_state.access_code_id = code_id
+                    # BETA- prefix = limited preview access
+                    st.session_state.is_beta = clean_code.startswith("BETA-")
+                    # Store expiry label for sidebar display
+                    if st.session_state.get("_login_expires_at"):
+                        import datetime as _dt2
+                        try:
+                            exp2 = _dt2.datetime.fromisoformat(
+                                st.session_state["_login_expires_at"].replace("Z", "+00:00"))
+                            dl = (exp2 - _dt2.datetime.now(_dt2.timezone.utc)).days
+                            st.session_state.trial_expires_label = f"Trial ends in {dl} day{'s' if dl != 1 else ''}."
+                        except Exception:
+                            pass
                     record_code_use(code_id)
                     st.rerun()
+                elif err == "expired":
+                    st.error("⏰ Your trial has ended. Contact DFS Cards to upgrade to full access.")
                 else:
                     st.error("Invalid or inactive access code.")
     st.stop()
@@ -779,12 +834,19 @@ def gem_signal(g):
     return "🟢"
 
 # ─── Sidebar ──────────────────────────────────────────────────────────────────
+is_beta = st.session_state.get("is_beta", False)
+
 with st.sidebar:
     st.markdown("## 💎 DFS Card Grader")
     st.caption(f"Gem rate research + grading ROI calculator · v{APP_VERSION}")
     access_name = st.session_state.get("access_name", "")
     if access_name:
-        st.markdown(f"👤 **{access_name}**")
+        if is_beta:
+            st.markdown(f"👤 **{access_name}** &nbsp; `BETA`")
+            _exp = st.session_state.get("trial_expires_label", "")
+            st.info(f"🔓 Beta Preview — Card Research & Inventory Check unlocked.{' ' + _exp if _exp else ''}", icon="ℹ️")
+        else:
+            st.markdown(f"👤 **{access_name}**")
     st.markdown("---")
     st.markdown("### ⚙️ Settings")
     roi_target = st.number_input("ROI target (×)", min_value=1.0, max_value=20.0, value=4.0, step=0.5)
@@ -798,6 +860,9 @@ with st.sidebar:
     st.caption(f"eBay sell fee: {EBAY_FEE*100:.2f}%")
 
 # ─── Tabs ─────────────────────────────────────────────────────────────────────
+if is_beta:
+    st.info("🔓 **Beta Preview** — You have access to Card Research and Inventory Check. Submission Tracker and Downloads unlock with a full membership.", icon="💎")
+
 tab1, tab2, tab3, tab4 = st.tabs(["🔍 Card Research", "📦 Inventory Check", "📬 Submission Tracker", "📥 Downloads"])
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1219,8 +1284,9 @@ with tab2:
 # ══════════════════════════════════════════════════════════════════════════════
 with tab3:
     st.markdown("## 📬 Submission Tracker")
-
-    if not SUPABASE_URL:
+    if is_beta:
+        st.warning("🔒 Submission Tracker is available with full membership. Your beta preview includes Card Research and Inventory Check.")
+    elif not SUPABASE_URL:
         st.warning("Supabase not configured — tracker unavailable in this environment")
     else:
         rows = sb_get()
@@ -1340,22 +1406,25 @@ with tab3:
 # ══════════════════════════════════════════════════════════════════════════════
 with tab4:
     st.markdown("## 📥 Downloads")
-    st.markdown("Tools to run your grading operation — built to work alongside the app.")
-    st.markdown("---")
+    if is_beta:
+        st.warning("🔒 Downloads are available with full membership. Your beta preview includes Card Research and Inventory Check.")
+    else:
+        st.markdown("Tools to run your grading operation — built to work alongside the app.")
+        st.markdown("---")
 
-    # ── Operations Kit ──
-    kit_path = Path(__file__).parent / "DFS_Card_Grader_Kit.xlsx"
-    current_user = st.session_state.get("access_name", "")
-    kit_unlocked = current_user == "Robert Bass"
+        # ── Operations Kit ──
+        kit_path = Path(__file__).parent / "DFS_Card_Grader_Kit.xlsx"
+        current_user = st.session_state.get("access_name", "")
+        kit_unlocked = current_user == "Robert Bass"
 
-    if kit_path.exists():
-        with open(kit_path, "rb") as f:
-            kit_bytes = f.read()
+        if kit_path.exists():
+            with open(kit_path, "rb") as f:
+                kit_bytes = f.read()
 
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            st.markdown("### 📊 DFS Card Grader — Operations Kit")
-            st.markdown("""
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                st.markdown("### 📊 DFS Card Grader — Operations Kit")
+                st.markdown("""
 A comprehensive Excel workbook built to run alongside this app. Includes:
 
 - **PSA Fee Schedule** — all 7 tiers with eBay fee calculations
@@ -1370,46 +1439,45 @@ A comprehensive Excel workbook built to run alongside this app. Includes:
 - **Path to $40k** — monthly revenue projection model
 - **+ 14 more sheets** covering capital velocity, lot evaluation, HeyStack priority scoring, and more
 """)
-        with c2:
-            st.markdown("<div style='padding-top:48px'></div>", unsafe_allow_html=True)
-            if kit_unlocked:
-                st.download_button(
-                    label="⬇️ Download Operations Kit",
-                    data=kit_bytes,
-                    file_name="DFS_Card_Grader_Operations_Kit.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                    type="primary",
-                )
-                st.caption("Excel (.xlsx) · Works with Excel, Google Sheets, and Numbers")
-            else:
-                st.button("🔒 Operations Kit", use_container_width=True, disabled=True)
-                st.caption("Coming soon — available as a premium add-on")
+            with c2:
+                st.markdown("<div style='padding-top:48px'></div>", unsafe_allow_html=True)
+                if kit_unlocked:
+                    st.download_button(
+                        label="⬇️ Download Operations Kit",
+                        data=kit_bytes,
+                        file_name="DFS_Card_Grader_Operations_Kit.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        type="primary",
+                    )
+                    st.caption("Excel (.xlsx) · Works with Excel, Google Sheets, and Numbers")
+                else:
+                    st.button("🔒 Operations Kit", use_container_width=True, disabled=True)
+                    st.caption("Coming soon — available as a premium add-on")
 
-    st.markdown("---")
+        st.markdown("---")
 
-    # ── Inventory Template ──
-    i1, i2 = st.columns([2, 1])
-    with i1:
-        st.markdown("### 📋 Inventory Template")
-        st.markdown("""
+        # ── Inventory Template ──
+        i1, i2 = st.columns([2, 1])
+        with i1:
+            st.markdown("### 📋 Inventory Template")
+            st.markdown("""
 A simple CSV template to get started tracking your inventory.
 Upload it in the **Inventory Check** tab to search GemRate and get GO/NO-GO decisions on your cards.
 
 - 11 columns: Card Description, Player, Year, Set, Parallel, Card Number, Category, Cost Basis, Listed Price, Source, Notes
 - 3 example rows included to show the format
 """)
-    with i2:
-        st.markdown("<div style='padding-top:48px'></div>", unsafe_allow_html=True)
-
-        st.download_button(
-            label="⬇️ Download Template",
-            data=make_template_csv(),
-            file_name="card_inventory_template.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
-        st.caption("CSV · Opens in Excel, Google Sheets, or Numbers")
+        with i2:
+            st.markdown("<div style='padding-top:48px'></div>", unsafe_allow_html=True)
+            st.download_button(
+                label="⬇️ Download Template",
+                data=make_template_csv(),
+                file_name="card_inventory_template.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+            st.caption("CSV · Opens in Excel, Google Sheets, or Numbers")
 
 # ─── Footer ───────────────────────────────────────────────────────────────────
 st.markdown("---")
