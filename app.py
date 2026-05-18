@@ -782,6 +782,48 @@ def trend_badge(direction, pct):
         return f"📉 Trending Down {pct:.0f}%"
     return f"➡️ Flat ({pct:+.0f}%)"
 
+# ─── Quick search target list ─────────────────────────────────────────────────
+QUICK_SEARCHES = [
+    ("🏀", "Cooper Flagg 2025 Topps Chrome RC Mavericks"),
+    ("🏀", "Steph Curry 2025 Topps Chrome Paradox Refractor"),
+    ("🏀", "Caitlin Clark 2024 Prizm WNBA"),
+    ("🏀", "Luka Doncic 2018 Prizm Silver RC"),
+    ("🏀", "Zion Williamson 2019 Prizm RC"),
+    ("🏈", "Cam Ward 2025 Prizm Draft Picks RC"),
+    ("🏈", "Ashton Jeanty 2025 Prizm Draft Picks RC"),
+    ("🏈", "Travis Hunter 2025 Prizm Draft Picks RC"),
+    ("🏈", "Drake Maye 2025 Prizm Draft Picks RC"),
+    ("🏈", "Shedeur Sanders 2025 Prizm Draft Picks RC"),
+    ("⚾", "Paul Skenes 2025 Topps Chrome RC"),
+    ("⚾", "Aaron Judge 2026 Topps"),
+    ("⚾", "Elly De La Cruz 2024 Bowman Chrome RC"),
+]
+
+# ─── Gem rate visual helpers ──────────────────────────────────────────────────
+def gem_color_hex(g):
+    """Return a hex color for a gem rate percentage."""
+    if g is None:
+        return "#94a3b8"
+    if g >= 60:
+        return "#22c55e"   # green
+    if g >= 35:
+        return "#f59e0b"   # yellow
+    return "#ef4444"       # red
+
+def gem_bar_html(g):
+    """Return an HTML progress bar for embedding in st.markdown."""
+    if g is None:
+        return "—"
+    color = gem_color_hex(g)
+    pct = min(g, 100)
+    return (
+        f'<div style="display:flex;align-items:center;gap:8px">'
+        f'<span style="color:{color};font-weight:700;font-size:15px;min-width:42px">{g:.1f}%</span>'
+        f'<div style="flex:1;background:#22263a;border-radius:4px;height:8px;min-width:80px">'
+        f'<div style="width:{pct}%;height:8px;border-radius:4px;background:{color}"></div>'
+        f'</div></div>'
+    )
+
 # ─── URL builders ─────────────────────────────────────────────────────────────
 def gemrate_url(gid):
     return f"https://www.gemrate.com/card/{gid}"
@@ -790,13 +832,36 @@ def ebay_raw_url(desc):
     q = urllib.parse.quote_plus(desc + " raw")
     return f"https://www.ebay.com/sch/i.html?_nkw={q}&LH_Sold=1&LH_Complete=1&LH_BIN=1&_sop=13"
 
+def ebay_raw_sold_all_url(desc):
+    """Raw sold comps — all sale types (BIN + auction + offers)."""
+    q = urllib.parse.quote_plus(desc)
+    return f"https://www.ebay.com/sch/i.html?_nkw={q}&LH_Sold=1&LH_Complete=1&_sop=13&_sacat=212"
+
+def ebay_buy_bin_url(desc):
+    """Buy raw — BIN listings, cheapest first."""
+    q = urllib.parse.quote_plus(desc)
+    return f"https://www.ebay.com/sch/i.html?_nkw={q}&LH_BIN=1&_sop=15&_sacat=212"
+
+def ebay_buy_auction_url(desc):
+    """Buy raw — auctions ending soonest."""
+    q = urllib.parse.quote_plus(desc)
+    return f"https://www.ebay.com/sch/i.html?_nkw={q}&LH_Auction=1&_sop=1&_sacat=212"
+
 def ebay_graded_sold_url(desc):
     q = urllib.parse.quote_plus(desc + " PSA 10")
     return f"https://www.ebay.com/sch/i.html?_nkw={q}&LH_Sold=1&LH_Complete=1&LH_BIN=1&_sop=13"
 
+def ebay_psa9_sold_url(desc):
+    q = urllib.parse.quote_plus(desc + " PSA 9")
+    return f"https://www.ebay.com/sch/i.html?_nkw={q}&LH_Sold=1&LH_Complete=1&_sop=13&_sacat=212"
+
 def ebay_graded_buy_url(desc):
     q = urllib.parse.quote_plus(desc + " PSA 10")
     return f"https://www.ebay.com/sch/i.html?_nkw={q}&LH_BIN=1&_sop=15"
+
+def psa_pop_url(desc):
+    q = urllib.parse.quote_plus(desc)
+    return f"https://www.psacertify.com/s/search?q={q}"
 
 # ─── ROI logic ────────────────────────────────────────────────────────────────
 def target_price(raw_cost, psa_tier, roi=4.0):
@@ -879,6 +944,27 @@ with tab1:
     with col_btn:
         do_search = st.button("Search", use_container_width=True, type="primary")
 
+    # ── Quick search buttons ──────────────────────────────────────────────────
+    with st.expander("⚡ Quick Search — Target Card List", expanded=False):
+        st.caption("One-click searches for your buy targets. Click any card to auto-search.")
+        sports = ["🏀", "🏈", "⚾"]
+        sport_names = {"🏀": "Basketball", "🏈": "Football", "⚾": "Baseball"}
+        for sport_emoji in sports:
+            sport_cards = [(e, q) for e, q in QUICK_SEARCHES if e == sport_emoji]
+            if sport_cards:
+                st.markdown(f"**{sport_emoji} {sport_names[sport_emoji]}**")
+                cols = st.columns(min(len(sport_cards), 4))
+                for idx, (_, qs) in enumerate(sport_cards):
+                    short = qs[:35] + ("…" if len(qs) > 35 else "")
+                    if cols[idx % 4].button(short, key=f"qs_{qs}", use_container_width=True):
+                        st.session_state.quick_search_query = qs
+                        st.rerun()
+
+    # Pick up quick-search selection
+    if st.session_state.get("quick_search_query") and not query:
+        query = st.session_state.pop("quick_search_query")
+        do_search = True
+
     if query and (do_search or st.session_state.get("last_q") != query):
         st.session_state.last_q = query
         with st.spinner("Searching GemRate..."):
@@ -920,7 +1006,9 @@ with tab1:
         st.text_input("📋 Card name (tap → select all → copy)", value=selected, key="card_name_copy")
 
         m1, m2, m3 = st.columns(3)
-        m1.metric("Gem Rate", fmt_gem(gem))
+        with m1:
+            st.markdown("**Gem Rate (PSA 10)**")
+            st.markdown(gem_bar_html(gem), unsafe_allow_html=True)
         m2.metric("Total Pop", f"{sel.get('total_population', 0):,}")
         m3.metric("Gem Copies", f"{sel.get('gems', 0):,}")
         st.markdown(f"[📊 Full pop report on GemRate]({gemrate_url(sel.get('gemrate_id',''))})")
@@ -1060,13 +1148,42 @@ Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI: {roi:.0f}%
             else:
                 st.info("Enter a Gem 10 avg price above to get a GO/NO-GO decision")
 
-        st.markdown("#### eBay Links")
-        st.caption("Fixed-price completed sales only (Best Offer excluded) — use sold comps to set your raw buy price and PSA 10 sell price above.")
-        l1, l2, l3 = st.columns(3)
-        l1.markdown(f"[📦 Raw Sold Comps]({ebay_raw_url(desc)})")
-        l2.markdown(f"[💎 PSA 10 Sold Comps]({ebay_graded_sold_url(desc)})")
-        _ebay_buy_raw = f"https://www.ebay.com/sch/i.html?_nkw={urllib.parse.quote_plus(desc)}&LH_BIN=1&_sop=15&_sacat=212"
-        l3.markdown(f"[🛒 Buy Raw Now]({_ebay_buy_raw})")
+        st.markdown("#### 🔍 Card Finder Links")
+        st.caption("All the links you need — buy raw, check sold comps, verify gem rate, or look up the PSA pop report.")
+
+        _link_style = (
+            "display:inline-flex;align-items:center;gap:6px;padding:8px 14px;"
+            "border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;"
+            "border:1px solid;margin:3px;"
+        )
+        st.markdown(
+            f"""
+            <div style="display:flex;flex-wrap:wrap;gap:2px;margin-bottom:8px">
+              <a href="{ebay_buy_bin_url(desc)}" target="_blank"
+                 style="{_link_style}color:#e5a310;border-color:rgba(229,163,16,.4);background:rgba(229,163,16,.08)">
+                 🛒 Buy Raw (BIN)</a>
+              <a href="{ebay_buy_auction_url(desc)}" target="_blank"
+                 style="{_link_style}color:#e5a310;border-color:rgba(229,163,16,.4);background:rgba(229,163,16,.08)">
+                 ⚡ Buy Raw (Auction)</a>
+              <a href="{ebay_raw_sold_all_url(desc)}" target="_blank"
+                 style="{_link_style}color:#94a3b8;border-color:rgba(148,163,184,.3);background:rgba(148,163,184,.06)">
+                 📊 Raw Sold Comps</a>
+              <a href="{ebay_graded_sold_url(desc)}" target="_blank"
+                 style="{_link_style}color:#22c55e;border-color:rgba(34,197,94,.4);background:rgba(34,197,94,.08)">
+                 🔴 PSA 10 Sold Comps</a>
+              <a href="{ebay_psa9_sold_url(desc)}" target="_blank"
+                 style="{_link_style}color:#f59e0b;border-color:rgba(245,158,11,.4);background:rgba(245,158,11,.08)">
+                 🟡 PSA 9 Sold Comps</a>
+              <a href="{gemrate_url(sel.get('gemrate_id',''))}" target="_blank"
+                 style="{_link_style}color:#4f8ef7;border-color:rgba(79,142,247,.4);background:rgba(79,142,247,.08)">
+                 💎 GemRate.com</a>
+              <a href="{psa_pop_url(desc)}" target="_blank"
+                 style="{_link_style}color:#7c5cfc;border-color:rgba(124,92,252,.4);background:rgba(124,92,252,.08)">
+                 🏆 PSA Pop Report</a>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         st.markdown("---")
         if st.button("➕ Add to Submission Tracker", type="secondary"):
@@ -1233,7 +1350,9 @@ with tab2:
                 desc_i = f"{inv_sel.get('year','')} {inv_sel.get('set_name','')} {inv_sel.get('name','')} {inv_sel.get('parallel') or ''}".strip()
 
                 g1, g2, g3 = st.columns(3)
-                g1.metric("Gem Rate", fmt_gem(gem_i))
+                with g1:
+                    st.markdown("**Gem Rate (PSA 10)**")
+                    st.markdown(gem_bar_html(gem_i), unsafe_allow_html=True)
                 g2.metric("Total Pop", f"{inv_sel.get('total_population', 0):,}")
                 g3.metric("Gem Copies", f"{inv_sel.get('gems', 0):,}")
                 st.markdown(f"[📊 GemRate pop report]({gemrate_url(inv_sel.get('gemrate_id',''))})")
