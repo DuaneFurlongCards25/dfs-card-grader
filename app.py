@@ -960,8 +960,8 @@ with tab1:
                         st.session_state.quick_search_query = qs
                         st.rerun()
 
-    # Pick up quick-search selection
-    if st.session_state.get("quick_search_query") and not query:
+    # Pick up quick-search selection — always overrides whatever is in the text box
+    if st.session_state.get("quick_search_query"):
         query = st.session_state.pop("quick_search_query")
         do_search = True
 
