@@ -772,6 +772,17 @@ def ch_price_history(card_id, grade: str, days: int = 90):
         "card_id": card_id, "grade": grade, "days": days,
     }) or {}
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def ch_card_image(card_id: str) -> str:
+    """Fetch the card image URL from CardHedger card-details."""
+    result = _ch_post("/v1/cards/card-details", {"card_id": card_id})
+    if not result:
+        return ""
+    cards = result.get("cards") or []
+    if cards and isinstance(cards, list):
+        return cards[0].get("image", "") or ""
+    return result.get("image", "") or ""
+
 def _extract_price(p):
     for k in ("price", "sale_price", "sold_price", "value", "amount"):
         try:
@@ -1086,13 +1097,35 @@ with tab1:
         st.markdown("---")
         st.text_input("📋 Card name (tap → select all → copy)", value=selected, key="card_name_copy")
 
-        m1, m2, m3 = st.columns(3)
-        with m1:
-            st.markdown("**Gem Rate (PSA 10)**")
-            st.markdown(gem_bar_html(gem), unsafe_allow_html=True)
-        m2.metric("Total Pop", f"{sel.get('total_population', 0):,}")
-        m3.metric("Gem Copies", f"{sel.get('gems', 0):,}")
-        st.markdown(f"[📊 Full pop report on GemRate]({gemrate_url(sel.get('gemrate_id',''))})")
+        # ── Card image via CardHedger ────────────────────────────────────────
+        gr_image_url = ""
+        if CARDHEDGER_KEY:
+            gr_ch_match = ch_card_match(desc)
+            if gr_ch_match:
+                gr_image_url = gr_ch_match.get("image", "") or ""
+                if not gr_image_url and gr_ch_match.get("card_id"):
+                    gr_image_url = ch_card_image(gr_ch_match["card_id"])
+
+        if gr_image_url:
+            img_c, stats_c = st.columns([1, 3])
+            with img_c:
+                st.image(gr_image_url, use_container_width=True)
+            with stats_c:
+                m1, m2, m3 = st.columns(3)
+                with m1:
+                    st.markdown("**Gem Rate (PSA 10)**")
+                    st.markdown(gem_bar_html(gem), unsafe_allow_html=True)
+                m2.metric("Total Pop", f"{sel.get('total_population', 0):,}")
+                m3.metric("Gem Copies", f"{sel.get('gems', 0):,}")
+                st.markdown(f"[📊 Full pop report on GemRate]({gemrate_url(sel.get('gemrate_id',''))})")
+        else:
+            m1, m2, m3 = st.columns(3)
+            with m1:
+                st.markdown("**Gem Rate (PSA 10)**")
+                st.markdown(gem_bar_html(gem), unsafe_allow_html=True)
+            m2.metric("Total Pop", f"{sel.get('total_population', 0):,}")
+            m3.metric("Gem Copies", f"{sel.get('gems', 0):,}")
+            st.markdown(f"[📊 Full pop report on GemRate]({gemrate_url(sel.get('gemrate_id',''))})")
 
         st.markdown("#### ROI Analysis")
 
@@ -1327,11 +1360,29 @@ Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI: {roi:.0f}%
             icon="ℹ️",
         )
 
-        st.markdown(f"### {desc}")
-        ci1, ci2, ci3 = st.columns(3)
-        ci1.markdown(f"**Set:** {set_name}")
-        ci2.markdown(f"**Variant:** {variant}")
-        ci3.markdown(f"**AI Match confidence:** {confidence * 100:.0f}%")
+        # ── Card image ────────────────────────────────────────────────────────
+        image_url = ch_match_data.get("image", "") or ""
+        if not image_url and ch_match_data.get("card_id"):
+            with st.spinner("Loading card image..."):
+                image_url = ch_card_image(ch_match_data["card_id"])
+
+        img_col, info_col = st.columns([1, 3])
+        with img_col:
+            if image_url:
+                st.image(image_url, use_container_width=True)
+            else:
+                st.markdown(
+                    '<div style="background:#1e2130;border:1px solid #2e3250;border-radius:10px;'
+                    'height:180px;display:flex;align-items:center;justify-content:center;'
+                    'color:#4a5568;font-size:2rem;">🃏</div>',
+                    unsafe_allow_html=True,
+                )
+        with info_col:
+            st.markdown(f"### {desc}")
+            ci1, ci2, ci3 = st.columns(3)
+            ci1.markdown(f"**Set:** {set_name}")
+            ci2.markdown(f"**Variant:** {variant}")
+            ci3.markdown(f"**AI Match confidence:** {confidence * 100:.0f}%")
 
         st.markdown("#### 💰 Market Prices (CardHedger)")
         if prices_list:
