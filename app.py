@@ -18,7 +18,7 @@ RELEASE_NOTES = {
         "emoji": "📦",
         "title": "Shipping costs + true total ROI",
         "items": [
-            ("📦", "Shipping costs added — set your per-card cost to PSA and return in Settings. Now baked into every ROI calculation."),
+            ("📦", "Shipping costs added — enter your true per-card cost (including insurance) in Settings. Baked into every ROI and net profit calculation."),
             ("⏳", "Time cost of capital — see the hidden fee of slow grading tiers. A $500 card at Value tier for 154 days costs you ~$27 you can't deploy elsewhere."),
             ("🔄", "Auto-fallback to CardHedger — when GemRate is offline, live PSA 10 / Raw prices load automatically from CardHedger."),
             ("💎", "Card images now show in search results."),
@@ -997,16 +997,19 @@ with st.sidebar:
     _sc1, _sc2 = st.columns(2)
     with _sc1:
         ship_to = st.number_input(
-            "To PSA ($/card)", min_value=0.0, value=3.00, step=0.50,
-            help="e.g. $30 priority box ÷ 10 cards = $3/card"
+            "To PSA ($/card)", min_value=0.0, value=0.0, step=0.50,
+            help="Your actual cost to ship to PSA including insurance, divided by number of cards in the submission"
         )
     with _sc2:
         ship_return = st.number_input(
-            "Return ($/card)", min_value=0.0, value=2.50, step=0.50,
-            help="PSA return shipping divided by cards in order"
+            "Return ($/card)", min_value=0.0, value=0.0, step=0.50,
+            help="PSA return shipping cost including insurance, divided by cards in order"
         )
     ship_cost = round(ship_to + ship_return, 2)
-    st.caption(f"Total shipping per card: **${ship_cost:.2f}**")
+    if ship_cost > 0:
+        st.caption(f"Total shipping per card: **${ship_cost:.2f}**")
+    else:
+        st.caption("Enter your actual shipping + insurance costs above.")
 
     st.markdown("---")
     st.markdown("**⏳ Time Cost of Capital**")
