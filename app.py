@@ -1319,9 +1319,8 @@ with tab1:
             )
             st.caption("What you paid (or plan to pay) for the ungraded card. Pre-filled from live comps — update to your actual price.")
         with ra2:
-            tier = st.selectbox("Grading tier", list(PSA_FEES.keys()),
-                                index=list(PSA_FEES.keys()).index(default_tier), key="t1_tier")
-            st.caption("PSA service level you'll submit under. Sets the grading fee used in the ROI calculation.")
+            tier = default_tier
+            st.caption(f"**Grading tier:** {tier} (${PSA_FEES[tier]:.2f}) — change in sidebar ⚙️")
         with ra3:
             graded_price = st.number_input(
                 "Expected PSA 10 sell price ($)", min_value=0.0,
@@ -1525,9 +1524,8 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
             )
             st.caption("Pre-filled from CardHedger live raw avg — update to your actual price.")
         with ra2:
-            tier = st.selectbox("Grading tier", list(PSA_FEES.keys()),
-                                index=list(PSA_FEES.keys()).index(default_tier), key="t1_tier")
-            st.caption("PSA service level you'll submit under.")
+            tier = default_tier
+            st.caption(f"**Grading tier:** {tier} (${PSA_FEES[tier]:.2f}) — change in sidebar ⚙️")
         with ra3:
             graded_price = st.number_input(
                 "Expected PSA 10 sell price ($)", min_value=0.0,
