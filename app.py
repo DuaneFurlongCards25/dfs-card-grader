@@ -2149,7 +2149,7 @@ with tab5:
             intake_submitted = st.form_submit_button("Log Card", type="primary", use_container_width=True)
             if intake_submitted:
                 if not i_player:
-                    st.error("Player name is required.")
+                    st.session_state["intake_msg"] = ("error", "Player name is required.")
                 else:
                     parts = [p for p in [i_year, i_set, i_player, i_parallel] if p]
                     auto_desc = " ".join(parts)
@@ -2170,10 +2170,17 @@ with tab5:
                         "status":        "Received",
                     })
                     if _err:
-                        st.error(f"Save failed: {_err}")
+                        st.session_state["intake_msg"] = ("error", f"Save failed: {_err}")
                     else:
-                        st.success(f"✓ Logged: {auto_desc}")
-                    st.rerun()
+                        st.session_state["intake_msg"] = ("success", f"✓ Logged: {auto_desc}")
+
+        # ── Feedback from last submit ─────────────────────────────────────────
+        if "intake_msg" in st.session_state:
+            _msg_type, _msg_text = st.session_state.pop("intake_msg")
+            if _msg_type == "success":
+                st.success(_msg_text)
+            else:
+                st.error(_msg_text)
 
         # ── Received cards log ────────────────────────────────────────────────
         st.markdown("---")
