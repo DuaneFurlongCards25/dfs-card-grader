@@ -2272,6 +2272,12 @@ with tab5:
 
             st.markdown("")
 
+            # Coerce types so data_editor doesn't crash on Supabase string returns
+            if "date_received" in df_i.columns:
+                df_i["date_received"] = pd.to_datetime(df_i["date_received"], errors="coerce").dt.date
+            if "cost" in df_i.columns:
+                df_i["cost"] = pd.to_numeric(df_i["cost"], errors="coerce")
+
             _show_cols = [c for c in [
                 "id", "date_received", "card_description", "player", "year",
                 "set_name", "card_number", "parallel", "cost",
