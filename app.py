@@ -1113,6 +1113,8 @@ _WN_KEY = f"wn_seen_{APP_VERSION}"
 
 @st.dialog("🎉 What's New in DFS Card Grader", width="large")
 def _show_whats_new():
+    # Mark as seen immediately — so closing via X doesn't re-trigger on next rerun
+    st.session_state[_WN_KEY] = True
     notes = RELEASE_NOTES.get(APP_VERSION, {})
     st.markdown(
         f'<div style="display:inline-block;background:#1e2130;border:1px solid #2e3250;'
