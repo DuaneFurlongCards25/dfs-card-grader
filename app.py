@@ -570,9 +570,9 @@ def sb_intake_get():
         return []
 
 def sb_intake_insert(row: dict):
-    """Insert a new shipment intake record."""
+    """Insert a new shipment intake record. Returns (result, error_str)."""
     if not SUPABASE_URL:
-        return
+        return None, "Supabase not configured"
     data = json.dumps(row).encode()
     req = urllib.request.Request(
         f"{SUPABASE_URL}/rest/v1/shipment_intake",
@@ -582,9 +582,12 @@ def sb_intake_insert(row: dict):
     )
     try:
         with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
-            return json.loads(r.read().decode())
-    except Exception:
-        pass
+            return json.loads(r.read().decode()), None
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")
+        return None, f"HTTP {e.code}: {body}"
+    except Exception as e:
+        return None, str(e)
 
 def sb_intake_update(row_id: int, updates: dict):
     """Update a shipment intake record by ID."""
@@ -2152,7 +2155,7 @@ with tab5:
                     auto_desc = " ".join(parts)
                     if i_card_num:
                         auto_desc += f" #{i_card_num}"
-                    sb_intake_insert({
+                    _res, _err = sb_intake_insert({
                         "date_received": i_date.isoformat(),
                         "player":        i_player.strip(),
                         "year":          i_year.strip(),
@@ -2166,7 +2169,10 @@ with tab5:
                         "notes":         i_notes.strip(),
                         "status":        "Received",
                     })
-                    st.success(f"✓ Logged: {auto_desc}")
+                    if _err:
+                        st.error(f"Save failed: {_err}")
+                    else:
+                        st.success(f"✓ Logged: {auto_desc}")
                     st.rerun()
 
         # ── Received cards log ────────────────────────────────────────────────
