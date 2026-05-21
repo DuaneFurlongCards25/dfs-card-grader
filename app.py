@@ -1779,32 +1779,22 @@ def load_inventory(uploaded_file):
 with tab2:
     st.markdown("## 📦 Inventory Check")
 
-    # Two-column header: description + template download
     _is_owner = st.session_state.get("access_name", "") == "Duane"
     _wb_label = "DFS Operations Workbook" if _is_owner else "your Operations Workbook"
 
-    h1, h2 = st.columns([3, 1])
-    with h1:
-        st.markdown(f"Upload your inventory to find grading candidates. Use the template below or upload {_wb_label} (.xlsx) directly.")
-    with h2:
-        st.download_button(
-            label="⬇️ Download Template",
-            data=make_template_csv(),
-            file_name="card_inventory_template.csv",
-            mime="text/csv",
-            help="Fill this out and upload it below",
-            use_container_width=True,
-        )
+    st.markdown(
+        f"Analyze cards from your intake log for grading potential. "
+        f"Or upload a file directly here — use the **🚚 Shipment Intake** tab to bulk-import a shipment."
+    )
 
     st.markdown("""
 **How it works:**
-1. Download the template → fill in your cards → save as CSV, or upload your Operations Workbook (.xlsx) directly
-2. Upload it below → select a card → search GemRate → get GO/NO-GO
-3. Add grading candidates directly to the Submission Tracker
+1. Upload a CSV or Operations Workbook (.xlsx) → select a card → search GemRate → get GO/NO-GO
+2. Add grading candidates directly to the Submission Tracker
 """)
 
     uploaded = st.file_uploader(
-        "Upload inventory (CSV template or Operations Workbook .xlsx)",
+        f"Upload inventory (CSV template or {_wb_label} .xlsx)",
         type=["csv", "xlsx"],
         label_visibility="visible",
     )
@@ -2173,6 +2163,76 @@ with tab5:
                         st.session_state["intake_msg"] = ("error", f"Save failed: {_err}")
                     else:
                         st.session_state["intake_msg"] = ("success", f"✓ Logged: {auto_desc}")
+
+        # ── Bulk Upload from Spreadsheet ──────────────────────────────────────
+        with st.expander("📂 Bulk Upload from Spreadsheet", expanded=False):
+            st.markdown(
+                "Upload your inventory CSV or Operations Workbook (.xlsx) to log multiple cards at once. "
+                "Each row becomes a card in the Received Cards log below."
+            )
+            bu1, bu2 = st.columns([3, 1])
+            with bu2:
+                st.download_button(
+                    "⬇️ Download Template",
+                    data=make_template_csv(),
+                    file_name="card_inventory_template.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                    help="Fill this out and upload it here",
+                )
+            with bu1:
+                bulk_file = st.file_uploader(
+                    "Upload CSV template or Operations Workbook (.xlsx)",
+                    type=["csv", "xlsx"],
+                    key="intake_bulk_upload",
+                )
+
+            if bulk_file:
+                bulk_df, bulk_source = load_inventory(bulk_file)
+                if bulk_df is None:
+                    st.error(f"Could not read file: {bulk_source}")
+                else:
+                    st.success(f"Found **{len(bulk_df)} cards** — preview below. Click Import to save them all.")
+                    preview_cols = [c for c in ["Card Description", "Player", "Year", "Set",
+                                                "Parallel", "Card Number", "Cost Basis ($)", "Source", "Notes"]
+                                    if c in bulk_df.columns]
+                    st.dataframe(bulk_df[preview_cols].head(20), use_container_width=True, hide_index=True)
+
+                    if st.button(f"⬆️ Import {len(bulk_df)} cards into Intake Log", type="primary", key="bulk_import_btn"):
+                        saved, failed = 0, 0
+                        for _, brow in bulk_df.iterrows():
+                            def _str(col): return str(brow.get(col, "") or "").strip()
+                            def _flt(col):
+                                try: return float(brow.get(col, 0) or 0) or None
+                                except: return None
+                            parts = [p for p in [_str("Year"), _str("Set"), _str("Player"), _str("Parallel")] if p]
+                            desc  = _str("Card Description") or " ".join(parts)
+                            card_num = _str("Card Number")
+                            if card_num and card_num not in desc:
+                                desc += f" #{card_num}"
+                            _, err = sb_intake_insert({
+                                "date_received":   date.today().isoformat(),
+                                "player":          _str("Player"),
+                                "year":            _str("Year"),
+                                "set_name":        _str("Set"),
+                                "parallel":        _str("Parallel"),
+                                "card_number":     card_num,
+                                "card_description": desc,
+                                "cost":            _flt("Cost Basis ($)"),
+                                "source":          _str("Source"),
+                                "platform":        "Other",
+                                "notes":           _str("Notes"),
+                                "status":          "Received",
+                            })
+                            if err:
+                                failed += 1
+                            else:
+                                saved += 1
+                        if failed:
+                            st.error(f"Imported {saved} cards — {failed} failed. Error: {err}")
+                        else:
+                            st.success(f"✓ Imported {saved} cards into your Intake Log!")
+                        st.rerun()
 
         # ── Feedback from last submit ─────────────────────────────────────────
         if "intake_msg" in st.session_state:
