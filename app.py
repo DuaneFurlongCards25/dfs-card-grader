@@ -592,11 +592,36 @@ def sb_intake_insert(row: dict):
     except Exception as e:
         return None, str(e)
 
+def _json_safe(obj):
+    """Recursively convert non-JSON-serializable types (date, numpy, NaT) to safe values."""
+    import datetime, math
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, (datetime.date, datetime.datetime)):
+        return obj.isoformat()
+    try:
+        import numpy as np
+        if isinstance(obj, (np.integer,)):  return int(obj)
+        if isinstance(obj, (np.floating,)): return None if math.isnan(float(obj)) else float(obj)
+        if isinstance(obj, np.bool_):       return bool(obj)
+    except ImportError:
+        pass
+    if obj is pd.NaT:
+        return None
+    try:
+        if isinstance(obj, float) and math.isnan(obj):
+            return None
+    except Exception:
+        pass
+    return obj
+
 def sb_intake_update(row_id: int, updates: dict):
     """Update a shipment intake record by ID."""
     if not SUPABASE_URL:
         return
-    data = json.dumps(updates).encode()
+    data = json.dumps(_json_safe(updates)).encode()
     req = urllib.request.Request(
         f"{SUPABASE_URL}/rest/v1/shipment_intake?id=eq.{row_id}",
         data=data,
