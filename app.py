@@ -556,18 +556,21 @@ def sb_delete(row_id: int):
 
 # ─── Shipment Intake Supabase helpers ─────────────────────────────────────────
 def sb_intake_get():
-    """Fetch all shipment intake records, newest first."""
+    """Fetch all shipment intake records, newest first. Returns (rows, error_str)."""
     if not SUPABASE_URL:
-        return []
+        return [], "Supabase not configured"
     req = urllib.request.Request(
         f"{SUPABASE_URL}/rest/v1/shipment_intake?order=id.desc",
         headers=sb_headers(),
     )
     try:
         with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
-            return json.loads(r.read().decode())
-    except Exception:
-        return []
+            return json.loads(r.read().decode()), None
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")
+        return [], f"HTTP {e.code}: {body}"
+    except Exception as e:
+        return [], str(e)
 
 def sb_intake_insert(row: dict):
     """Insert a new shipment intake record. Returns (result, error_str)."""
@@ -2246,7 +2249,10 @@ with tab5:
         st.markdown("---")
         st.markdown("### 📋 Received Cards")
 
-        intake_rows = sb_intake_get()
+        intake_rows, intake_err = sb_intake_get()
+        if intake_err:
+            st.error(f"Could not load cards: {intake_err}")
+            st.stop()
         if not intake_rows:
             st.info("No cards logged yet — use the form above to start tracking incoming shipments.")
         else:
