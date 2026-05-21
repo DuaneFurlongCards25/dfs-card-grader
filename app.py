@@ -54,6 +54,7 @@ SUPABASE_KEY = get_secret("supabase", "key")
 DEFAULT_EBAY_KEY = get_secret("ebay", "app_id")
 CARDHEDGER_KEY = get_secret("cardhedger", "api_key")
 CARDHEDGER_BASE = "https://api.cardhedger.com"
+WP_PROXY_URL   = "https://duanefurlongstudios.com/wp-admin/admin-ajax.php?action=dfs_gemrate"
 
 # ─── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -553,27 +554,99 @@ def sb_delete(row_id: int):
     except Exception:
         pass
 
+# ─── Shipment Intake Supabase helpers ─────────────────────────────────────────
+def sb_intake_get():
+    """Fetch all shipment intake records, newest first."""
+    if not SUPABASE_URL:
+        return []
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/rest/v1/shipment_intake?order=id.desc",
+        headers=sb_headers(),
+    )
+    try:
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
+            return json.loads(r.read().decode())
+    except Exception:
+        return []
+
+def sb_intake_insert(row: dict):
+    """Insert a new shipment intake record."""
+    if not SUPABASE_URL:
+        return
+    data = json.dumps(row).encode()
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/rest/v1/shipment_intake",
+        data=data,
+        headers=sb_headers(),
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
+            return json.loads(r.read().decode())
+    except Exception:
+        pass
+
+def sb_intake_update(row_id: int, updates: dict):
+    """Update a shipment intake record by ID."""
+    if not SUPABASE_URL:
+        return
+    data = json.dumps(updates).encode()
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/rest/v1/shipment_intake?id=eq.{row_id}",
+        data=data,
+        headers={**sb_headers(), "Prefer": "return=minimal"},
+        method="PATCH",
+    )
+    try:
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
+            pass
+    except Exception:
+        pass
+
+def sb_intake_delete(row_id: int):
+    """Delete a shipment intake record by ID."""
+    if not SUPABASE_URL:
+        return
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/rest/v1/shipment_intake?id=eq.{row_id}",
+        headers=sb_headers(),
+        method="DELETE",
+    )
+    try:
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
+            pass
+    except Exception:
+        pass
+
 # ─── GemRate API ──────────────────────────────────────────────────────────────
 def _gemrate_single(query: str):
-    data = json.dumps({"query": query, "limit": 10}).encode()
-    headers_list = [
-        # Try multiple User-Agent strings — GemRate may block common bot UAs
-        {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", "Content-Type": "application/json", "Accept": "application/json"},
-        {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", "Content-Type": "application/json", "Accept": "application/json"},
-    ]
-    for hdrs in headers_list:
+    payload = json.dumps({"query": query, "limit": 10}).encode()
+    browser_hdrs = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    }
+
+    # Route through WordPress proxy first (avoids Cloudflare IP block on Streamlit Cloud)
+    try:
+        req = urllib.request.Request(WP_PROXY_URL, data=payload, headers=browser_hdrs, method="POST")
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=15) as r:
+            result = json.loads(r.read().decode())
+            if isinstance(result, list) and result:
+                return result
+    except Exception:
+        pass
+
+    # Direct fallback (works locally, may be blocked on cloud)
+    try:
         req = urllib.request.Request(
             "https://www.gemrate.com/universal-search-query",
-            data=data, headers=hdrs, method="POST",
+            data=payload, headers=browser_hdrs, method="POST",
         )
-        try:
-            with urllib.request.urlopen(req, context=ssl_ctx(), timeout=15) as r:
-                result = json.loads(r.read().decode())
-                if result:  # got real data — stop trying
-                    return result
-        except Exception:
-            continue
-    return []
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=15) as r:
+            return json.loads(r.read().decode())
+    except Exception:
+        return []
 
 def _build_queries(query: str):
     """Expand user query into multiple GemRate-friendly variants."""
@@ -1108,7 +1181,7 @@ if not is_beta and SUPABASE_URL:
 if is_beta:
     st.info("🔓 **Beta Preview** — You have access to Card Research and Inventory Check. Submission Tracker and Downloads unlock with a full membership.", icon="💎")
 
-tab1, tab2, tab3, tab4 = st.tabs(["🔍 Card Research", "📦 Inventory Check", "📬 Submission Tracker", "📥 Downloads"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["🔍 Card Research", "📦 Inventory Check", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake"])
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — Card Research
@@ -2024,6 +2097,147 @@ Upload it in the **Inventory Check** tab to search GemRate and get GO/NO-GO deci
                 use_container_width=True,
             )
             st.caption("CSV · Opens in Excel, Google Sheets, or Numbers")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 5 — Shipment Intake
+# ══════════════════════════════════════════════════════════════════════════════
+INTAKE_PLATFORMS = ["eBay", "COMC", "Whatnot", "Card Show", "Private Sale", "MySlabs", "Facebook", "Other"]
+INTAKE_STATUSES  = ["Received", "Sent to PSA", "In Collection", "Listed", "Sold"]
+
+with tab5:
+    st.markdown("## 🚚 Shipment Intake")
+    st.markdown("Log cards as they arrive. Build a queue to evaluate or send to PSA.")
+
+    if not SUPABASE_URL:
+        st.warning("Supabase not configured — intake log unavailable in this environment.")
+    else:
+        # ── Add Card form ─────────────────────────────────────────────────────
+        st.markdown("### ➕ Add a Card")
+        with st.form("intake_form", clear_on_submit=True):
+            fi1, fi2, fi3, fi4 = st.columns([3, 1, 1, 1])
+            with fi1:
+                i_player = st.text_input("Player *", placeholder="e.g. Steph Curry")
+            with fi2:
+                i_year = st.text_input("Year", placeholder="2021")
+            with fi3:
+                i_card_num = st.text_input("Card #", placeholder="44")
+            with fi4:
+                i_date = st.date_input("Date Received", value=date.today())
+
+            fi5, fi6 = st.columns([3, 2])
+            with fi5:
+                i_set = st.text_input("Set", placeholder="e.g. Topps Chrome")
+            with fi6:
+                i_parallel = st.text_input("Parallel / Variation", placeholder="e.g. Silver Prizm")
+
+            fi7, fi8, fi9 = st.columns([2, 2, 2])
+            with fi7:
+                i_cost = st.number_input("Cost ($) *", min_value=0.0, step=1.0, format="%.2f",
+                                         help="What you paid — include shipping if buying from a single seller")
+            with fi8:
+                i_platform = st.selectbox("Platform", INTAKE_PLATFORMS)
+            with fi9:
+                i_source = st.text_input("Source / Seller", placeholder="e.g. cardking88")
+
+            i_notes = st.text_input("Notes", placeholder="e.g. Pack fresh, lot of 3, small corner wear")
+
+            intake_submitted = st.form_submit_button("Log Card", type="primary", use_container_width=True)
+            if intake_submitted:
+                if not i_player:
+                    st.error("Player name is required.")
+                else:
+                    parts = [p for p in [i_year, i_set, i_player, i_parallel] if p]
+                    auto_desc = " ".join(parts)
+                    if i_card_num:
+                        auto_desc += f" #{i_card_num}"
+                    sb_intake_insert({
+                        "date_received": i_date.isoformat(),
+                        "player":        i_player.strip(),
+                        "year":          i_year.strip(),
+                        "set_name":      i_set.strip(),
+                        "parallel":      i_parallel.strip(),
+                        "card_number":   i_card_num.strip(),
+                        "card_description": auto_desc.strip(),
+                        "cost":          float(i_cost) if i_cost > 0 else None,
+                        "source":        i_source.strip(),
+                        "platform":      i_platform,
+                        "notes":         i_notes.strip(),
+                        "status":        "Received",
+                    })
+                    st.success(f"✓ Logged: {auto_desc}")
+                    st.rerun()
+
+        # ── Received cards log ────────────────────────────────────────────────
+        st.markdown("---")
+        st.markdown("### 📋 Received Cards")
+
+        intake_rows = sb_intake_get()
+        if not intake_rows:
+            st.info("No cards logged yet — use the form above to start tracking incoming shipments.")
+        else:
+            df_i = pd.DataFrame(intake_rows)
+
+            # Summary strip
+            total_i    = len(df_i)
+            cost_i     = pd.to_numeric(df_i.get("cost", pd.Series(dtype=float)), errors="coerce").sum()
+            received_i = (df_i["status"] == "Received").sum() if "status" in df_i.columns else 0
+            sent_i     = (df_i["status"] == "Sent to PSA").sum() if "status" in df_i.columns else 0
+
+            mi1, mi2, mi3, mi4 = st.columns(4)
+            mi1.metric("Total Cards",    total_i)
+            mi2.metric("Total Cost",     f"${cost_i:,.2f}")
+            mi3.metric("Awaiting Eval",  received_i)
+            mi4.metric("Sent to PSA",    sent_i)
+
+            st.markdown("")
+
+            _show_cols = [c for c in [
+                "id", "date_received", "card_description", "player", "year",
+                "set_name", "card_number", "parallel", "cost",
+                "platform", "source", "status", "notes",
+            ] if c in df_i.columns]
+
+            edited_i = st.data_editor(
+                df_i[_show_cols],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "id":               st.column_config.NumberColumn("ID", disabled=True),
+                    "date_received":    st.column_config.DateColumn("Date Received"),
+                    "card_description": st.column_config.TextColumn("Card", disabled=True),
+                    "player":           st.column_config.TextColumn("Player"),
+                    "year":             st.column_config.TextColumn("Year"),
+                    "set_name":         st.column_config.TextColumn("Set"),
+                    "card_number":      st.column_config.TextColumn("Card #"),
+                    "parallel":         st.column_config.TextColumn("Parallel"),
+                    "cost":             st.column_config.NumberColumn("Cost $", format="$%.2f"),
+                    "platform":         st.column_config.SelectboxColumn("Platform", options=INTAKE_PLATFORMS),
+                    "source":           st.column_config.TextColumn("Seller / Source"),
+                    "status":           st.column_config.SelectboxColumn("Status", options=INTAKE_STATUSES),
+                    "notes":            st.column_config.TextColumn("Notes"),
+                },
+            )
+
+            ci1, ci2 = st.columns([1, 1])
+            with ci1:
+                if st.button("💾 Save changes", type="primary", key="intake_save", use_container_width=True):
+                    for _, row in edited_i.iterrows():
+                        row_id = int(row.get("id", 0))
+                        if row_id:
+                            updates = {k: (None if (isinstance(v, float) and pd.isna(v)) else v)
+                                       for k, v in row.items() if k != "id"}
+                            sb_intake_update(row_id, updates)
+                    st.success("Saved ✓")
+                    st.rerun()
+            with ci2:
+                csv_bytes = df_i[_show_cols].to_csv(index=False).encode()
+                st.download_button(
+                    "⬇️ Export to CSV",
+                    data=csv_bytes,
+                    file_name=f"shipment_intake_{date.today().isoformat()}.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
 
 # ─── Footer ───────────────────────────────────────────────────────────────────
 st.markdown("---")
