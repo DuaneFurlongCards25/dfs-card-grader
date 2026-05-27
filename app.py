@@ -11,9 +11,19 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.2.6"
+APP_VERSION = "1.2.7"
 
 RELEASE_NOTES = {
+    "1.2.7": {
+        "emoji": "⚖️",
+        "title": "Grade vs Flip — the holding-cost decision",
+        "items": [
+            ("⚖️", "New Grade vs Flip panel in Card Research — see what flipping raw nets you NOW vs grading and waiting ~5 months, side by side."),
+            ("🎯", "Probability-weighted: blends the PSA 10 and PSA 9 outcomes by the card's gem rate into one expected-profit number, with the downside spelled out."),
+            ("💸", "Holding cost made the headline — exactly how much of your cash gets locked up, for how long, and what that time costs you."),
+            ("📐", "Submission Planner in Inventory Check — model a whole batch (e.g. 20 cards): total capital locked, total holding cost, grade-vs-flip totals."),
+        ],
+    },
     "1.2.6": {
         "emoji": "💰",
         "title": "Reprice Assistant for your inventory",
@@ -1073,6 +1083,75 @@ def verdict(raw_cost, psa_tier, gem_rate, graded_price, min_gem, roi_target, opp
         return "✅ GO", "green", f"Gem 10 avg ${graded_price:,.0f} clears ${tgt:,.0f} target | Net ~${net:,.0f} | ROI ~{roi:.0f}%"
     return "❌ NO-GO", "red", f"Gem 10 avg ${graded_price:,.0f} needs ${tgt:,.0f} for {roi_target:.0f}× | ROI only ~{roi:.0f}%"
 
+# ─── Grade-vs-Flip decision logic (the holding-cost engine) ───────────────────
+def hold_cost(capital, cal_days, opp_rate):
+    """Opportunity cost of `capital` locked up for cal_days at opp_rate %/yr."""
+    if opp_rate <= 0 or capital <= 0:
+        return 0.0
+    return capital * (opp_rate / 100.0) * (cal_days / 365.0)
+
+def flip_raw_net(raw_comp, raw_buy):
+    """Net from selling the card raw right now (after eBay fees)."""
+    if not raw_comp:
+        return None
+    return raw_comp * (1 - EBAY_FEE) - raw_buy
+
+def grade_sale_net(sale_price, raw_buy, fee, ship, hold):
+    """Net from grading then selling at sale_price, after every cost incl. holding."""
+    if not sale_price:
+        return None
+    return sale_price * (1 - EBAY_FEE) - (raw_buy + fee + ship + hold)
+
+def expected_graded_sale(gem_rate, psa10, psa9):
+    """Gem-rate-weighted expected graded sale: P(10)*PSA10 + (1-P(10))*PSA9."""
+    if psa10 is None and psa9 is None:
+        return None
+    p10 = max(0.0, min(1.0, (gem_rate or 0) / 100.0))
+    s10 = psa10 if psa10 is not None else psa9
+    s9 = psa9 if psa9 is not None else psa10
+    return p10 * s10 + (1 - p10) * s9
+
+def grade_vs_flip(raw_buy, raw_comp, psa10, psa9, gem_rate, tier, ship, opp_rate):
+    """Full grade-vs-flip economics for one card. Returns a dict of outcomes."""
+    fee = PSA_FEES.get(tier, 50)
+    cal_days = int(PSA_DAYS.get(tier, 60) * 1.4)
+    capital = raw_buy + fee + ship
+    hold = round(hold_cost(capital, cal_days, opp_rate), 2)
+    raw_net = flip_raw_net(raw_comp, raw_buy)
+    net10 = grade_sale_net(psa10, raw_buy, fee, ship, hold)
+    net9 = grade_sale_net(psa9, raw_buy, fee, ship, hold)
+    exp_sale = expected_graded_sale(gem_rate, psa10, psa9)
+    net_exp = grade_sale_net(exp_sale, raw_buy, fee, ship, hold)
+    premium = (net_exp - raw_net) if (net_exp is not None and raw_net is not None) else None
+    return {
+        "fee": fee, "cal_days": cal_days, "capital": capital, "hold": hold,
+        "raw_net": raw_net, "net10": net10, "net9": net9,
+        "exp_sale": exp_sale, "net_exp": net_exp, "premium": premium,
+        "p10": max(0.0, min(1.0, (gem_rate or 0) / 100.0)),
+    }
+
+def grade_flip_verdict(d):
+    """Return (label, color, message) recommending grade vs flip for one card."""
+    net_exp, raw_net, net9 = d["net_exp"], d["raw_net"], d["net9"]
+    if net_exp is None:
+        return "ℹ️ Need comps", "info", "Not enough comp data to compare — enter prices manually."
+    downside = ""
+    if net9 is not None and net9 < 0:
+        downside = f" ⚠️ Downside: a PSA 9 nets **−${abs(net9):,.0f}** (a loss)."
+    if raw_net is None:
+        if net_exp > 0:
+            return "✅ GRADE", "green", f"Expected net **${net_exp:,.0f}** after the ${d['hold']:,.0f} holding cost.{downside}"
+        return "❌ SKIP", "red", f"Expected net only **${net_exp:,.0f}** — not worth grading.{downside}"
+    if net_exp > raw_net and net_exp > 0:
+        return "✅ GRADE", "green", (
+            f"Expected **${net_exp:,.0f}** vs **${raw_net:,.0f}** flipping raw — "
+            f"**+${d['premium']:,.0f}** for the ~{d['cal_days']}-day wait (after ${d['hold']:,.0f} holding cost).{downside}"
+        )
+    return "💵 FLIP RAW", "amber", (
+        f"Flipping raw nets **${raw_net:,.0f}** now; grading's expected **${net_exp:,.0f}** "
+        f"isn't worth locking **${d['capital']:,.0f}** for ~{d['cal_days']} days.{downside}"
+    )
+
 def fmt_gem(g):
     if g is None:
         return "—"
@@ -1350,6 +1429,7 @@ with tab1:
         # ── CardHedger: live sold comps + trend ───────────────────────────────
         ch_raw_avg = None
         ch_psa10_avg = None
+        ch_psa9_avg = None
         ch_trend_dir = None
         ch_trend_pct = 0.0
         ch_raw_sales = []
@@ -1366,8 +1446,10 @@ with tab1:
                     if ch_id:
                         raw_data  = ch_comps(ch_id, "Raw")
                         psa_data  = ch_comps(ch_id, "PSA 10")
+                        psa9_data = ch_comps(ch_id, "PSA 9")
                         ch_raw_avg   = raw_data.get("comp_price") or raw_data.get("average") or raw_data.get("mean")
                         ch_psa10_avg = psa_data.get("comp_price") or psa_data.get("average") or psa_data.get("mean")
+                        ch_psa9_avg  = psa9_data.get("comp_price") or psa9_data.get("average") or psa9_data.get("mean")
                         for k in ("raw_prices", "sales", "comps", "data"):
                             if k in raw_data and isinstance(raw_data[k], list):
                                 ch_raw_sales = raw_data[k]; break
@@ -1489,6 +1571,54 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
                     st.code(summary, language=None)
             else:
                 st.info("Enter a Gem 10 avg price above to get a GO/NO-GO decision")
+
+        # ── ⚖️ Grade vs Flip — the holding-cost decision ──────────────────────
+        if CARDHEDGER_KEY and raw_cost > 0 and (ch_raw_avg or ch_psa10_avg or ch_psa9_avg):
+            st.markdown("#### ⚖️ Grade vs Flip — the real decision")
+            st.caption(
+                "Grading locks up your cash for months. Here's what each path actually nets — "
+                "weighted by this card's gem rate — so you decide with eyes open, not just \"I can 4× it.\""
+            )
+            gvf = grade_vs_flip(raw_cost, ch_raw_avg, ch_psa10_avg, ch_psa9_avg, gem, tier, ship_cost, opp_rate)
+
+            d1, d2, d3 = st.columns(3)
+            with d1:
+                st.markdown("**💵 Flip Raw Now**")
+                st.metric("Sell ~", f"${ch_raw_avg:,.0f}" if ch_raw_avg else "—", help="Current raw sold-comp average")
+                st.metric("Net profit", f"${gvf['raw_net']:,.0f}" if gvf['raw_net'] is not None else "—",
+                          help="After eBay fees + your buy cost. Cash back in ~3-7 days, nothing locked up.")
+            with d2:
+                st.markdown("**💎 Grade → PSA 10**")
+                st.metric("Sell ~", f"${ch_psa10_avg:,.0f}" if ch_psa10_avg else "—")
+                st.metric("Net profit", f"${gvf['net10']:,.0f}" if gvf['net10'] is not None else "—",
+                          help=f"After grading, shipping, eBay fees, and ${gvf['hold']:,.0f} holding cost.")
+            with d3:
+                st.markdown("**🥈 Grade → PSA 9**")
+                st.metric("Sell ~", f"${ch_psa9_avg:,.0f}" if ch_psa9_avg else "—")
+                st.metric("Net profit", f"${gvf['net9']:,.0f}" if gvf['net9'] is not None else "—",
+                          help="The downside if it doesn't gem — same costs, lower sale.")
+
+            ev1, ev2, ev3 = st.columns(3)
+            ev1.metric(f"🎯 Expected net (gem {fmt_gem(gem)})",
+                       f"${gvf['net_exp']:,.0f}" if gvf['net_exp'] is not None else "—",
+                       help=f"Gem-rate-weighted: {gvf['p10']*100:.0f}% chance of a 10, {(1-gvf['p10'])*100:.0f}% a 9. After all costs incl. holding.")
+            ev2.metric("💸 Holding cost", f"${gvf['hold']:,.0f}",
+                       help=f"${gvf['capital']:,.0f} of your cash locked ~{gvf['cal_days']} days at {opp_rate:.0f}%/yr")
+            if gvf['premium'] is not None:
+                ev3.metric("Grade premium vs raw",
+                           f"{'+' if gvf['premium'] >= 0 else '−'}${abs(gvf['premium']):,.0f}",
+                           help="Expected graded net minus flip-raw net — your reward for the wait.")
+
+            _lbl, _clr, _msg = grade_flip_verdict(gvf)
+            (st.success if _clr == "green" else st.warning if _clr == "amber"
+             else st.error if _clr == "red" else st.info)(f"**{_lbl}** — {_msg}")
+
+            st.caption(
+                f"⏳ Grading this card ties up **${gvf['capital']:,.0f}** "
+                f"(buy ${raw_cost:,.0f} + fee ${gvf['fee']:.0f}"
+                + (f" + ship ${ship_cost:.0f}" if ship_cost else "")
+                + f") for ~**{gvf['cal_days']} days** (~{gvf['cal_days']/30:.1f} months). Flipping raw frees that cash now."
+            )
 
         st.markdown("#### 🔍 Card Finder Links")
         st.caption("All the links you need — buy raw, check sold comps, verify gem rate, or look up the PSA pop report.")
@@ -2113,6 +2243,74 @@ with tab2:
                     )
     else:
         st.info("👆 Upload your inventory file above to get started, or download the template first.")
+
+    # ── 📐 Submission Planner — Grade vs Flip a whole batch ────────────────────
+    st.markdown("---")
+    st.markdown("### 📐 Submission Planner — Grade vs Flip a whole batch")
+    st.caption(
+        "Model a full submission the way new sellers don't: how much cash gets locked up, for how long, "
+        "and whether grading actually beats flipping the lot raw. Defaults to a 20-card order — change to your numbers."
+    )
+    with st.expander("📐 Open the batch planner", expanded=False):
+        bp1, bp2, bp3 = st.columns(3)
+        n_cards = bp1.number_input("Number of cards", min_value=1, max_value=500, value=20, step=1, key="bp_n")
+        avg_buy = bp2.number_input("Avg buy cost / card ($)", min_value=0.0, value=40.0, step=5.0, key="bp_buy")
+        bp_tier = bp3.selectbox("Grading tier", list(PSA_FEES.keys()), index=0, key="bp_tier")
+
+        bc1, bc2, bc3, bc4 = st.columns(4)
+        avg_raw = bc1.number_input("Avg RAW comp ($)", min_value=0.0, value=55.0, step=5.0, key="bp_raw",
+                                   help="What each card sells for raw right now")
+        avg_10 = bc2.number_input("Avg PSA 10 comp ($)", min_value=0.0, value=180.0, step=10.0, key="bp_10")
+        avg_9 = bc3.number_input("Avg PSA 9 comp ($)", min_value=0.0, value=70.0, step=5.0, key="bp_9")
+        avg_gem = bc4.number_input("Avg gem rate (%)", min_value=0.0, max_value=100.0, value=50.0, step=5.0, key="bp_gem")
+
+        fee_b = PSA_FEES[bp_tier]
+        cal_b = int(PSA_DAYS.get(bp_tier, 60) * 1.4)
+        gvf_b = grade_vs_flip(avg_buy, avg_raw, avg_10, avg_9, avg_gem, bp_tier, ship_cost, opp_rate)
+        capital_total = gvf_b["capital"] * n_cards
+        hold_total = gvf_b["hold"] * n_cards
+        raw_total = (gvf_b["raw_net"] or 0) * n_cards
+        exp_total = (gvf_b["net_exp"] or 0) * n_cards
+        best_total = (gvf_b["net10"] or 0) * n_cards
+        down_total = (gvf_b["net9"] or 0) * n_cards
+        premium_total = exp_total - raw_total
+
+        st.markdown("**If you GRADE the batch**")
+        gm1, gm2, gm3 = st.columns(3)
+        gm1.metric("💰 Cash locked up", f"${capital_total:,.0f}",
+                   help=f"{n_cards} × (buy ${avg_buy:,.0f} + fee ${fee_b:.0f}"
+                        + (f" + ship ${ship_cost:.0f}" if ship_cost else "") + ")")
+        gm2.metric("⏳ Locked for", f"~{cal_b} days", help=f"~{cal_b/30:.1f} months at {bp_tier.split('(')[0].strip()}")
+        gm3.metric("💸 Holding cost", f"${hold_total:,.0f}", help=f"At {opp_rate:.0f}%/yr opportunity cost")
+
+        gn1, gn2, gn3 = st.columns(3)
+        gn1.metric(f"🎯 Expected net (gem {avg_gem:.0f}%)", f"${exp_total:,.0f}",
+                   help="Gem-rate-weighted across the batch, after every cost incl. holding")
+        gn2.metric("💎 Best case (all 10s)", f"${best_total:,.0f}")
+        gn3.metric("🥈 Downside (all 9s)", f"${down_total:,.0f}")
+
+        st.markdown("**If you FLIP the batch RAW now**")
+        fr1, fr2 = st.columns(2)
+        fr1.metric("💵 Net now", f"${raw_total:,.0f}", help="Sell all raw today — cash in ~a week, nothing locked up")
+        fr2.metric("Grade premium (expected)", f"{'+' if premium_total >= 0 else '−'}${abs(premium_total):,.0f}",
+                   help="Expected graded net minus raw-flip net across the batch")
+
+        if exp_total > raw_total and exp_total > 0:
+            st.success(
+                f"**✅ Grading wins (expected)** — across {n_cards} cards you'd net ~**${exp_total:,.0f}** vs "
+                f"**${raw_total:,.0f}** flipping raw: **+${premium_total:,.0f}** for tying up **${capital_total:,.0f}** "
+                f"for ~{cal_b/30:.1f} months. If none gem, downside is **${down_total:,.0f}**."
+            )
+        else:
+            st.warning(
+                f"**💵 Flipping raw may win** — grading's expected **${exp_total:,.0f}** doesn't beat the "
+                f"**${raw_total:,.0f}** you'd net flipping raw now, and grading locks **${capital_total:,.0f}** "
+                f"for ~{cal_b/30:.1f} months. Grade only the cards with the highest gem rates."
+            )
+        st.caption(
+            "Rule of thumb: the lower the gem rate, the more the PSA 9 downside drags your expected return — "
+            "and the longer your cash is locked, the more the holding cost eats the upside."
+        )
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — Submission Tracker
