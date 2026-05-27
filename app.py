@@ -11,9 +11,26 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.2.8"
+APP_VERSION = "1.3.0"
+
+# Product branding — change APP_NAME on this one line to rebrand the whole app.
+APP_NAME = "Card Grader Pro"
+APP_TAGLINE = "Gem rate research + grading ROI calculator"
+
+# Daily cap on live CardHedger look-ups per member (protects the API budget).
+DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.3.0": {
+        "emoji": "🧰",
+        "title": "Operations & Inventory — live pricing on your whole list",
+        "items": [
+            ("🧰", "New Operations tab (full membership) — maintain your inventory, edit costs inline, and pull live market prices across the list."),
+            ("✏️", "Editable cost basis + listed price — every margin, reprice, and profit number recalculates the instant you change a cost."),
+            ("⚡", "Live pricing is metered — a daily look-up budget keeps pricing fast and protects against runaway API costs. Cached cards re-price free."),
+            ("🏷️", "Cleaner brand — the app is now white-labelable; set the name in one place."),
+        ],
+    },
     "1.2.7": {
         "emoji": "⚖️",
         "title": "Grade vs Flip — the holding-cost decision",
@@ -78,10 +95,10 @@ WP_PROXY_URL   = "https://duanefurlongstudios.com/wp-admin/admin-ajax.php?action
 
 # ─── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="DFS Card Grader",
+    page_title=APP_NAME,
     page_icon="💎",
     layout="wide",
-    menu_items={"About": "DFS Card Grader — © 2025 DFS Cards LLC"},
+    menu_items={"About": f"{APP_NAME} — research & decision-support tool"},
 )
 
 # ─── Mobile CSS ───────────────────────────────────────────────────────────────
@@ -257,7 +274,7 @@ if st.query_params.get("admin") == "true":
         st.stop()
 
     # ── Admin dashboard ──
-    st.markdown("## 🔐 DFS Card Grader — Admin")
+    st.markdown(f"## 🔐 {APP_NAME} — Admin")
     st.caption(f"v{APP_VERSION} · Access code management")
     st.markdown("---")
 
@@ -399,12 +416,12 @@ def record_code_use(code_id: int):
 
 if not st.session_state.get("access_granted"):
     st.markdown(
-        """
+        f"""
         <div style="max-width:420px; margin:60px auto; padding:36px 28px;
                     background:#1e2130; border-radius:12px;
                     border:1px solid #2e3250; text-align:center;">
             <div style="font-size:2.2rem; margin-bottom:8px;">💎</div>
-            <h2 style="margin-bottom:4px;">DFS Card Grader</h2>
+            <h2 style="margin-bottom:4px;">{APP_NAME}</h2>
             <p style="color:#aaa; font-size:0.85rem; margin-bottom:24px;">
                 Enter your access code to continue.
             </p>
@@ -414,7 +431,7 @@ if not st.session_state.get("access_granted"):
     )
     gc1, gc2, gc3 = st.columns([1, 2, 1])
     with gc2:
-        entered_code = st.text_input("Access Code", placeholder="DFS-XXXX-XXXX", label_visibility="collapsed")
+        entered_code = st.text_input("Access Code", placeholder="XXXX-XXXX", label_visibility="collapsed")
         if st.button("Enter", use_container_width=True, type="primary"):
             clean_code = entered_code.strip().upper()
             # Owner bypass — never touches Supabase
@@ -446,7 +463,7 @@ if not st.session_state.get("access_granted"):
                     record_code_use(code_id)
                     st.rerun()
                 elif err == "expired":
-                    st.error("⏰ Your trial has ended. Contact DFS Cards to upgrade to full access.")
+                    st.error("⏰ Your trial has ended. Contact us to upgrade to full access.")
                 else:
                     st.error("Invalid or inactive access code.")
     st.stop()
@@ -454,12 +471,12 @@ if not st.session_state.get("access_granted"):
 # ─── Disclaimer gate ──────────────────────────────────────────────────────────
 if not st.session_state.get("agreed"):
     st.markdown(
-        """
+        f"""
         <div style="max-width:680px; margin:40px auto; padding:32px 24px;
                     background:#1e2130; border-radius:12px;
                     border:1px solid #2e3250; text-align:center;">
             <div style="font-size:2.5rem; margin-bottom:8px;">💎</div>
-            <h2 style="margin-bottom:4px;">DFS Card Grader</h2>
+            <h2 style="margin-bottom:4px;">{APP_NAME}</h2>
             <p style="color:#aaa; font-size:0.85rem; margin-bottom:24px;">
                 Please read and accept the disclaimer before continuing.
             </p>
@@ -467,17 +484,16 @@ if not st.session_state.get("agreed"):
                         padding:20px; margin-bottom:24px;
                         font-size:0.88rem; color:#ccc; line-height:1.7;">
                 <strong style="color:#fafafa;">Disclaimer</strong><br><br>
-                DFS Card Grader is a research and decision-support tool only.
+                {APP_NAME} is a research and decision-support tool only.
                 All pricing data (GemRate, eBay) is pulled from third-party sources
                 and may be incomplete, delayed, or inaccurate. Gem rates and market
                 values fluctuate — always verify data independently before submitting
                 cards for grading.<br><br>
                 All grading decisions and associated costs are <strong style="color:#fafafa;">
-                solely your responsibility</strong>. DFS Cards LLC assumes no liability
+                solely your responsibility</strong>. {APP_NAME} assumes no liability
                 for financial outcomes resulting from use of this tool.<br><br>
                 <span style="font-size:0.8rem; color:#888;">
-                DFS Cards LLC · 8601 E Palo Verde Dr · Scottsdale, AZ 85250<br>
-                ©️ 2025 DFS Cards LLC. All rights reserved.
+                ©️ 2026 {APP_NAME}. All rights reserved.
                 </span>
             </div>
         </div>
@@ -666,6 +682,72 @@ def sb_intake_delete(row_id: int):
     try:
         with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
             pass
+    except Exception:
+        pass
+
+# ─── Live-pricing daily usage cap (protects the CardHedger API budget) ────────
+# Supabase table `pricing_usage` (code text, day date, used int) persists the
+# count across sessions/refreshes; falls back to session_state if it's missing.
+def _today_iso():
+    return date.today().isoformat()
+
+def _pricing_key():
+    return str(st.session_state.get("access_code_id") or st.session_state.get("access_name") or "anon")
+
+def pricing_unlimited():
+    """Owner + Robert (marketing partner) are never capped."""
+    return st.session_state.get("access_name", "") in ("Duane", "Robert Bass")
+
+def pricing_used_today():
+    """Live look-ups already used today (max of Supabase + this session)."""
+    day = _today_iso()
+    sess_n = st.session_state.get("_pricing_used", {}).get(day, 0)
+    if not SUPABASE_URL:
+        return sess_n
+    try:
+        code = urllib.parse.quote(_pricing_key())
+        req = urllib.request.Request(
+            f"{SUPABASE_URL}/rest/v1/pricing_usage?code=eq.{code}&day=eq.{day}&select=used",
+            headers=sb_headers())
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=8) as r:
+            rows = json.loads(r.read().decode())
+        return max(sess_n, rows[0]["used"] if rows else 0)
+    except Exception:
+        return sess_n
+
+def pricing_remaining():
+    if pricing_unlimited():
+        return 10 ** 9
+    return max(0, DAILY_PRICING_CAP - pricing_used_today())
+
+def pricing_bump(n):
+    """Record n live look-ups against today's budget (session + Supabase)."""
+    if n <= 0 or pricing_unlimited():
+        return
+    day = _today_iso()
+    sess = st.session_state.setdefault("_pricing_used", {})
+    sess[day] = sess.get(day, 0) + n
+    if not SUPABASE_URL:
+        return
+    try:
+        code = _pricing_key()
+        q = urllib.parse.quote(code)
+        req = urllib.request.Request(
+            f"{SUPABASE_URL}/rest/v1/pricing_usage?code=eq.{q}&day=eq.{day}&select=id,used",
+            headers=sb_headers())
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=8) as r:
+            rows = json.loads(r.read().decode())
+        if rows:
+            req2 = urllib.request.Request(
+                f"{SUPABASE_URL}/rest/v1/pricing_usage?id=eq.{rows[0]['id']}",
+                data=json.dumps({"used": rows[0]["used"] + n}).encode(),
+                headers={**sb_headers(), "Prefer": "return=minimal"}, method="PATCH")
+        else:
+            req2 = urllib.request.Request(
+                f"{SUPABASE_URL}/rest/v1/pricing_usage",
+                data=json.dumps({"code": code, "day": day, "used": n}).encode(),
+                headers={**sb_headers(), "Prefer": "return=minimal"}, method="POST")
+        urllib.request.urlopen(req2, context=ssl_ctx(), timeout=8)
     except Exception:
         pass
 
@@ -1200,7 +1282,7 @@ def gem_signal(g):
 is_beta = st.session_state.get("is_beta", False)
 
 with st.sidebar:
-    st.markdown("## 💎 DFS Card Grader")
+    st.markdown(f"## 💎 {APP_NAME}")
     st.caption(f"Gem rate research + grading ROI calculator · v{APP_VERSION}")
     access_name = st.session_state.get("access_name", "")
     if access_name:
@@ -1263,7 +1345,7 @@ with st.sidebar:
 # ─── What's New dialog ────────────────────────────────────────────────────────
 _WN_KEY = f"wn_seen_{APP_VERSION}"
 
-@st.dialog("🎉 What's New in DFS Card Grader", width="large")
+@st.dialog(f"🎉 What's New in {APP_NAME}", width="large")
 def _show_whats_new():
     # Mark as seen immediately — so closing via X doesn't re-trigger on next rerun
     st.session_state[_WN_KEY] = True
@@ -1335,7 +1417,7 @@ if not is_beta and SUPABASE_URL:
 if is_beta:
     st.info("🔓 **Beta Preview** — You have access to Card Research and Inventory Check. Submission Tracker and Downloads unlock with a full membership.", icon="💎")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["🔍 Card Research", "📦 Inventory Check", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake"])
+tab1, tab2, tab6, tab3, tab4, tab5 = st.tabs(["🔍 Card Research", "📦 Inventory Check", "🧰 Operations", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake"])
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — Card Research
@@ -2481,7 +2563,7 @@ with tab4:
 
             c1, c2 = st.columns([2, 1])
             with c1:
-                st.markdown("### 📊 DFS Card Grader — Operations Kit")
+                st.markdown(f"### 📊 {APP_NAME} — Operations Kit")
                 st.markdown("""
 A comprehensive Excel workbook built to run alongside this app. Includes:
 
@@ -2503,7 +2585,7 @@ A comprehensive Excel workbook built to run alongside this app. Includes:
                     st.download_button(
                         label="⬇️ Download Operations Kit",
                         data=kit_bytes,
-                        file_name="DFS_Card_Grader_Operations_Kit.xlsx",
+                        file_name=f"{APP_NAME.replace(' ', '_')}_Operations_Kit.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True,
                         type="primary",
@@ -2767,20 +2849,192 @@ with tab5:
                     use_container_width=True,
                 )
 
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 6 — Operations & Inventory (paid, metered live pricing)
+# ══════════════════════════════════════════════════════════════════════════════
+with tab6:
+    st.markdown("## 🧰 Operations & Inventory")
+
+    if is_beta:
+        st.warning("🔒 Operations is part of full membership. Your preview includes Card Research and Inventory Check.")
+        st.caption(
+            "Operations adds live real-time pricing across your whole inventory, an editable cost basis, "
+            "and reprice + margin tools — metered with a daily look-up budget to keep pricing fast and fair."
+        )
+    elif not CARDHEDGER_KEY:
+        st.info("📊 Connect the CardHedger API to enable live pricing.")
+    else:
+        def _num(x):
+            try:
+                v = float(x)
+                return v if v == v else 0.0
+            except Exception:
+                return 0.0
+
+        used = pricing_used_today()
+        if pricing_unlimited():
+            st.caption("⚡ Live pricing: **unlimited** on your account.")
+        else:
+            st.progress(min(1.0, used / DAILY_PRICING_CAP) if DAILY_PRICING_CAP else 1.0,
+                        text=f"Live look-ups today: {used} / {DAILY_PRICING_CAP}")
+            if pricing_remaining() == 0:
+                st.warning(f"You've used today's {DAILY_PRICING_CAP} live look-ups — resets tomorrow.")
+
+        st.markdown(
+            "Maintain your inventory and costs, then pull live market prices on demand. "
+            "Edit a cost and every number — margin, reprice, profit — recalculates instantly."
+        )
+
+        op_file = st.file_uploader("Upload inventory (CSV or Operations Workbook .xlsx)",
+                                   type=["csv", "xlsx"], key="op_upload")
+        if op_file:
+            op_inv, op_src = load_inventory(op_file)
+            if op_inv is None:
+                st.error(f"Could not read file: {op_src}")
+            elif "Card Description" not in op_inv.columns:
+                st.error("That file has no 'Card Description' column.")
+            else:
+                for col in ("Cost Basis ($)", "Listed Price ($)"):
+                    if col not in op_inv.columns:
+                        op_inv[col] = None
+                base = op_inv[["Card Description", "Cost Basis ($)", "Listed Price ($)"]].copy()
+                base = base[base["Card Description"].notna()].reset_index(drop=True)
+                st.session_state["op_inv"] = base
+                st.success(f"Loaded {len(base)} cards.")
+
+        base = st.session_state.get("op_inv")
+        if base is not None and len(base):
+            st.markdown("### ✏️ Your inventory & costs")
+            st.caption("Edit Cost or Listed inline — changes feed the margin and reprice math below.")
+            edited = st.data_editor(
+                base, use_container_width=True, hide_index=True, num_rows="dynamic", key="op_editor",
+                column_config={
+                    "Card Description": st.column_config.TextColumn("Card", width="large"),
+                    "Cost Basis ($)": st.column_config.NumberColumn("Cost ($)", min_value=0.0, step=1.0),
+                    "Listed Price ($)": st.column_config.NumberColumn("Listed ($)", min_value=0.0, step=1.0),
+                },
+            )
+            st.session_state["op_inv"] = edited
+
+            oc1, oc2, oc3 = st.columns(3)
+            strat = oc1.selectbox("Reprice strategy",
+                                  ["Trend-following", "Match market", "Undercut to sell faster", "List high for offers"],
+                                  key="op_strat")
+            if strat == "Trend-following":
+                adj = oc2.slider("Trend sensitivity (%)", 0, 100, 50, 5, key="op_sens")
+            elif strat == "Undercut to sell faster":
+                adj = oc2.slider("Undercut below comp (%)", 0, 30, 7, 1, key="op_under")
+            elif strat == "List high for offers":
+                adj = oc2.slider("Premium above comp (%)", 0, 30, 10, 1, key="op_prem")
+            else:
+                adj = oc2.slider("Adjust vs comp (%)", -20, 20, 0, 1, key="op_match")
+
+            n_rows = len(edited)
+            budget = pricing_remaining()
+            ceiling = n_rows if pricing_unlimited() else max(1, min(n_rows, budget))
+            run_n = oc3.number_input("Cards to price this run", 1, max(1, n_rows),
+                                     min(25, ceiling), key="op_runn",
+                                     help="Each card uses one live look-up from your daily budget. Cached cards re-price free within 30 min.")
+
+            blocked = (budget <= 0 and not pricing_unlimited())
+            if st.button(f"🔄 Refresh live pricing ({int(run_n)} look-ups)", key="op_run",
+                         type="primary", disabled=blocked):
+                allow = int(run_n) if pricing_unlimited() else min(int(run_n), budget)
+                sub = edited.head(allow)
+                rows, priced = [], 0
+                prog = st.progress(0.0, text="Pricing…")
+                total = max(1, len(sub))
+                for i, (_, r) in enumerate(sub.iterrows()):
+                    d = str(r.get("Card Description", "") or "").strip()
+                    if not d:
+                        continue
+                    grade = detect_grade(d)
+                    mkt = fetch_market(d, grade)
+                    rows.append({"Card": d, "Grade": grade,
+                                 "Comp": mkt["comp_avg"], "TrendDir": mkt["trend_dir"],
+                                 "TrendPct": mkt["trend_pct"], "Matched": mkt["matched"]})
+                    priced += 1
+                    prog.progress((i + 1) / total, text=f"Pricing… {i + 1}/{total}")
+                prog.empty()
+                pricing_bump(priced)
+                st.session_state["op_priced"] = rows
+                st.session_state["op_priced_when"] = date.today().isoformat()
+                st.rerun()
+
+            priced = st.session_state.get("op_priced")
+            if priced:
+                cost_map = {
+                    str(r["Card Description"]).strip(): (_num(r.get("Cost Basis ($)")), _num(r.get("Listed Price ($)")))
+                    for _, r in edited.iterrows() if pd.notna(r.get("Card Description"))
+                }
+                table = []
+                for p in priced:
+                    cost, listed = cost_map.get(p["Card"], (0.0, 0.0))
+                    comp = p["Comp"]
+                    sugg = suggest_reprice(comp, p["TrendPct"], strat, adj)
+                    margin = (listed * (1 - EBAY_FEE) - cost) if (listed and cost) else None
+                    margin_pct = (margin / cost * 100) if (margin is not None and cost) else None
+                    sugg_profit = (sugg * (1 - EBAY_FEE) - cost) if (sugg and cost) else None
+                    if not comp:
+                        flag = "no comp"
+                    elif not listed:
+                        flag = "🟡 no list price"
+                    elif (listed - comp) / comp > 0.10:
+                        flag = "🔴 overpriced"
+                    elif (listed - comp) / comp < -0.10:
+                        flag = "🟢 underpriced"
+                    else:
+                        flag = "⚪ on market"
+                    table.append({**p, "Cost": cost, "Listed": listed, "Sugg": sugg,
+                                  "Margin": margin, "MarginPct": margin_pct, "SuggProfit": sugg_profit, "Flag": flag})
+
+                st.caption(f"Last priced {st.session_state.get('op_priced_when','')} · {len(table)} cards. "
+                           "Editing costs above or changing strategy recomputes instantly — no new look-ups.")
+                tdf = pd.DataFrame([{
+                    "Card": t["Card"], "Grade": t["Grade"],
+                    "Cost": f"${t['Cost']:,.0f}" if t["Cost"] else "—",
+                    "Listed": f"${t['Listed']:,.0f}" if t["Listed"] else "—",
+                    "Comp (Market)": f"${t['Comp']:,.0f}" if t["Comp"] else ("—" if t["Matched"] else "no match"),
+                    "Trend": trend_label(t["TrendDir"], t["TrendPct"]),
+                    "Margin @ listed": (f"${t['Margin']:,.0f} ({t['MarginPct']:+.0f}%)"
+                                        if (t["Margin"] is not None and t["MarginPct"] is not None)
+                                        else (f"${t['Margin']:,.0f}" if t["Margin"] is not None else "—")),
+                    "Suggested": f"${t['Sugg']:,.0f}" if t["Sugg"] else "—",
+                    "Profit @ sugg": f"${t['SuggProfit']:,.0f}" if t["SuggProfit"] is not None else "—",
+                    "Flag": t["Flag"],
+                } for t in table])
+                st.dataframe(tdf, use_container_width=True, hide_index=True)
+
+                csv_buf = io.StringIO()
+                pd.DataFrame([{
+                    "Card Description": t["Card"], "Grade": t["Grade"],
+                    "Cost Basis": round(t["Cost"], 2) if t["Cost"] else "",
+                    "Listed Price": round(t["Listed"], 2) if t["Listed"] else "",
+                    "Comp Avg (Market)": round(t["Comp"], 2) if t["Comp"] else "",
+                    "90-Day Trend": trend_label(t["TrendDir"], t["TrendPct"]),
+                    "Margin @ Listed": round(t["Margin"], 2) if t["Margin"] is not None else "",
+                    "Suggested Price": round(t["Sugg"], 2) if t["Sugg"] else "",
+                    "Profit @ Suggested": round(t["SuggProfit"], 2) if t["SuggProfit"] is not None else "",
+                    "Flag": t["Flag"],
+                } for t in table]).to_csv(csv_buf, index=False)
+                st.download_button("📥 Download operations CSV", data=csv_buf.getvalue().encode(),
+                                   file_name=f"operations_{date.today().isoformat()}.csv",
+                                   mime="text/csv", key="op_csv")
+        else:
+            st.info("👆 Upload your inventory to start. Costs you enter or edit here drive every margin and reprice number.")
+
 # ─── Footer ───────────────────────────────────────────────────────────────────
 st.markdown("---")
 st.markdown(
-    """
+    f"""
     <div style="text-align:center; color:#666; font-size:0.78rem; line-height:1.9; padding-bottom:1rem;">
         <strong style="color:#aaa;">Disclaimer</strong><br>
-        DFS Card Grader is a research and decision-support tool only. All pricing data (GemRate, eBay)
+        {APP_NAME} is a research and decision-support tool only. All pricing data (GemRate, eBay)
         is pulled from third-party sources and may be incomplete, delayed, or inaccurate.
         Gem rates and market values fluctuate — always verify data independently before submitting cards for grading.
         All grading decisions and associated costs are solely your responsibility.
-        DFS Cards LLC assumes no liability for financial outcomes resulting from use of this tool.<br><br>
-        <strong style="color:#aaa;">DFS Cards LLC</strong><br>
-        8601 E Palo Verde Dr · Scottsdale, AZ 85250<br><br>
-        ©️ 2025 DFS Cards LLC. All rights reserved.
+        {APP_NAME} assumes no liability for financial outcomes resulting from use of this tool.<br><br>
+        ©️ 2026 {APP_NAME}. All rights reserved.
     </div>
     """,
     unsafe_allow_html=True,
