@@ -4,3 +4,5 @@ psa_tracker.csv
 __pycache__/
 *.pyc
 .DS_Store
+CLAUDE.md
+DFS_Card_Grader_Questionnaire.md

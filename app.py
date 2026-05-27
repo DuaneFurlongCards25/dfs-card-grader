@@ -11,9 +11,19 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.2.5"
+APP_VERSION = "1.2.6"
 
 RELEASE_NOTES = {
+    "1.2.6": {
+        "emoji": "💰",
+        "title": "Reprice Assistant for your inventory",
+        "items": [
+            ("💰", "New Reprice Assistant in Inventory Check — pulls live sold comps + 90-day trend for every card at once."),
+            ("📈", "Trend-following suggested prices: leans the suggestion up when a card is rising, down when it's falling. Strategy and sensitivity are adjustable."),
+            ("🚩", "Over/underpriced flags — instantly see which listings are above or below market so you reprice the ones that matter."),
+            ("📥", "Download a reprice CSV to update eBay in bulk instead of editing listings one at a time."),
+        ],
+    },
     "1.2.5": {
         "emoji": "📦",
         "title": "Shipping costs + true total ROI",
@@ -1804,6 +1814,58 @@ def load_inventory(uploaded_file):
     except Exception as e:
         return None, str(e)
 
+# ─── Reprice Assistant helpers ────────────────────────────────────────────────
+def detect_grade(desc):
+    """Infer the grade to price against from the card description. Defaults to Raw."""
+    d = (desc or "").upper()
+    if "PSA 10" in d or "GEM MINT 10" in d or "GEM MT 10" in d:
+        return "PSA 10"
+    if "PSA 9" in d:
+        return "PSA 9"
+    return "Raw"
+
+def fetch_market(desc, grade):
+    """Look up a card on CardHedger and return its comp avg + 90-day trend for the given grade."""
+    out = {"grade": grade, "comp_avg": None, "trend_dir": None, "trend_pct": 0.0, "matched": False}
+    if not CARDHEDGER_KEY:
+        return out
+    matches = ch_search(desc)
+    if not matches:
+        return out
+    card = matches[0]
+    cid = card.get("card_id") or card.get("id")
+    if not cid:
+        return out
+    out["matched"] = True
+    cdata = ch_comps(cid, grade) or {}
+    out["comp_avg"] = cdata.get("comp_price") or cdata.get("average") or cdata.get("mean")
+    out["trend_dir"], out["trend_pct"] = calculate_trend(ch_price_history(cid, grade, days=90))
+    return out
+
+def suggest_reprice(comp_avg, trend_pct, strategy, adj_pct):
+    """Suggested list price from the market comp, shaped by the chosen strategy."""
+    if not comp_avg or comp_avg <= 0:
+        return None
+    if strategy == "Match market":
+        return comp_avg * (1 + adj_pct / 100.0)
+    if strategy == "Undercut to sell faster":
+        return comp_avg * (1 - adj_pct / 100.0)
+    if strategy == "List high for offers":
+        return comp_avg * (1 + adj_pct / 100.0)
+    # Trend-following (default): lean into momentum, capped so a wild swing can't run away
+    t = max(-25.0, min(25.0, trend_pct or 0.0))
+    move = t * (adj_pct / 100.0)  # adj_pct is sensitivity 0..100
+    return comp_avg * (1 + move / 100.0)
+
+def trend_label(direction, pct):
+    if not direction:
+        return "—"
+    if direction == "up":
+        return f"↑ Up +{pct:.0f}%"
+    if direction == "down":
+        return f"↓ Down {pct:.0f}%"
+    return f"→ Flat ({pct:+.0f}%)"
+
 with tab2:
     st.markdown("## 📦 Inventory Check")
 
@@ -1918,6 +1980,137 @@ with tab2:
                             "status": "Queued",
                         })
                         st.success("Added to Tracker ✓")
+
+            # ── 💰 Reprice Assistant (bulk comps + trend) ──────────────────────
+            st.markdown("---")
+            st.markdown("### 💰 Reprice Assistant")
+            st.caption(
+                "Pull current sold comps + 90-day trend for every card, then get a suggested "
+                "new list price. Built for repricing a full inventory at once instead of one eBay listing at a time."
+            )
+
+            if not CARDHEDGER_KEY:
+                st.info("📊 Connect the CardHedger API to enable live comps and repricing.")
+            else:
+                rp1, rp2, rp3 = st.columns(3)
+                strategy = rp1.selectbox(
+                    "Pricing strategy",
+                    ["Trend-following", "Match market", "Undercut to sell faster", "List high for offers"],
+                    index=0, key="rp_strategy",
+                    help="Trend-following raises the suggestion when a card is trending up and cuts it when trending down.",
+                )
+                if strategy == "Trend-following":
+                    adj_pct = rp2.slider("Trend sensitivity (%)", 0, 100, 50, 5, key="rp_sens",
+                                         help="How hard to lean into the trend. 50% moves the price half as much as the 90-day trend.")
+                elif strategy == "Undercut to sell faster":
+                    adj_pct = rp2.slider("Undercut below comp (%)", 0, 30, 7, 1, key="rp_under")
+                elif strategy == "List high for offers":
+                    adj_pct = rp2.slider("Premium above comp (%)", 0, 30, 10, 1, key="rp_prem")
+                else:
+                    adj_pct = rp2.slider("Adjust vs comp (%)", -20, 20, 0, 1, key="rp_match")
+                misprice_thresh = rp3.slider("Mispricing flag threshold (%)", 5, 30, 10, 1, key="rp_thresh",
+                                             help="How far your listed price can sit from market before it's flagged over/underpriced.")
+
+                max_n = max(1, len(inv))
+                proc_n = st.slider("How many cards to refresh this run", 1, max_n, min(25, max_n), key="rp_count",
+                                   help="Each card makes a few CardHedger calls. Process in batches to stay fast and within your API quota.")
+
+                if st.button("🔄 Refresh comps & trend", key="rp_run"):
+                    rows_market = []
+                    sub = inv.head(proc_n)
+                    total = max(1, len(sub))
+                    prog = st.progress(0.0, text="Fetching comps…")
+                    for i, (_, row) in enumerate(sub.iterrows()):
+                        d = str(row.get("Card Description", "") or "").strip()
+                        if not d:
+                            continue
+                        grade = detect_grade(d)
+                        mkt = fetch_market(d, grade)
+                        try:
+                            listed = float(row.get("Listed Price ($)", 0) or 0)
+                        except Exception:
+                            listed = 0.0
+                        try:
+                            cost = float(row.get("Cost Basis ($)", 0) or 0)
+                        except Exception:
+                            cost = 0.0
+                        rows_market.append({
+                            "Card": d, "Grade": grade, "Cost": cost, "Listed": listed,
+                            "Comp": mkt["comp_avg"], "TrendDir": mkt["trend_dir"],
+                            "TrendPct": mkt["trend_pct"], "Matched": mkt["matched"],
+                        })
+                        prog.progress((i + 1) / total, text=f"Fetching comps… {i + 1}/{total}")
+                    prog.empty()
+                    st.session_state["reprice_data"] = rows_market
+                    st.session_state["reprice_when"] = date.today().isoformat()
+
+                rows_market = st.session_state.get("reprice_data")
+                if rows_market:
+                    st.caption(
+                        f"Last refreshed {st.session_state.get('reprice_when','')} · {len(rows_market)} cards. "
+                        f"Adjust the strategy/sliders above to recompute instantly — no new API calls."
+                    )
+                    computed = []
+                    for r in rows_market:
+                        comp, listed = r["Comp"], r["Listed"]
+                        sugg = suggest_reprice(comp, r["TrendPct"], strategy, adj_pct)
+                        if not comp:
+                            flag = "no comp"
+                        elif listed <= 0:
+                            flag = "🟡 No list price"
+                        elif (listed - comp) / comp > misprice_thresh / 100:
+                            flag = "🔴 Overpriced"
+                        elif (listed - comp) / comp < -misprice_thresh / 100:
+                            flag = "🟢 Underpriced"
+                        else:
+                            flag = "⚪ On market"
+                        if sugg and r["Cost"] and sugg < r["Cost"]:
+                            flag += " ⚠ under cost"
+                        delta = (sugg - listed) if (sugg and listed) else None
+                        delta_pct = (delta / listed * 100) if (delta is not None and listed) else None
+                        computed.append({**r, "Sugg": sugg, "Flag": flag, "Delta": delta, "DeltaPct": delta_pct})
+
+                    n_over = sum(1 for c in computed if c["Flag"].startswith("🔴"))
+                    n_under = sum(1 for c in computed if c["Flag"].startswith("🟢"))
+                    n_nomatch = sum(1 for c in computed if not c["Matched"])
+                    mc1, mc2, mc3 = st.columns(3)
+                    mc1.metric("🔴 Overpriced", n_over, help="Listed above market — lower to sell")
+                    mc2.metric("🟢 Underpriced", n_under, help="Listed below market — room to raise")
+                    mc3.metric("No match", n_nomatch, help="CardHedger couldn't price these — check the card name")
+
+                    tdf = pd.DataFrame([{
+                        "Card": c["Card"], "Grade": c["Grade"],
+                        "Cost": f"${c['Cost']:,.0f}" if c["Cost"] else "—",
+                        "Listed": f"${c['Listed']:,.0f}" if c["Listed"] else "—",
+                        "Comp (Market)": f"${c['Comp']:,.0f}" if c["Comp"] else ("—" if c["Matched"] else "no match"),
+                        "Trend": trend_label(c["TrendDir"], c["TrendPct"]),
+                        "Suggested": f"${c['Sugg']:,.0f}" if c["Sugg"] else "—",
+                        "Δ vs Listed": (f"{'+' if c['Delta'] >= 0 else ''}${c['Delta']:,.0f} ({c['DeltaPct']:+.0f}%)"
+                                        if c["Delta"] is not None else "—"),
+                        "Flag": c["Flag"],
+                    } for c in computed])
+                    st.dataframe(tdf, use_container_width=True, hide_index=True)
+
+                    csv_buf = io.StringIO()
+                    pd.DataFrame([{
+                        "Card Description": c["Card"], "Grade": c["Grade"],
+                        "Cost Basis": round(c["Cost"], 2) if c["Cost"] else "",
+                        "Current Listed Price": round(c["Listed"], 2) if c["Listed"] else "",
+                        "Comp Avg (Market)": round(c["Comp"], 2) if c["Comp"] else "",
+                        "90-Day Trend": trend_label(c["TrendDir"], c["TrendPct"]),
+                        "Suggested Price": round(c["Sugg"], 2) if c["Sugg"] else "",
+                        "Flag": c["Flag"],
+                    } for c in computed]).to_csv(csv_buf, index=False)
+                    st.download_button(
+                        "📥 Download reprice CSV",
+                        data=csv_buf.getvalue().encode(),
+                        file_name=f"reprice_{date.today().isoformat()}.csv",
+                        mime="text/csv", key="rp_csv",
+                    )
+                    st.caption(
+                        "Use this CSV with eBay's bulk-edit / File Exchange, or work down the list by hand. "
+                        "There's no eBay API, so prices can't be pushed automatically."
+                    )
     else:
         st.info("👆 Upload your inventory file above to get started, or download the template first.")
 
