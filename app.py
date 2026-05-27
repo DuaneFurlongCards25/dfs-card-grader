@@ -11,7 +11,7 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.2.7"
+APP_VERSION = "1.2.8"
 
 RELEASE_NOTES = {
     "1.2.7": {
@@ -923,6 +923,38 @@ def ch_card_image(card_id: str) -> str:
         return cards[0].get("image", "") or ""
     return result.get("image", "") or ""
 
+def safe_image_url(u):
+    """Return a fetchable http(s) URL (normalizing protocol-relative), else None.
+
+    st.image crashes the whole app if handed a non-URL string (it tries to open
+    it as a local file → MediaFileStorageError), so anything that isn't a real
+    web URL must be filtered out before it reaches st.image.
+    """
+    if not isinstance(u, str):
+        return None
+    u = u.strip()
+    if u.startswith("//"):
+        u = "https:" + u
+    return u if u.lower().startswith(("http://", "https://")) else None
+
+def render_card_image(url, placeholder=True, **kwargs):
+    """Safely render a card image. Returns True if shown, False if not (bad/missing URL)."""
+    url = safe_image_url(url)
+    if url:
+        try:
+            st.image(url, **kwargs)
+            return True
+        except Exception:
+            pass
+    if placeholder:
+        st.markdown(
+            '<div style="background:#1e2130;border:1px solid #2e3250;border-radius:10px;'
+            'height:180px;display:flex;align-items:center;justify-content:center;'
+            'color:#4a5568;font-size:2rem;">🃏</div>',
+            unsafe_allow_html=True,
+        )
+    return False
+
 def _extract_price(p):
     for k in ("price", "sale_price", "sold_price", "value", "amount"):
         try:
@@ -1402,11 +1434,12 @@ with tab1:
                 gr_image_url = gr_ch_match.get("image", "") or ""
                 if not gr_image_url and gr_ch_match.get("card_id"):
                     gr_image_url = ch_card_image(gr_ch_match["card_id"])
+        gr_image_url = safe_image_url(gr_image_url)
 
         if gr_image_url:
             img_c, stats_c = st.columns([1, 3])
             with img_c:
-                st.image(gr_image_url, use_container_width=True)
+                render_card_image(gr_image_url, use_container_width=True)
             with stats_c:
                 m1, m2, m3 = st.columns(3)
                 with m1:
@@ -1726,15 +1759,7 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
 
         img_col, info_col = st.columns([1, 3])
         with img_col:
-            if image_url:
-                st.image(image_url, use_container_width=True)
-            else:
-                st.markdown(
-                    '<div style="background:#1e2130;border:1px solid #2e3250;border-radius:10px;'
-                    'height:180px;display:flex;align-items:center;justify-content:center;'
-                    'color:#4a5568;font-size:2rem;">🃏</div>',
-                    unsafe_allow_html=True,
-                )
+            render_card_image(image_url, use_container_width=True)
         with info_col:
             st.markdown(f"### {desc}")
             ci1, ci2, ci3 = st.columns(3)
