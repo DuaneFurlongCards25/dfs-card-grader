@@ -2103,6 +2103,164 @@ def trend_label(direction, pct):
         return f"↓ Down {pct:.0f}%"
     return f"→ Flat ({pct:+.0f}%)"
 
+# ─── Sport / rookie detection + Supabase listings helpers ────────────────────
+_SPORT_KEYS = {
+    "Soccer": [
+        'premier league','bundesliga','la liga','champions league','serie a',
+        'liga mx','fifa','messi','pulisic','yamal','ronaldo','neymar','beckham',
+        'vlahovic','gavi','pedri','mbappe','haaland','lewandowski','di maria',
+        'topps ucc','panini select fifa','topps now uefa','soccer','futbol',
+    ],
+    "Basketball": [
+        'nba',' hoops ','prizm nba','mosaic nba','select nba','basketball','wnba',
+        'hailey van lith','player of the day','timberwolves','nuggets','heat ',
+        'bucks ','suns ','clippers','maverick','thunder','pelicans','grizzlies',
+        'knicks','lakers','celtics','warriors','strawther','beringer','knueppel',
+        'joan beringer','julian strawther',
+    ],
+    "Football": [
+        'nfl','gridiron','panini contenders season ticket','panini prestige',
+        'panini absolute football','ohio state university nil',
+        'lagway','hartman','pierce','jalen mcmillan','dallas turner',
+        'jayden daniels','jordan addison','tuli tuipulotu','tyreek hill','julian sayin',
+        'chiefs','eagles','cowboys','patriots','seahawks','49ers','ravens','bengals',
+        'bills','commanders','vikings','jaguars','titans','giants','bears ','packers',
+        'lions ','browns ','saints','falcons','panthers','cardinals','rams ','chargers',
+        'raiders','broncos','dolphins','donruss optic rated rookie',
+    ],
+    "Baseball": [
+        'bowman','topps','upper deck','fleer','stadium club','heritage',
+        '1st bowman','minor league','mlb','yankees','braves','cubs','dodgers',
+        'red sox','mets','padres','astros','phillies','winfield','palmeiro',
+        'topps five star',"bowman's best",'bowman draft',
+    ],
+}
+
+def detect_sport(title):
+    t = (title or "").lower()
+    for sport in ("Soccer", "Basketball", "Football", "Baseball"):
+        if any(k in t for k in _SPORT_KEYS[sport]):
+            return sport
+    return "Unknown"
+
+def is_rookie_card(title):
+    t = (title or "").lower()
+    return any(k in t for k in [' rc ', ' rc/', '(rc)', 'rookie', '1st bowman',
+                                  'prospect', 'rated rookie', 'bowman draft'])
+
+def price_freq_for(sport):
+    return {"Baseball": "daily", "Soccer": "triweekly"}.get(sport, "weekly")
+
+def needs_pricing_today(last_priced_at_str, freq):
+    if not last_priced_at_str:
+        return True
+    try:
+        from datetime import timezone as _tz
+        lp = datetime.fromisoformat(last_priced_at_str.replace("Z", "+00:00"))
+        now = datetime.now(_tz.utc)
+        days = (now - lp).days
+        return days >= {"daily": 1, "triweekly": 3}.get(freq, 7)
+    except Exception:
+        return True
+
+def parse_ebay_csv_to_listings(df):
+    col_map = {str(c).lower(): c for c in df.columns}
+    def col(name):
+        return col_map.get(name.lower(), name)
+    rows = []
+    for _, r in df.iterrows():
+        item_num = str(r.get(col("item number"), "") or "").strip()
+        if not item_num:
+            continue
+        title = str(r.get(col("title"), "") or "").strip()
+        try:
+            price = float(r.get(col("current price"), 0) or 0)
+        except Exception:
+            price = 0.0
+        sport = detect_sport(title)
+        rookie = is_rookie_card(title)
+        freq = price_freq_for(sport)
+        def _parse_ebay_date(s):
+            s = str(s or "").strip()
+            if not s or s == "nan":
+                return None
+            for tz_suffix in [" PDT", " PST", " EDT", " EST"]:
+                s = s.replace(tz_suffix, "")
+            try:
+                return datetime.strptime(s, "%b-%d-%y %H:%M:%S").isoformat()
+            except Exception:
+                return None
+        def _int(v):
+            try: return int(v or 0)
+            except Exception: return 0
+        rows.append({
+            "item_number":   item_num,
+            "title":         title,
+            "sku":           str(r.get(col("custom label (sku)"), "") or "").strip() or None,
+            "current_price": price,
+            "start_date":    _parse_ebay_date(r.get(col("start date"))),
+            "end_date":      _parse_ebay_date(r.get(col("end date"))),
+            "watchers":      _int(r.get(col("watchers"))),
+            "sold_qty":      _int(r.get(col("sold quantity"))),
+            "condition":     str(r.get(col("condition"), "") or "").strip() or None,
+            "grader":        str(r.get(col("cd:professional grader - (id: 27501)"), "") or "").strip() or None,
+            "grade":         str(r.get(col("cd:grade - (id: 27502)"), "") or "").strip() or None,
+            "cert_number":   str(r.get(col("cda:certification number - (id: 27503)"), "") or "").strip() or None,
+            "sport":         sport,
+            "is_rookie":     rookie,
+            "price_freq":    freq,
+            "updated_at":    datetime.utcnow().isoformat() + "Z",
+        })
+    return rows
+
+def _sb_headers(extra=None):
+    h = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
+         "Content-Type": "application/json"}
+    if extra:
+        h.update(extra)
+    return h
+
+def upsert_listings(rows):
+    if not SUPABASE_URL or not rows:
+        return 0
+    total = 0
+    for i in range(0, len(rows), 500):
+        chunk = rows[i:i+500]
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/listings", json=chunk, timeout=30,
+            headers=_sb_headers({"Prefer": "resolution=merge-duplicates,return=minimal"}),
+        )
+        if r.ok:
+            total += len(chunk)
+    return total
+
+def load_listings(min_price=20, limit=1000):
+    if not SUPABASE_URL:
+        return []
+    r = requests.get(
+        f"{SUPABASE_URL}/rest/v1/listings?current_price=gte.{min_price}&order=current_price.desc&limit={limit}",
+        headers=_sb_headers(), timeout=15,
+    )
+    return r.json() if r.ok and isinstance(r.json(), list) else []
+
+def update_listing(item_number, updates):
+    if not SUPABASE_URL:
+        return False
+    r = requests.patch(
+        f"{SUPABASE_URL}/rest/v1/listings?item_number=eq.{item_number}",
+        json=updates, timeout=10,
+        headers=_sb_headers({"Prefer": "return=minimal"}),
+    )
+    return r.ok
+
+def save_listing_pricing(item_number, comp_avg, trend_dir, trend_pct, suggested):
+    return update_listing(item_number, {
+        "comp_avg": comp_avg, "trend_dir": trend_dir,
+        "trend_pct": trend_pct, "suggested_price": suggested,
+        "last_priced_at": datetime.utcnow().isoformat() + "Z",
+        "updated_at":     datetime.utcnow().isoformat() + "Z",
+    })
+
 with tab2:
     st.markdown("## 📦 Inventory Check")
 
@@ -2864,164 +3022,235 @@ with tab6:
     elif not CARDHEDGER_KEY:
         st.info("📊 Connect the CardHedger API to enable live pricing.")
     else:
-        def _num(x):
+        from datetime import timezone as _optz
+
+        op_tab_inv, op_tab_queue = st.tabs(["📦 Inventory & Aging", "🔄 Reprice Queue"])
+
+        # ── helpers shared across both sub-tabs ───────────────────────────────
+        def _days_since(dt_str):
+            if not dt_str:
+                return None
             try:
-                v = float(x)
-                return v if v == v else 0.0
+                d = datetime.fromisoformat(str(dt_str).replace("Z", "+00:00"))
+                if d.tzinfo is None:
+                    d = d.replace(tzinfo=_optz.utc)
+                return (datetime.now(_optz.utc) - d).days
             except Exception:
-                return 0.0
+                return None
 
-        used = pricing_used_today()
-        if pricing_unlimited():
-            st.caption("⚡ Live pricing: **unlimited** on your account.")
-        else:
-            st.progress(min(1.0, used / DAILY_PRICING_CAP) if DAILY_PRICING_CAP else 1.0,
-                        text=f"Live look-ups today: {used} / {DAILY_PRICING_CAP}")
-            if pricing_remaining() == 0:
-                st.warning(f"You've used today's {DAILY_PRICING_CAP} live look-ups — resets tomorrow.")
+        def _last_priced_label(ts):
+            if not ts:
+                return "Never"
+            days = _days_since(ts)
+            return f"{days}d ago" if days is not None else "?"
 
-        st.markdown(
-            "Maintain your inventory and costs, then pull live market prices on demand. "
-            "Edit a cost and every number — margin, reprice, profit — recalculates instantly."
-        )
-
-        op_file = st.file_uploader("Upload inventory (CSV or Operations Workbook .xlsx)",
-                                   type=["csv", "xlsx"], key="op_upload")
-        if op_file:
-            op_inv, op_src = load_inventory(op_file)
-            if op_inv is None:
-                st.error(f"Could not read file: {op_src}")
-            elif "Card Description" not in op_inv.columns:
-                st.error("That file has no 'Card Description' column.")
-            else:
-                for col in ("Cost Basis ($)", "Listed Price ($)"):
-                    if col not in op_inv.columns:
-                        op_inv[col] = None
-                base = op_inv[["Card Description", "Cost Basis ($)", "Listed Price ($)"]].copy()
-                base = base[base["Card Description"].notna()].reset_index(drop=True)
-                st.session_state["op_inv"] = base
-                st.success(f"Loaded {len(base)} cards.")
-
-        base = st.session_state.get("op_inv")
-        if base is not None and len(base):
-            st.markdown("### ✏️ Your inventory & costs")
-            st.caption("Edit Cost or Listed inline — changes feed the margin and reprice math below.")
-            edited = st.data_editor(
-                base, use_container_width=True, hide_index=True, num_rows="dynamic", key="op_editor",
-                column_config={
-                    "Card Description": st.column_config.TextColumn("Card", width="large"),
-                    "Cost Basis ($)": st.column_config.NumberColumn("Cost ($)", min_value=0.0, step=1.0),
-                    "Listed Price ($)": st.column_config.NumberColumn("Listed ($)", min_value=0.0, step=1.0),
-                },
+        # ── INVENTORY & AGING ─────────────────────────────────────────────────
+        with op_tab_inv:
+            st.markdown("### Sync from eBay")
+            st.caption(
+                "eBay Seller Hub → Reports → Active listings → Download CSV. "
+                "Drop it here — all 4,000+ listings sync into Supabase in seconds."
             )
-            st.session_state["op_inv"] = edited
-
-            oc1, oc2, oc3 = st.columns(3)
-            strat = oc1.selectbox("Reprice strategy",
-                                  ["Trend-following", "Match market", "Undercut to sell faster", "List high for offers"],
-                                  key="op_strat")
-            if strat == "Trend-following":
-                adj = oc2.slider("Trend sensitivity (%)", 0, 100, 50, 5, key="op_sens")
-            elif strat == "Undercut to sell faster":
-                adj = oc2.slider("Undercut below comp (%)", 0, 30, 7, 1, key="op_under")
-            elif strat == "List high for offers":
-                adj = oc2.slider("Premium above comp (%)", 0, 30, 10, 1, key="op_prem")
-            else:
-                adj = oc2.slider("Adjust vs comp (%)", -20, 20, 0, 1, key="op_match")
-
-            n_rows = len(edited)
-            budget = pricing_remaining()
-            ceiling = n_rows if pricing_unlimited() else max(1, min(n_rows, budget))
-            run_n = oc3.number_input("Cards to price this run", 1, max(1, n_rows),
-                                     min(25, ceiling), key="op_runn",
-                                     help="Each card uses one live look-up from your daily budget. Cached cards re-price free within 30 min.")
-
-            blocked = (budget <= 0 and not pricing_unlimited())
-            if st.button(f"🔄 Refresh live pricing ({int(run_n)} look-ups)", key="op_run",
-                         type="primary", disabled=blocked):
-                allow = int(run_n) if pricing_unlimited() else min(int(run_n), budget)
-                sub = edited.head(allow)
-                rows, priced = [], 0
-                prog = st.progress(0.0, text="Pricing…")
-                total = max(1, len(sub))
-                for i, (_, r) in enumerate(sub.iterrows()):
-                    d = str(r.get("Card Description", "") or "").strip()
-                    if not d:
-                        continue
-                    grade = detect_grade(d)
-                    mkt = fetch_market(d, grade)
-                    rows.append({"Card": d, "Grade": grade,
-                                 "Comp": mkt["comp_avg"], "TrendDir": mkt["trend_dir"],
-                                 "TrendPct": mkt["trend_pct"], "Matched": mkt["matched"]})
-                    priced += 1
-                    prog.progress((i + 1) / total, text=f"Pricing… {i + 1}/{total}")
-                prog.empty()
-                pricing_bump(priced)
-                st.session_state["op_priced"] = rows
-                st.session_state["op_priced_when"] = date.today().isoformat()
-                st.rerun()
-
-            priced = st.session_state.get("op_priced")
-            if priced:
-                cost_map = {
-                    str(r["Card Description"]).strip(): (_num(r.get("Cost Basis ($)")), _num(r.get("Listed Price ($)")))
-                    for _, r in edited.iterrows() if pd.notna(r.get("Card Description"))
-                }
-                table = []
-                for p in priced:
-                    cost, listed = cost_map.get(p["Card"], (0.0, 0.0))
-                    comp = p["Comp"]
-                    sugg = suggest_reprice(comp, p["TrendPct"], strat, adj)
-                    margin = (listed * (1 - EBAY_FEE) - cost) if (listed and cost) else None
-                    margin_pct = (margin / cost * 100) if (margin is not None and cost) else None
-                    sugg_profit = (sugg * (1 - EBAY_FEE) - cost) if (sugg and cost) else None
-                    if not comp:
-                        flag = "no comp"
-                    elif not listed:
-                        flag = "🟡 no list price"
-                    elif (listed - comp) / comp > 0.10:
-                        flag = "🔴 overpriced"
-                    elif (listed - comp) / comp < -0.10:
-                        flag = "🟢 underpriced"
+            op_sync_file = st.file_uploader("eBay active listings CSV", type=["csv"], key="op_sync")
+            if op_sync_file:
+                sync_df = pd.read_csv(op_sync_file, encoding="utf-8-sig")
+                listing_rows = parse_ebay_csv_to_listings(sync_df)
+                st.caption(f"Parsed {len(listing_rows):,} listings. Click below to sync.")
+                if st.button(f"⬆️ Sync {len(listing_rows):,} listings to Supabase", type="primary", key="op_sync_btn"):
+                    with st.spinner("Syncing… (batches of 500)"):
+                        n_synced = upsert_listings(listing_rows)
+                    if n_synced:
+                        st.success(f"✅ Synced {n_synced:,} listings.")
+                        st.session_state.pop("op_listings_cache", None)
+                        st.rerun()
                     else:
-                        flag = "⚪ on market"
-                    table.append({**p, "Cost": cost, "Listed": listed, "Sugg": sugg,
-                                  "Margin": margin, "MarginPct": margin_pct, "SuggProfit": sugg_profit, "Flag": flag})
+                        st.error("Sync failed. Run the Supabase SQL to create the `listings` table first, then retry.")
 
-                st.caption(f"Last priced {st.session_state.get('op_priced_when','')} · {len(table)} cards. "
-                           "Editing costs above or changing strategy recomputes instantly — no new look-ups.")
-                tdf = pd.DataFrame([{
-                    "Card": t["Card"], "Grade": t["Grade"],
-                    "Cost": f"${t['Cost']:,.0f}" if t["Cost"] else "—",
-                    "Listed": f"${t['Listed']:,.0f}" if t["Listed"] else "—",
-                    "Comp (Market)": f"${t['Comp']:,.0f}" if t["Comp"] else ("—" if t["Matched"] else "no match"),
-                    "Trend": trend_label(t["TrendDir"], t["TrendPct"]),
-                    "Margin @ listed": (f"${t['Margin']:,.0f} ({t['MarginPct']:+.0f}%)"
-                                        if (t["Margin"] is not None and t["MarginPct"] is not None)
-                                        else (f"${t['Margin']:,.0f}" if t["Margin"] is not None else "—")),
-                    "Suggested": f"${t['Sugg']:,.0f}" if t["Sugg"] else "—",
-                    "Profit @ sugg": f"${t['SuggProfit']:,.0f}" if t["SuggProfit"] is not None else "—",
-                    "Flag": t["Flag"],
-                } for t in table])
-                st.dataframe(tdf, use_container_width=True, hide_index=True)
+            st.divider()
 
-                csv_buf = io.StringIO()
-                pd.DataFrame([{
-                    "Card Description": t["Card"], "Grade": t["Grade"],
-                    "Cost Basis": round(t["Cost"], 2) if t["Cost"] else "",
-                    "Listed Price": round(t["Listed"], 2) if t["Listed"] else "",
-                    "Comp Avg (Market)": round(t["Comp"], 2) if t["Comp"] else "",
-                    "90-Day Trend": trend_label(t["TrendDir"], t["TrendPct"]),
-                    "Margin @ Listed": round(t["Margin"], 2) if t["Margin"] is not None else "",
-                    "Suggested Price": round(t["Sugg"], 2) if t["Sugg"] else "",
-                    "Profit @ Suggested": round(t["SuggProfit"], 2) if t["SuggProfit"] is not None else "",
-                    "Flag": t["Flag"],
-                } for t in table]).to_csv(csv_buf, index=False)
-                st.download_button("📥 Download operations CSV", data=csv_buf.getvalue().encode(),
-                                   file_name=f"operations_{date.today().isoformat()}.csv",
-                                   mime="text/csv", key="op_csv")
-        else:
-            st.info("👆 Upload your inventory to start. Costs you enter or edit here drive every margin and reprice number.")
+            # Load from Supabase
+            if "op_listings_cache" not in st.session_state:
+                with st.spinner("Loading from Supabase…"):
+                    st.session_state["op_listings_cache"] = load_listings(min_price=20)
+
+            all_ls = st.session_state.get("op_listings_cache", [])
+
+            if not all_ls:
+                st.info("No $20+ listings in Supabase yet. Sync your eBay CSV above to get started.")
+            else:
+                today_due = sum(1 for l in all_ls if needs_pricing_today(l.get("last_priced_at"), l.get("price_freq","weekly")))
+                never_priced = sum(1 for l in all_ls if not l.get("last_priced_at"))
+                total_value = sum(l.get("current_price") or 0 for l in all_ls)
+                sc1, sc2, sc3, sc4 = st.columns(4)
+                sc1.metric("$20+ Listings", f"{len(all_ls):,}")
+                sc2.metric("Need Pricing Today", f"{today_due:,}")
+                sc3.metric("Never Priced", f"{never_priced:,}")
+                sc4.metric("Listed Value", f"${total_value:,.0f}")
+
+                fc1, fc2, fc3 = st.columns(3)
+                sports_avail = sorted(set(l.get("sport","Unknown") for l in all_ls))
+                f_sport = fc1.selectbox("Sport", ["All"] + sports_avail, key="inv_f_sport")
+                f_show  = fc2.selectbox("Show", ["All","Needs Pricing","Never Priced"], key="inv_f_show")
+                if fc3.button("🔄 Refresh inventory", key="inv_refresh"):
+                    st.session_state.pop("op_listings_cache", None)
+                    st.rerun()
+
+                filtered_ls = all_ls
+                if f_sport != "All":
+                    filtered_ls = [l for l in filtered_ls if l.get("sport") == f_sport]
+                if f_show == "Needs Pricing":
+                    filtered_ls = [l for l in filtered_ls if needs_pricing_today(l.get("last_priced_at"), l.get("price_freq","weekly"))]
+                elif f_show == "Never Priced":
+                    filtered_ls = [l for l in filtered_ls if not l.get("last_priced_at")]
+
+                inv_rows = []
+                for l in filtered_ls:
+                    inv_rows.append({
+                        "Title":        (l.get("title") or "")[:65],
+                        "Sport":        l.get("sport","?"),
+                        "RC":           "✓" if l.get("is_rookie") else "",
+                        "Price ($)":    l.get("current_price"),
+                        "Cost ($)":     l.get("cost_basis"),
+                        "Comp ($)":     l.get("comp_avg"),
+                        "Suggested ($)":l.get("suggested_price"),
+                        "Trend":        trend_label(l.get("trend_dir"), l.get("trend_pct") or 0),
+                        "Days Listed":  _days_since(l.get("start_date")),
+                        "Last Priced":  _last_priced_label(l.get("last_priced_at")),
+                        "Freq":         l.get("price_freq","weekly"),
+                        "Item #":       l.get("item_number",""),
+                    })
+
+                st.dataframe(
+                    pd.DataFrame(inv_rows), use_container_width=True, hide_index=True,
+                    column_config={
+                        "Price ($)":     st.column_config.NumberColumn(format="$%.2f"),
+                        "Cost ($)":      st.column_config.NumberColumn(format="$%.2f"),
+                        "Comp ($)":      st.column_config.NumberColumn(format="$%.2f"),
+                        "Suggested ($)": st.column_config.NumberColumn(format="$%.2f"),
+                    },
+                )
+                st.caption(f"Showing {len(filtered_ls):,} of {len(all_ls):,} listings.")
+
+        # ── REPRICE QUEUE ─────────────────────────────────────────────────────
+        with op_tab_queue:
+            used = pricing_used_today()
+            if pricing_unlimited():
+                st.caption("⚡ Live pricing: **unlimited** on your account.")
+            else:
+                st.progress(min(1.0, used / DAILY_PRICING_CAP) if DAILY_PRICING_CAP else 1.0,
+                            text=f"Live look-ups today: {used} / {DAILY_PRICING_CAP}")
+                if pricing_remaining() == 0:
+                    st.warning(f"You've used today's {DAILY_PRICING_CAP} live look-ups — resets tomorrow.")
+
+            if "op_listings_cache" not in st.session_state:
+                st.session_state["op_listings_cache"] = load_listings(min_price=20)
+
+            all_ls2 = st.session_state.get("op_listings_cache", [])
+            if not all_ls2:
+                st.info("No listings in Supabase yet. Go to Inventory & Aging → sync your eBay CSV first.")
+            else:
+                due = [l for l in all_ls2 if needs_pricing_today(l.get("last_priced_at"), l.get("price_freq","weekly"))]
+
+                def _queue_priority(l):
+                    sport, rc = l.get("sport","Unknown"), l.get("is_rookie", False)
+                    if sport == "Baseball" and rc: return 0
+                    if sport == "Baseball": return 1
+                    if sport == "Soccer": return 2
+                    return 3
+
+                due.sort(key=_queue_priority)
+
+                st.markdown(f"### Today's queue — {len(due)} cards")
+                st.caption(
+                    "Priority order: ⚾ Baseball rookies → ⚾ Baseball → ⚽ Soccer → 🏈 Football / 🏀 Basketball / Other. "
+                    f"{len(all_ls2) - len(due)} cards already up to date."
+                )
+
+                if not due:
+                    st.success("✅ All $20+ listings are current — nothing due today.")
+                else:
+                    qc1, qc2, qc3 = st.columns(3)
+                    q_strat = qc1.selectbox("Strategy", ["Trend-following","Match market","Undercut to sell faster","List high for offers"], key="q_strat")
+                    if q_strat == "Trend-following":
+                        q_adj = qc2.slider("Trend sensitivity (%)", 0, 100, 50, 5, key="q_sens")
+                    elif q_strat == "Undercut to sell faster":
+                        q_adj = qc2.slider("Undercut below comp (%)", 0, 30, 7, 1, key="q_under")
+                    elif q_strat == "List high for offers":
+                        q_adj = qc2.slider("Premium above comp (%)", 0, 30, 10, 1, key="q_prem")
+                    else:
+                        q_adj = qc2.slider("Adjust vs comp (%)", -20, 20, 0, 1, key="q_match")
+
+                    budget = pricing_remaining()
+                    max_run = len(due) if pricing_unlimited() else max(1, min(len(due), budget))
+                    run_n = qc3.number_input("Cards this run", 1, max(1, len(due)), min(min(100, len(due)), max_run), key="q_runn")
+
+                    blocked = (budget <= 0 and not pricing_unlimited())
+                    if st.button(f"🔄 Run queue ({int(run_n)} look-ups)", type="primary", key="q_run", disabled=blocked):
+                        batch = due[:int(run_n)]
+                        prog = st.progress(0.0, text="Pricing…")
+                        q_res = []
+                        for i, l in enumerate(batch):
+                            title = l.get("title","")
+                            grade = detect_grade(title)
+                            mkt = fetch_market(title, grade)
+                            sugg = suggest_reprice(mkt["comp_avg"], mkt["trend_pct"], q_strat, q_adj)
+                            save_listing_pricing(l["item_number"], mkt["comp_avg"], mkt["trend_dir"], mkt["trend_pct"], sugg)
+                            q_res.append({**l, "comp_avg": mkt["comp_avg"], "trend_dir": mkt["trend_dir"],
+                                          "trend_pct": mkt["trend_pct"], "suggested_price": sugg})
+                            prog.progress((i+1)/len(batch), text=f"Pricing… {i+1}/{len(batch)}")
+                        pricing_bump(len(batch))
+                        prog.empty()
+                        st.session_state.pop("op_listings_cache", None)
+                        st.session_state["q_results"] = q_res
+                        st.success(f"✅ Priced {len(q_res)} cards. Results saved to Supabase.")
+                        st.rerun()
+
+                    display_list = st.session_state.get("q_results") or due[:100]
+                    if display_list:
+                        rtbl = []
+                        for l in display_list:
+                            cur  = l.get("current_price") or 0
+                            comp = l.get("comp_avg")
+                            sugg = l.get("suggested_price")
+                            diff = ((sugg - cur) / cur * 100) if (sugg and cur) else None
+                            rtbl.append({
+                                "Title":         (l.get("title","") or "")[:65],
+                                "Sport":         l.get("sport","?"),
+                                "RC":            "✓" if l.get("is_rookie") else "",
+                                "Current ($)":   cur,
+                                "Comp ($)":      comp,
+                                "Trend":         trend_label(l.get("trend_dir"), l.get("trend_pct") or 0),
+                                "Suggested ($)": sugg,
+                                "∆ vs Listed":   f"{diff:+.0f}%" if diff is not None else "—",
+                                "Item #":        l.get("item_number",""),
+                            })
+                        st.dataframe(
+                            pd.DataFrame(rtbl), use_container_width=True, hide_index=True,
+                            column_config={
+                                "Current ($)":   st.column_config.NumberColumn(format="$%.2f"),
+                                "Comp ($)":      st.column_config.NumberColumn(format="$%.2f"),
+                                "Suggested ($)": st.column_config.NumberColumn(format="$%.2f"),
+                            },
+                        )
+
+                        ebay_rows = [l for l in display_list if l.get("suggested_price")]
+                        if ebay_rows:
+                            ebuf = io.StringIO()
+                            pd.DataFrame([{
+                                "Item number":     l.get("item_number",""),
+                                "Title":           l.get("title",""),
+                                "Current Price":   l.get("current_price",""),
+                                "Suggested Price": round(l["suggested_price"], 2),
+                                "Comp Avg":        round(l["comp_avg"], 2) if l.get("comp_avg") else "",
+                                "Trend":           trend_label(l.get("trend_dir"), l.get("trend_pct") or 0),
+                                "Sport":           l.get("sport",""),
+                            } for l in ebay_rows]).to_csv(ebuf, index=False)
+                            st.download_button(
+                                "📥 Export reprice CSV for eBay",
+                                data=ebuf.getvalue().encode(),
+                                file_name=f"reprice_{date.today().isoformat()}.csv",
+                                mime="text/csv", key="q_export",
+                            )
 
 # ─── Footer ───────────────────────────────────────────────────────────────────
 st.markdown("---")
