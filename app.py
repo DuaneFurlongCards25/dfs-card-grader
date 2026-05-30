@@ -3296,21 +3296,40 @@ with tab6:
 
                         ebay_rows = [l for l in display_list if l.get("suggested_price")]
                         if ebay_rows:
+                            # eBay upload file — price-only, 2 columns
+                            # Uploading any extra columns risks overwriting Heystack formatting
                             ebuf = io.StringIO()
                             pd.DataFrame([{
-                                "Item number":     l.get("item_number",""),
-                                "Title":           l.get("title",""),
-                                "Current Price":   l.get("current_price",""),
-                                "Suggested Price": round(l["suggested_price"], 2),
-                                "Comp Avg":        round(l["comp_avg"], 2) if l.get("comp_avg") else "",
-                                "Trend":           trend_label(l.get("trend_dir"), l.get("trend_pct") or 0),
-                                "Sport":           l.get("sport",""),
+                                "Item number": l.get("item_number",""),
+                                "Start price": round(l["suggested_price"], 2),
                             } for l in ebay_rows]).to_csv(ebuf, index=False)
-                            st.download_button(
-                                "📥 Export reprice CSV for eBay",
+
+                            # Reference sheet with full context (keep for your own records)
+                            ref_buf = io.StringIO()
+                            pd.DataFrame([{
+                                "Item number":   l.get("item_number",""),
+                                "Title":         l.get("title",""),
+                                "Current Price": l.get("current_price",""),
+                                "New Price":     round(l["suggested_price"], 2),
+                                "Comp Avg":      round(l["comp_avg"], 2) if l.get("comp_avg") else "",
+                                "Trend":         trend_label(l.get("trend_dir"), l.get("trend_pct") or 0),
+                                "Sport":         l.get("sport",""),
+                            } for l in ebay_rows]).to_csv(ref_buf, index=False)
+
+                            ec1, ec2 = st.columns(2)
+                            ec1.download_button(
+                                "📤 Upload to eBay (price only)",
                                 data=ebuf.getvalue().encode(),
-                                file_name=f"reprice_{date.today().isoformat()}.csv",
-                                mime="text/csv", key="q_export",
+                                file_name=f"ebay_reprice_{date.today().isoformat()}.csv",
+                                mime="text/csv", key="q_export_ebay",
+                                help="Safe to upload directly — only Item number + Start price. Nothing else touched.",
+                            )
+                            ec2.download_button(
+                                "📋 Full reference sheet",
+                                data=ref_buf.getvalue().encode(),
+                                file_name=f"reprice_reference_{date.today().isoformat()}.csv",
+                                mime="text/csv", key="q_export_ref",
+                                help="Your records — current price, comp, trend, sport. Do NOT upload this to eBay.",
                             )
 
 # ─── Footer ───────────────────────────────────────────────────────────────────
