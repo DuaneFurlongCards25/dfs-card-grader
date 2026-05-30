@@ -2055,27 +2055,65 @@ def load_inventory(uploaded_file):
 def detect_grade(desc):
     """Infer the grade to price against from the card description. Defaults to Raw."""
     d = (desc or "").upper()
-    if "PSA 10" in d or "GEM MINT 10" in d or "GEM MT 10" in d:
-        return "PSA 10"
-    if "PSA 9" in d:
-        return "PSA 9"
+    if "PSA 10" in d or "GEM MINT 10" in d or "GEM MT 10" in d: return "PSA 10"
+    if "PSA 9.5" in d: return "PSA 9.5"
+    if "PSA 9"  in d: return "PSA 9"
+    if "PSA 8.5" in d: return "PSA 8.5"
+    if "PSA 8"  in d: return "PSA 8"
+    if "PSA 7"  in d: return "PSA 7"
+    if "PSA 6"  in d: return "PSA 6"
+    if "PSA 5"  in d: return "PSA 5"
+    if "BGS 10" in d or "BGS PRISTINE" in d: return "BGS 10"
+    if "BGS 9.5" in d: return "BGS 9.5"
+    if "BGS 9"  in d: return "BGS 9"
+    if "SGC 10" in d: return "SGC 10"
+    if "SGC 9.5" in d: return "SGC 9.5"
+    if "SGC 9"  in d: return "SGC 9"
     return "Raw"
 
 def fetch_market(desc, grade):
-    """Look up a card on CardHedger and return its comp avg + 90-day trend for the given grade."""
+    """Look up a card via CardHedger card-match (AI) and return comp avg + 90-day trend."""
     out = {"grade": grade, "comp_avg": None, "trend_dir": None, "trend_pct": 0.0, "matched": False}
     if not CARDHEDGER_KEY:
         return out
-    matches = ch_search(desc)
-    if not matches:
+
+    # Use card-match (AI-powered) for better accuracy than card-search
+    match = ch_card_match(desc)
+    if not match:
         return out
-    card = matches[0]
-    cid = card.get("card_id") or card.get("id")
+
+    cid = match.get("card_id") or match.get("id")
     if not cid:
         return out
+
     out["matched"] = True
-    cdata = ch_comps(cid, grade) or {}
-    out["comp_avg"] = cdata.get("comp_price") or cdata.get("average") or cdata.get("mean")
+
+    # First try: grade-specific comp from the match's prices array
+    prices = match.get("prices") or []
+    for p in prices:
+        if str(p.get("grade","")).upper() == grade.upper():
+            try:
+                out["comp_avg"] = float(p["price"])
+            except Exception:
+                pass
+            break
+
+    # Second try: dedicated comps endpoint for the grade
+    if not out["comp_avg"]:
+        cdata = ch_comps(cid, grade) or {}
+        out["comp_avg"] = cdata.get("comp_price") or cdata.get("average") or cdata.get("mean")
+
+    # Fall back to Raw if still nothing and the card is graded
+    if not out["comp_avg"] and grade != "Raw":
+        for p in prices:
+            if str(p.get("grade","")).upper() == "RAW":
+                try:
+                    out["comp_avg"] = float(p["price"])
+                    out["grade"] = "Raw (fallback)"
+                except Exception:
+                    pass
+                break
+
     out["trend_dir"], out["trend_pct"] = calculate_trend(ch_price_history(cid, grade, days=90))
     return out
 
