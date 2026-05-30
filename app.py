@@ -2213,45 +2213,66 @@ def parse_ebay_csv_to_listings(df):
         })
     return rows
 
-def _sb_headers(extra=None):
-    h = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
-         "Content-Type": "application/json"}
-    if extra:
-        h.update(extra)
-    return h
+def _sb_ctx():
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+def _sb_base_headers():
+    return {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json"}
 
 def upsert_listings(rows):
     if not SUPABASE_URL or not rows:
         return 0
+    ctx = _sb_ctx()
     total = 0
     for i in range(0, len(rows), 500):
         chunk = rows[i:i+500]
-        r = requests.post(
-            f"{SUPABASE_URL}/rest/v1/listings", json=chunk, timeout=30,
-            headers=_sb_headers({"Prefer": "resolution=merge-duplicates,return=minimal"}),
+        body = json.dumps(chunk).encode()
+        req = urllib.request.Request(
+            f"{SUPABASE_URL}/rest/v1/listings",
+            data=body, method="POST",
+            headers={**_sb_base_headers(),
+                     "Prefer": "resolution=merge-duplicates,return=minimal"},
         )
-        if r.ok:
-            total += len(chunk)
+        try:
+            with urllib.request.urlopen(req, context=ctx, timeout=30):
+                total += len(chunk)
+        except Exception:
+            pass
     return total
 
 def load_listings(min_price=20, limit=1000):
     if not SUPABASE_URL:
         return []
-    r = requests.get(
-        f"{SUPABASE_URL}/rest/v1/listings?current_price=gte.{min_price}&order=current_price.desc&limit={limit}",
-        headers=_sb_headers(), timeout=15,
-    )
-    return r.json() if r.ok and isinstance(r.json(), list) else []
+    ctx = _sb_ctx()
+    url = (f"{SUPABASE_URL}/rest/v1/listings"
+           f"?current_price=gte.{min_price}&order=current_price.desc&limit={limit}")
+    req = urllib.request.Request(url, headers=_sb_base_headers())
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
+            data = json.loads(r.read().decode())
+            return data if isinstance(data, list) else []
+    except Exception:
+        return []
 
 def update_listing(item_number, updates):
     if not SUPABASE_URL:
         return False
-    r = requests.patch(
-        f"{SUPABASE_URL}/rest/v1/listings?item_number=eq.{item_number}",
-        json=updates, timeout=10,
-        headers=_sb_headers({"Prefer": "return=minimal"}),
+    ctx = _sb_ctx()
+    body = json.dumps(updates).encode()
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/rest/v1/listings?item_number=eq.{urllib.parse.quote(item_number)}",
+        data=body, method="PATCH",
+        headers={**_sb_base_headers(), "Prefer": "return=minimal"},
     )
-    return r.ok
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=10):
+            return True
+    except Exception:
+        return False
 
 def save_listing_pricing(item_number, comp_avg, trend_dir, trend_pct, suggested):
     return update_listing(item_number, {
