@@ -3170,7 +3170,9 @@ with tab6:
             if not all_ls2:
                 st.info("No listings in Supabase yet. Go to Inventory & Aging → sync your eBay CSV first.")
             else:
-                due = [l for l in all_ls2 if needs_pricing_today(l.get("last_priced_at"), l.get("price_freq","weekly"))]
+                force_all = st.toggle("Price all $20+ listings (ignore schedule)", key="q_force_all")
+
+                due = all_ls2 if force_all else [l for l in all_ls2 if needs_pricing_today(l.get("last_priced_at"), l.get("price_freq","weekly"))]
 
                 def _queue_priority(l):
                     sport, rc = l.get("sport","Unknown"), l.get("is_rookie", False)
@@ -3188,7 +3190,7 @@ with tab6:
                 )
 
                 if not due:
-                    st.success("✅ All $20+ listings are current — nothing due today.")
+                    st.success("✅ All $20+ listings are current — toggle 'Price all' above to force a full run.")
                 else:
                     qc1, qc2, qc3 = st.columns(3)
                     q_strat = qc1.selectbox("Strategy", ["Trend-following","Match market","Undercut to sell faster","List high for offers"], key="q_strat")
