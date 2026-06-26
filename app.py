@@ -11,7 +11,7 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.3.2"
+APP_VERSION = "1.3.3"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -21,6 +21,15 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.3.3": {
+        "emoji": "⚖️",
+        "title": "FMV + Grade vs Flip now work while GemRate is offline",
+        "items": [
+            ("⚖️", "Grade vs Flip + PASS verdict now appear on the CardHedger screen too (the one you see when GemRate is down) — no longer hidden."),
+            ("🎯", "FMV (cleaned value) + confidence grade now show on that screen and pre-fill your cost/sell prices."),
+            ("📊", "Set your own gem-rate estimate there to weight the PSA 10 vs PSA 9 outcome while PSA pop data is unavailable."),
+        ],
+    },
     "1.3.2": {
         "emoji": "❌",
         "title": "Grade vs Flip now warns when to just PASS",
@@ -1038,6 +1047,22 @@ def fmv_caption(d):
         band = f" (conf {grade})" if grade else ""
     return f"🎯 **FMV ${p:,.2f}**{band}"
 
+def fmv_band_conf(d):
+    """'🎯 FMV · $lo–$hi · conf A' for use under a metric already showing the FMV price."""
+    if not fmv_price(d):
+        return ""
+    lo, hi = d.get("price_low"), d.get("price_high")
+    grade = d.get("confidence_grade") or ""
+    parts = []
+    try:
+        if lo and hi:
+            parts.append(f"${float(lo):,.0f}–${float(hi):,.0f}")
+    except Exception:
+        pass
+    if grade:
+        parts.append(f"conf {grade}")
+    return "🎯 FMV · " + " · ".join(parts) if parts else "🎯 FMV"
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def ch_price_history(card_id, grade: str, days: int = 90):
     return _ch_post("/v1/cards/prices-by-card", {
@@ -1895,6 +1920,15 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
         ch_psa9  = price_map.get("PSA 9")
         ch_raw   = price_map.get("Raw")
 
+        # Cleaned FMV per grade (more reliable than the plain avg); falls back to avg.
+        _cid = ch_match_data.get("card_id")
+        fb_raw_fmv   = ch_fmv(_cid, "Raw")    if _cid else {}
+        fb_psa10_fmv = ch_fmv(_cid, "PSA 10") if _cid else {}
+        fb_psa9_fmv  = ch_fmv(_cid, "PSA 9")  if _cid else {}
+        raw_val   = fmv_price(fb_raw_fmv)   or ch_raw
+        psa10_val = fmv_price(fb_psa10_fmv) or ch_psa10
+        psa9_val  = fmv_price(fb_psa9_fmv)  or ch_psa9
+
         _link_style_fb = (
             "display:inline-flex;align-items:center;gap:6px;padding:8px 14px;"
             "border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;"
@@ -1935,10 +1969,18 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
         with fb1:
             st.markdown("**Gem Rate (PSA 10)**")
             st.markdown('<span style="color:#94a3b8;font-size:14px">N/A — GemRate offline</span>', unsafe_allow_html=True)
-        if ch_psa10:
-            fb2.metric("PSA 10 Avg", f"${ch_psa10:,.2f}")
-        if ch_psa9:
-            fb3.metric("PSA 9 Avg", f"${ch_psa9:,.2f}")
+        if psa10_val:
+            fb2.metric("PSA 10", f"${psa10_val:,.2f}")
+            _c10 = fmv_band_conf(fb_psa10_fmv)
+            if _c10:
+                fb2.caption(_c10)
+        if psa9_val:
+            fb3.metric("PSA 9", f"${psa9_val:,.2f}")
+            _c9 = fmv_band_conf(fb_psa9_fmv)
+            if _c9:
+                fb3.caption(_c9)
+        if fmv_price(fb_raw_fmv) or fmv_price(fb_psa10_fmv):
+            st.caption("🎯 Showing FMV (cleaned value) where available, else the CardHedger average. Confidence A = best.")
 
         st.markdown("#### ROI Analysis")
 
@@ -1946,20 +1988,20 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
         with ra1:
             raw_cost = st.number_input(
                 "Your cost for the raw card ($)", min_value=0.0,
-                value=float(ch_raw) if ch_raw else 50.0,
+                value=float(raw_val) if raw_val else 50.0,
                 step=5.0, key="t1_raw",
             )
-            st.caption("Pre-filled from CardHedger live raw avg — update to your actual price.")
+            st.caption("Pre-filled from raw FMV (cleaned) — update to your actual price.")
         with ra2:
             tier = default_tier
             st.caption(f"**Grading tier:** {tier} (${PSA_FEES[tier]:.2f}) — change in sidebar ⚙️")
         with ra3:
             graded_price = st.number_input(
                 "Expected PSA 10 sell price ($)", min_value=0.0,
-                value=float(ch_psa10) if ch_psa10 else 0.0,
+                value=float(psa10_val) if psa10_val else 0.0,
                 step=10.0, key="t1_graded",
             )
-            st.caption("Pre-filled from CardHedger PSA 10 avg — adjust as needed.")
+            st.caption("Pre-filled from PSA 10 FMV (cleaned) — adjust as needed.")
 
         if raw_cost > 0:
             fee      = PSA_FEES[tier]
@@ -2002,6 +2044,53 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
                     st.code(summary_fb, language=None)
             else:
                 st.info("Enter a PSA 10 price above to get a GO/NO-GO decision")
+
+        # ── ⚖️ Grade vs Flip (works even with GemRate offline) ────────────────
+        if raw_cost > 0 and (raw_val or psa10_val or psa9_val):
+            st.markdown("#### ⚖️ Grade vs Flip — the real decision")
+            st.caption(
+                "Grading locks up your cash for months. Here's what each path nets. "
+                "GemRate is offline, so set your own gem-rate estimate below to weight the PSA 10 vs PSA 9 outcome."
+            )
+            gem_fb = st.slider(
+                "Estimated gem rate % (your best guess — PSA pop is offline)",
+                0, 100, 50, 5, key="fb_gem",
+                help="How often you think this card grades a PSA 10. 50% is a neutral default.",
+            )
+            gvf = grade_vs_flip(raw_cost, raw_val, psa10_val, psa9_val, gem_fb, tier, ship_cost, opp_rate)
+            d1, d2, d3 = st.columns(3)
+            with d1:
+                st.markdown("**💵 Flip Raw Now**")
+                st.metric("Sell ~", f"${raw_val:,.0f}" if raw_val else "—", help="Raw FMV (cleaned)")
+                st.metric("Net profit", f"${gvf['raw_net']:,.0f}" if gvf['raw_net'] is not None else "—",
+                          help="After eBay fees + your buy cost. Cash back in days, nothing locked up.")
+            with d2:
+                st.markdown("**💎 Grade → PSA 10**")
+                st.metric("Sell ~", f"${psa10_val:,.0f}" if psa10_val else "—")
+                st.metric("Net profit", f"${gvf['net10']:,.0f}" if gvf['net10'] is not None else "—",
+                          help=f"After grading, shipping, eBay fees, and ${gvf['hold']:,.0f} holding cost.")
+            with d3:
+                st.markdown("**🥈 Grade → PSA 9**")
+                st.metric("Sell ~", f"${psa9_val:,.0f}" if psa9_val else "—")
+                st.metric("Net profit", f"${gvf['net9']:,.0f}" if gvf['net9'] is not None else "—",
+                          help="The downside if it doesn't gem — same costs, lower sale.")
+            ev1, ev2, ev3 = st.columns(3)
+            ev1.metric(f"🎯 Expected net (gem {gem_fb}%)",
+                       f"${gvf['net_exp']:,.0f}" if gvf['net_exp'] is not None else "—",
+                       help="Gem-rate-weighted expected profit after all costs incl. holding.")
+            ev2.metric("💸 Holding cost", f"${gvf['hold']:,.0f}",
+                       help=f"${gvf['capital']:,.0f} of cash locked ~{gvf['cal_days']} days at {opp_rate:.0f}%/yr")
+            if gvf['premium'] is not None:
+                ev3.metric("Grade premium vs raw",
+                           f"{'+' if gvf['premium'] >= 0 else '−'}${abs(gvf['premium']):,.0f}",
+                           help="Expected graded net minus flip-raw net — your reward for the wait.")
+            _lbl, _clr, _msg = grade_flip_verdict(gvf)
+            (st.success if _clr == "green" else st.warning if _clr == "amber"
+             else st.error if _clr == "red" else st.info)(f"**{_lbl}** — {_msg}")
+            st.caption(
+                f"⏳ Grading ties up **${gvf['capital']:,.0f}** for ~**{gvf['cal_days']} days** "
+                f"(~{gvf['cal_days']/30:.1f} months). Flipping raw frees that cash now."
+            )
 
         st.markdown("#### 🔍 Card Finder Links")
         st.markdown(
