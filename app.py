@@ -11,7 +11,7 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.1"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -21,6 +21,15 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.3.1": {
+        "emoji": "🎯",
+        "title": "Fair Market Value — true numbers, not just averages",
+        "items": [
+            ("🎯", "New FMV shown beside every comp average (Raw + PSA 10) — a statistically cleaned price that throws out fluke sales the plain average gets fooled by."),
+            ("🔤", "Confidence grade (A/B/C) + a low–high price band on each FMV, so you know how much to trust it at a card show."),
+            ("✅", "Your cost, sell price, ROI, and Grade-vs-Flip now run on FMV — falls back to the comp average automatically when FMV data is thin."),
+        ],
+    },
     "1.3.0": {
         "emoji": "🧰",
         "title": "Operations & Inventory — live pricing on your whole list",
@@ -988,6 +997,39 @@ def ch_comps(card_id, grade: str):
         "count": 20, "include_raw_prices": True,
     }) or {}
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def ch_fmv(card_id, grade: str):
+    """Fair Market Value — statistically cleaned price (Winsorized median) with a
+    confidence grade and a low–high band. More reliable than the raw comp average.
+    Returns {} if unavailable."""
+    return _ch_post("/v1/cards/card-fmv", {
+        "card_id": card_id, "grade": grade,
+    }) or {}
+
+def fmv_price(d):
+    """Pull a usable price out of an FMV dict, else None."""
+    try:
+        v = float(d.get("price"))
+        return v if v > 0 else None
+    except Exception:
+        return None
+
+def fmv_caption(d):
+    """One-line FMV display: '🎯 FMV $X  ($low–$high, conf A)' or '' if no price."""
+    p = fmv_price(d)
+    if not p:
+        return ""
+    lo, hi = d.get("price_low"), d.get("price_high")
+    grade = d.get("confidence_grade") or ""
+    band = ""
+    try:
+        if lo and hi:
+            band = f" (${float(lo):,.0f}–${float(hi):,.0f}"
+            band += f", conf {grade})" if grade else ")"
+    except Exception:
+        band = f" (conf {grade})" if grade else ""
+    return f"🎯 **FMV ${p:,.2f}**{band}"
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def ch_price_history(card_id, grade: str, days: int = 90):
     return _ch_post("/v1/cards/prices-by-card", {
@@ -1550,9 +1592,12 @@ with tab1:
         ch_raw_sales = []
         ch_psa10_sales = []
         ch_card_name = ""
+        ch_raw_fmv = {}
+        ch_psa10_fmv = {}
+        ch_psa9_fmv = {}
 
         if CARDHEDGER_KEY:
-            with st.spinner("Fetching live sold comps & trend data..."):
+            with st.spinner("Fetching live sold comps, FMV & trend data..."):
                 ch_matches = ch_search(desc)
                 if ch_matches:
                     ch_card = ch_matches[0]
@@ -1562,6 +1607,9 @@ with tab1:
                         raw_data  = ch_comps(ch_id, "Raw")
                         psa_data  = ch_comps(ch_id, "PSA 10")
                         psa9_data = ch_comps(ch_id, "PSA 9")
+                        ch_raw_fmv   = ch_fmv(ch_id, "Raw")
+                        ch_psa10_fmv = ch_fmv(ch_id, "PSA 10")
+                        ch_psa9_fmv  = ch_fmv(ch_id, "PSA 9")
                         ch_raw_avg   = raw_data.get("comp_price") or raw_data.get("average") or raw_data.get("mean")
                         ch_psa10_avg = psa_data.get("comp_price") or psa_data.get("average") or psa_data.get("mean")
                         ch_psa9_avg  = psa9_data.get("comp_price") or psa9_data.get("average") or psa9_data.get("mean")
@@ -1601,7 +1649,10 @@ with tab1:
                             st.dataframe(pd.DataFrame(rows_r), use_container_width=True, hide_index=True, height=200)
                     if ch_raw_avg:
                         st.markdown(f"**Comp avg: ${ch_raw_avg:,.2f}**")
-                    elif not ch_raw_sales:
+                    _rf = fmv_caption(ch_raw_fmv)
+                    if _rf:
+                        st.markdown(_rf)
+                    elif not ch_raw_avg and not ch_raw_sales:
                         st.info("No raw comps found")
                 with fc2:
                     st.markdown("**💎 PSA 10 — recent sold comps**")
@@ -1611,17 +1662,22 @@ with tab1:
                             st.dataframe(pd.DataFrame(rows_g), use_container_width=True, hide_index=True, height=200)
                     if ch_psa10_avg:
                         st.markdown(f"**Comp avg: ${ch_psa10_avg:,.2f}**")
-                    elif not ch_psa10_sales:
+                    _gf = fmv_caption(ch_psa10_fmv)
+                    if _gf:
+                        st.markdown(_gf)
+                    elif not ch_psa10_avg and not ch_psa10_sales:
                         st.info("No PSA 10 comps found")
             if ch_raw_sales or ch_psa10_sales:
                 st.caption("⚠️ Comp avg includes all sale types. 🏷 BIN = fixed price (most reliable). 💬 Offer = accepted below ask. 🔨 Auction = bidding (use with caution).")
+                st.caption("🎯 **FMV** = Fair Market Value: a statistically cleaned price (Winsorized median, recent sales) with a confidence grade (A best). More reliable than the comp avg — drives the cost/sell pre-fills below.")
             elif CARDHEDGER_KEY:
                 st.info("No CardHedger match found for this card — enter prices manually below.")
         else:
             st.info("📊 Live sold comps will appear here once the CardHedger API is connected.")
 
-        raw_auto    = ch_raw_avg
-        graded_auto = ch_psa10_avg
+        # Prefer cleaned FMV for pre-fills; fall back to the comp average.
+        raw_auto    = fmv_price(ch_raw_fmv)   or ch_raw_avg
+        graded_auto = fmv_price(ch_psa10_fmv) or ch_psa10_avg
 
         ra1, ra2, ra3 = st.columns(3)
         with ra1:
@@ -1630,7 +1686,7 @@ with tab1:
                 value=float(raw_auto) if raw_auto else 50.0,
                 step=5.0, key="t1_raw",
             )
-            st.caption("What you paid (or plan to pay) for the ungraded card. Pre-filled from live comps — update to your actual price.")
+            st.caption("What you paid (or plan to pay) for the ungraded card. Pre-filled from raw FMV (cleaned) — update to your actual price.")
         with ra2:
             tier = default_tier
             st.caption(f"**Grading tier:** {tier} (${PSA_FEES[tier]:.2f}) — change in sidebar ⚙️")
@@ -1640,7 +1696,7 @@ with tab1:
                 value=float(graded_auto) if graded_auto else 0.0,
                 step=10.0, key="t1_graded",
             )
-            st.caption("The price you expect to sell a PSA 10 for on eBay. Pre-filled from live comps — adjust up or down based on your read of the market.")
+            st.caption("The price you expect to sell a PSA 10 for on eBay. Pre-filled from PSA 10 FMV (cleaned) — adjust up or down based on your read of the market.")
 
         if raw_cost > 0:
             fee      = PSA_FEES[tier]
@@ -1694,22 +1750,26 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
                 "Grading locks up your cash for months. Here's what each path actually nets — "
                 "weighted by this card's gem rate — so you decide with eyes open, not just \"I can 4× it.\""
             )
-            gvf = grade_vs_flip(raw_cost, ch_raw_avg, ch_psa10_avg, ch_psa9_avg, gem, tier, ship_cost, opp_rate)
+            # Use cleaned FMV where available, fall back to the comp average.
+            gvf_raw   = fmv_price(ch_raw_fmv)   or ch_raw_avg
+            gvf_psa10 = fmv_price(ch_psa10_fmv) or ch_psa10_avg
+            gvf_psa9  = fmv_price(ch_psa9_fmv)  or ch_psa9_avg
+            gvf = grade_vs_flip(raw_cost, gvf_raw, gvf_psa10, gvf_psa9, gem, tier, ship_cost, opp_rate)
 
             d1, d2, d3 = st.columns(3)
             with d1:
                 st.markdown("**💵 Flip Raw Now**")
-                st.metric("Sell ~", f"${ch_raw_avg:,.0f}" if ch_raw_avg else "—", help="Current raw sold-comp average")
+                st.metric("Sell ~", f"${gvf_raw:,.0f}" if gvf_raw else "—", help="Raw FMV (cleaned) — or sold-comp average if FMV unavailable")
                 st.metric("Net profit", f"${gvf['raw_net']:,.0f}" if gvf['raw_net'] is not None else "—",
                           help="After eBay fees + your buy cost. Cash back in ~3-7 days, nothing locked up.")
             with d2:
                 st.markdown("**💎 Grade → PSA 10**")
-                st.metric("Sell ~", f"${ch_psa10_avg:,.0f}" if ch_psa10_avg else "—")
+                st.metric("Sell ~", f"${gvf_psa10:,.0f}" if gvf_psa10 else "—")
                 st.metric("Net profit", f"${gvf['net10']:,.0f}" if gvf['net10'] is not None else "—",
                           help=f"After grading, shipping, eBay fees, and ${gvf['hold']:,.0f} holding cost.")
             with d3:
                 st.markdown("**🥈 Grade → PSA 9**")
-                st.metric("Sell ~", f"${ch_psa9_avg:,.0f}" if ch_psa9_avg else "—")
+                st.metric("Sell ~", f"${gvf_psa9:,.0f}" if gvf_psa9 else "—")
                 st.metric("Net profit", f"${gvf['net9']:,.0f}" if gvf['net9'] is not None else "—",
                           help="The downside if it doesn't gem — same costs, lower sale.")
 

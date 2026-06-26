@@ -1,4 +1,5 @@
 .streamlit/secrets.toml
+.claude/settings.local.json
 config.json
 psa_tracker.csv
 __pycache__/
