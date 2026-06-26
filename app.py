@@ -11,7 +11,7 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.3.2"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -21,6 +21,14 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.3.2": {
+        "emoji": "❌",
+        "title": "Grade vs Flip now warns when to just PASS",
+        "items": [
+            ("❌", "New PASS verdict — when flipping raw AND grading both lose money at your buy price, the tool tells you to skip the card (or pay less) instead of flipping at a loss."),
+            ("🎯", "Grade vs Flip runs on cleaned FMV numbers (not raw averages) for a truer call."),
+        ],
+    },
     "1.3.1": {
         "emoji": "🎯",
         "title": "Fair Market Value — true numbers, not just averages",
@@ -1302,6 +1310,12 @@ def grade_flip_verdict(d):
         return "✅ GRADE", "green", (
             f"Expected **${net_exp:,.0f}** vs **${raw_net:,.0f}** flipping raw — "
             f"**+${d['premium']:,.0f}** for the ~{d['cal_days']}-day wait (after ${d['hold']:,.0f} holding cost).{downside}"
+        )
+    # Neither path makes money at this buy price → don't buy it.
+    if raw_net <= 0 and net_exp <= 0:
+        return "❌ PASS", "red", (
+            f"Both paths lose at this cost: flipping raw nets **${raw_net:,.0f}**, "
+            f"grading's expected is **${net_exp:,.0f}**. Skip it (or pay less).{downside}"
         )
     return "💵 FLIP RAW", "amber", (
         f"Flipping raw nets **${raw_net:,.0f}** now; grading's expected **${net_exp:,.0f}** "
