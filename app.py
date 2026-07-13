@@ -11,7 +11,7 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.3.4"
+APP_VERSION = "1.3.5"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -21,6 +21,16 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.3.5": {
+        "emoji": "📰",
+        "title": "Player Watch — live news & injury alerts (free)",
+        "items": [
+            ("🔴", "Injury status on the card's player — pulls the live ESPN injury report (MLB/NBA/NFL/NHL) with the actual injury + comment."),
+            ("📰", "Recent ESPN headlines for that player, so hot news (or bad news) shows up right next to the price — news moves cards before comps do."),
+            ("💸", "Free — uses ESPN's public feeds, no extra subscription on top of CardHedger."),
+            ("🌱", "Note: deep prospects may show 'no ESPN match' — coverage is best for established pros."),
+        ],
+    },
     "1.3.4": {
         "emoji": "📈",
         "title": "Sold Price Trend chart + sales volume",
@@ -1170,6 +1180,107 @@ def render_price_trend(card_id, key_prefix="pt", default_grade="PSA 10"):
     vc3.metric("🛒 Active for sale", "n/a",
                help="CardHedger tracks SOLD sales only, not live listings — 'how many are for sale right now' isn't available from this API.")
 
+# ── ESPN free player news + injuries (no API key) ────────────────────────────
+ESPN_SPORT = {
+    "Baseball":   ("baseball", "mlb"),
+    "Basketball": ("basketball", "nba"),
+    "Football":   ("football", "nfl"),
+    "Hockey":     ("hockey", "nhl"),
+}
+_ESPN_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+
+def _espn_get(url):
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": _ESPN_UA, "Accept": "application/json"})
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=12) as r:
+            return json.loads(r.read().decode())
+    except Exception:
+        return None
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def espn_injuries_map(sport, league):
+    """Whole-league injury report → {player_name_lower: {status,type,comment,team}}."""
+    d = _espn_get(f"https://site.api.espn.com/apis/site/v2/sports/{sport}/{league}/injuries")
+    out = {}
+    for team in (d or {}).get("injuries", []):
+        for inj in team.get("injuries", []):
+            nm = ((inj.get("athlete") or {}).get("displayName") or "").strip().lower()
+            if not nm:
+                continue
+            typ = inj.get("type")
+            typ = typ.get("description") if isinstance(typ, dict) else typ
+            out[nm] = {
+                "status":  inj.get("status") or "",
+                "type":    typ or "",
+                "comment": inj.get("shortComment") or inj.get("longComment") or "",
+                "team":    team.get("displayName", ""),
+            }
+    return out
+
+@st.cache_data(ttl=900, show_spinner=False)
+def espn_player_news(player, limit=4):
+    """Recent ESPN articles matching a player name → [{title,url,date}]."""
+    if not player:
+        return []
+    d = _espn_get(f"https://site.web.api.espn.com/apis/search/v2?query={urllib.parse.quote(player)}&limit={limit}")
+    out = []
+    for g in (d or {}).get("results", []):
+        if g.get("type") == "article":
+            for it in g.get("contents", []):
+                title = it.get("displayName") or ""
+                link = (it.get("link") or {}).get("web") if isinstance(it.get("link"), dict) else ""
+                if title and link:
+                    out.append({"title": title, "url": link, "date": (it.get("date") or "")[:10]})
+            break
+    # Prefer headlines that actually name the player (drops generic league noise).
+    last = player.lower().split()[-1] if player else ""
+    preferred = [a for a in out if last and last in a["title"].lower()]
+    return (preferred or out)[:limit]
+
+def render_player_watch(card_id, key_prefix="pw"):
+    """News + injury status for the card's player, via the free ESPN feeds."""
+    meta = ch_card_meta(card_id) if card_id else {}
+    player = (meta.get("player") or "").strip()
+    if not player:
+        return
+    category = meta.get("category") or ""
+    st.markdown("#### 📰 Player Watch — news & injury")
+
+    sport = ESPN_SPORT.get(category.title())
+    injury = None
+    if sport:
+        inj_map = espn_injuries_map(*sport)
+        injury = inj_map.get(player.lower())
+        if not injury and " " in player:            # last-name fallback
+            last = player.lower().split()[-1]
+            for nm, v in inj_map.items():
+                if nm.split()[-1] == last:
+                    injury = v
+                    break
+    if injury:
+        msg = f"🔴 **{player} — {injury['status']}**"
+        if injury["type"]:
+            msg += f" · {injury['type']}"
+        if injury["comment"]:
+            msg += f"  \n{injury['comment']}"
+        st.error(msg)
+    elif sport:
+        st.success(f"🟢 {player} — not on the {sport[1].upper()} injury report right now.")
+
+    news = espn_player_news(player)
+    if news:
+        for n in news:
+            line = f"- [{n['title']}]({n['url']})"
+            if n["date"]:
+                line += f" · _{n['date']}_"
+            st.markdown(line)
+    else:
+        srch = urllib.parse.quote(player)
+        st.caption(f"No recent ESPN articles matched **{player}** (common for prospects). "
+                   f"[Search ESPN ↗](https://www.espn.com/search/_/q/{srch})")
+    st.caption("⚡ News & injuries move card prices before the comps do. Source: ESPN (free).")
+
 def safe_image_url(u):
     """Return a fetchable http(s) URL (normalizing protocol-relative), else None.
 
@@ -1927,6 +2038,7 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
 
         if CARDHEDGER_KEY and ch_id:
             render_price_trend(ch_id, key_prefix="main")
+            render_player_watch(ch_id, key_prefix="main")
 
         st.markdown("#### 🔍 Card Finder Links")
         st.caption("All the links you need — buy raw, check sold comps, verify gem rate, or look up the PSA pop report.")
@@ -2187,6 +2299,7 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
             )
 
         render_price_trend(_cid, key_prefix="fb")
+        render_player_watch(_cid, key_prefix="fb")
 
         st.markdown("#### 🔍 Card Finder Links")
         st.markdown(
