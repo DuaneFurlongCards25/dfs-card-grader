@@ -9,9 +9,10 @@ import string
 from datetime import date, datetime
 from pathlib import Path
 import io
+import base64
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.3.5"
+APP_VERSION = "1.4.0"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -21,6 +22,16 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.4.0": {
+        "emoji": "🚀",
+        "title": "CardHedger, maximized — Hot Movers, Scan, Player Demand",
+        "items": [
+            ("🔥", "New 🔥 Hot Movers tab — the week's biggest price gainers by sport. A buy-radar for what's heating up."),
+            ("📷", "New 📷 Scan tab — snap a raw card to ID + price it (AI image match), or look up a graded slab by its cert number."),
+            ("📊", "Player Demand on Card Research — weekly sold-volume trend across ALL of a player's cards (rising = growing demand)."),
+            ("⚡", "Behind the scenes: Reprice/Operations now use one all-grades price call instead of many — fewer API calls, faster."),
+        ],
+    },
     "1.3.5": {
         "emoji": "📰",
         "title": "Player Watch — live news & injury alerts (free)",
@@ -1107,6 +1118,52 @@ def ch_card_meta(card_id):
     cards = (result or {}).get("cards") or []
     return cards[0] if cards else (result or {})
 
+def _ch_get(endpoint: str):
+    """GET against CardHedger (top-movers is GET, not POST)."""
+    if not CARDHEDGER_KEY:
+        return None
+    req = urllib.request.Request(f"{CARDHEDGER_BASE}{endpoint}",
+                                 headers={"X-API-Key": CARDHEDGER_KEY})
+    try:
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=15) as r:
+            return json.loads(r.read().decode())
+    except Exception:
+        return None
+
+@st.cache_data(ttl=900, show_spinner=False)
+def ch_top_movers(category=None, count=25):
+    """Weekly biggest price gainers (optionally filtered to a sport category)."""
+    q = f"/v1/cards/top-movers?count={int(count)}"
+    if category:
+        q += f"&category={urllib.parse.quote(category)}"
+    d = _ch_get(q) or {}
+    return d.get("cards", []) if isinstance(d, dict) else []
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def ch_all_prices(card_id):
+    """Latest price for EVERY grade in one call (Raw..PSA 10). Cheaper than N comps calls."""
+    d = _ch_post("/v1/cards/all-prices-by-card", {"card_id": card_id}) or {}
+    return d.get("prices", []) if isinstance(d, dict) else []
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def ch_sales_stats(player, interval="week", periods=8):
+    """Player sales volume + $ per period → demand trend. Returns list of buckets."""
+    d = _ch_post("/v1/cards/sales-stats-by-player",
+                 {"players": [player], "interval": interval, "periods": periods}) or {}
+    res = d.get("results", []) if isinstance(d, dict) else []
+    return (res[0].get("buckets", []) if res else [])
+
+@st.cache_data(ttl=900, show_spinner=False)
+def ch_image_match(image_b64):
+    """Identify a raw card from a photo (base64). Returns dict with candidates[]."""
+    return _ch_post("/v1/cards/image-match", {"image_base64": image_b64}) or {}
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def ch_prices_by_cert(cert, grader="PSA", days=180):
+    """Look up a graded card by its cert number → cert_info + card + price history."""
+    return _ch_post("/v1/cards/prices-by-cert",
+                    {"cert": str(cert), "grader": grader, "days": int(days)}) or {}
+
 def render_price_trend(card_id, key_prefix="pt", default_grade="PSA 10"):
     """Sold-price line chart with 7/30/60/90-day windows + sales-volume context.
 
@@ -1280,6 +1337,43 @@ def render_player_watch(card_id, key_prefix="pw"):
         st.caption(f"No recent ESPN articles matched **{player}** (common for prospects). "
                    f"[Search ESPN ↗](https://www.espn.com/search/_/q/{srch})")
     st.caption("⚡ News & injuries move card prices before the comps do. Source: ESPN (free).")
+
+def render_player_demand(card_id, key_prefix="pd"):
+    """Weekly sold-volume trend across ALL of a player's cards — a demand signal."""
+    meta = ch_card_meta(card_id) if card_id else {}
+    player = (meta.get("player") or "").strip()
+    if not player:
+        return
+    buckets = ch_sales_stats(player, interval="week", periods=8)
+    rows = []
+    for b in buckets:
+        wk = (b.get("start") or "")[:10]
+        try:
+            rows.append({"week": wk, "sales": int(b.get("count") or 0),
+                         "avg": float(b.get("average_sale") or 0)})
+        except Exception:
+            pass
+    if len(rows) < 2:
+        return
+    df = pd.DataFrame(rows).sort_values("week")
+    st.markdown(f"#### 📊 Player Demand — {player} (all cards)")
+    st.bar_chart(df.set_index("week")["sales"], height=200)
+
+    # Demand direction: recent half vs older half of the weekly sales counts.
+    vals = df["sales"].tolist()
+    mid = len(vals) // 2
+    older = sum(vals[:mid]) / max(mid, 1)
+    recent = sum(vals[mid:]) / max(len(vals) - mid, 1)
+    pct = ((recent - older) / older * 100) if older else 0
+    arrow = "📈 rising" if pct > 10 else "📉 cooling" if pct < -10 else "➡️ steady"
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Latest week — sales", f"{vals[-1]:,}")
+    m2.metric("Avg sale (latest wk)", f"${df['avg'].iloc[-1]:,.0f}")
+    m3.metric("Demand trend", arrow, f"{pct:+.0f}%")
+    st.caption(
+        f"Weekly count of ALL {player} cards sold across marketplaces (CardHedger). "
+        "Rising volume = growing demand/attention — a leading signal for where prices head."
+    )
 
 def safe_image_url(u):
     """Return a fetchable http(s) URL (normalizing protocol-relative), else None.
@@ -1699,7 +1793,7 @@ if not is_beta and SUPABASE_URL:
 if is_beta:
     st.info("🔓 **Beta Preview** — You have access to Card Research and Inventory Check. Submission Tracker and Downloads unlock with a full membership.", icon="💎")
 
-tab1, tab2, tab6, tab3, tab4, tab5 = st.tabs(["🔍 Card Research", "📦 Inventory Check", "🧰 Operations", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake"])
+tab1, tab7, tab8, tab2, tab6, tab3, tab4, tab5 = st.tabs(["🔍 Card Research", "🔥 Hot Movers", "📷 Scan", "📦 Inventory Check", "🧰 Operations", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake"])
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — Card Research
@@ -2039,6 +2133,7 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
         if CARDHEDGER_KEY and ch_id:
             render_price_trend(ch_id, key_prefix="main")
             render_player_watch(ch_id, key_prefix="main")
+            render_player_demand(ch_id, key_prefix="main")
 
         st.markdown("#### 🔍 Card Finder Links")
         st.caption("All the links you need — buy raw, check sold comps, verify gem rate, or look up the PSA pop report.")
@@ -2300,6 +2395,7 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
 
         render_price_trend(_cid, key_prefix="fb")
         render_player_watch(_cid, key_prefix="fb")
+        render_player_demand(_cid, key_prefix="fb")
 
         st.markdown("#### 🔍 Card Finder Links")
         st.markdown(
@@ -2470,7 +2566,18 @@ def fetch_market(desc, grade):
                 pass
             break
 
-    # Second try: dedicated comps endpoint for the grade
+    # Second try: all-prices-by-card — ONE cached call covers every grade, so the
+    # Reprice loop stops making a separate comps call per grade/card (cost saver).
+    if not out["comp_avg"]:
+        for p in ch_all_prices(cid):
+            if str(p.get("grade", "")).upper() == grade.upper():
+                try:
+                    out["comp_avg"] = float(p.get("price"))
+                except Exception:
+                    pass
+                break
+
+    # Third try: dedicated comps endpoint (recent-sales average) as a final fallback
     if not out["comp_avg"]:
         cdata = ch_comps(cid, grade) or {}
         out["comp_avg"] = cdata.get("comp_price") or cdata.get("average") or cdata.get("mean")
@@ -2691,6 +2798,132 @@ def save_listing_pricing(item_number, comp_avg, trend_dir, trend_pct, suggested)
         "last_priced_at": datetime.utcnow().isoformat() + "Z",
         "updated_at":     datetime.utcnow().isoformat() + "Z",
     })
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 7 — Hot Movers (top-movers)
+# ══════════════════════════════════════════════════════════════════════════════
+with tab7:
+    st.markdown("## 🔥 Hot Movers")
+    st.markdown("The week's biggest price gainers — what's heating up right now. A buy-radar, not a card you already own.")
+    if not CARDHEDGER_KEY:
+        st.info("📊 Connect the CardHedger API to load hot movers.")
+    else:
+        hm1, hm2 = st.columns([2, 1])
+        cat = hm1.selectbox("Category", ["All", "Basketball", "Baseball", "Football", "Hockey", "Pokemon", "Soccer"], key="hm_cat")
+        count = hm2.slider("How many", 10, 100, 25, 5, key="hm_count")
+        if st.button("🔥 Load hot movers", key="hm_go"):
+            st.session_state["hm_data"] = ch_top_movers(None if cat == "All" else cat, count)
+        movers = st.session_state.get("hm_data")
+        if movers is not None:
+            def _gp(card, grade):
+                for p in card.get("prices", []):
+                    if p.get("grade") == grade:
+                        try:
+                            return float(p.get("price"))
+                        except Exception:
+                            return None
+                return None
+            rows = []
+            for c in movers:
+                g = c.get("gain")
+                rows.append({
+                    "Card": c.get("description", ""),
+                    "Gain %": round(float(g), 1) if g is not None else None,
+                    "7d Sales": c.get("7 Day Sales"),
+                    "30d Sales": c.get("30 Day Sales"),
+                    "PSA 10": _gp(c, "PSA 10"),
+                    "Raw": _gp(c, "Raw"),
+                })
+            if rows:
+                dfm = pd.DataFrame(rows).sort_values("Gain %", ascending=False)
+                st.dataframe(
+                    dfm, use_container_width=True, hide_index=True,
+                    column_config={
+                        "Gain %": st.column_config.NumberColumn(format="%.1f%%"),
+                        "PSA 10": st.column_config.NumberColumn(format="$%.2f"),
+                        "Raw": st.column_config.NumberColumn(format="$%.2f"),
+                    },
+                )
+                st.caption(f"{len(rows)} movers · {cat}. Gain = recent weekly price change (CardHedger). Cross-check volume — a spike on thin sales is fragile.")
+            else:
+                st.info("No movers returned for that category — try another.")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 8 — Scan (image-match raw card + cert lookup)
+# ══════════════════════════════════════════════════════════════════════════════
+with tab8:
+    st.markdown("## 📷 Scan")
+    st.markdown("Identify a card fast — snap a raw card, or look up a graded slab by its cert number.")
+    if not CARDHEDGER_KEY:
+        st.info("📊 Connect the CardHedger API to use scanning.")
+    else:
+        scan_raw, scan_cert = st.tabs(["🃏 Raw card photo", "🎫 Graded slab (cert #)"])
+
+        with scan_raw:
+            st.caption("Upload or take a photo of the **front of a raw card**. CardHedger's AI returns the closest matches + prices.")
+            up = st.file_uploader("Card photo", type=["jpg", "jpeg", "png", "webp"], key="scan_up")
+            if up is not None:
+                pcol, rcol = st.columns([1, 2])
+                with pcol:
+                    st.image(up, caption="Your photo", use_container_width=True)
+                with rcol:
+                    with st.spinner("Identifying card..."):
+                        b64 = base64.b64encode(up.getvalue()).decode()
+                        res = ch_image_match(b64)
+                    cands = (res or {}).get("candidates") or []
+                    if not cands:
+                        st.warning("No match found. Try a straighter, well-lit photo of the card front.")
+                    else:
+                        top = cands[0]
+                        sim = top.get("similarity")
+                        st.markdown(f"**Best match:** {top.get('description','')}")
+                        st.caption(f"Similarity {sim}% · {top.get('set','')} · {top.get('variant','')}")
+                        prices = ch_all_prices(top.get("card_id"))
+                        if prices:
+                            prows = []
+                            for p in prices:
+                                try:
+                                    prows.append({"Grade": p.get("grade", ""), "Price": float(p.get("price"))})
+                                except Exception:
+                                    pass
+                            if prows:
+                                st.dataframe(
+                                    pd.DataFrame(prows), use_container_width=True, hide_index=True,
+                                    column_config={"Price": st.column_config.NumberColumn(format="$%.2f")},
+                                )
+                if cands and len(cands) > 1:
+                    with st.expander("Other possible matches"):
+                        for c in cands[1:5]:
+                            st.markdown(f"- {c.get('description','')} · _sim {c.get('similarity')}%_")
+
+        with scan_cert:
+            st.caption("Enter the cert number printed on the slab label to pull the card + recent sold prices.")
+            cc1, cc2, cc3 = st.columns([2, 1, 1])
+            cert = cc1.text_input("Cert number", key="cert_num")
+            grader = cc2.selectbox("Grader", ["PSA", "BGS", "SGC", "CGC"], key="cert_grader")
+            days = cc3.selectbox("History", [90, 180, 365], index=1, key="cert_days")
+            if st.button("🎫 Look up cert", key="cert_go") and cert.strip():
+                with st.spinner("Looking up cert..."):
+                    cres = ch_prices_by_cert(cert.strip(), grader, days)
+                info = (cres or {}).get("cert_info") or {}
+                if info.get("description"):
+                    st.markdown(f"**{info.get('description','')}**")
+                    st.caption(f"{info.get('grader','').upper()} {info.get('grade','')} · cert {info.get('cert','')}")
+                    pr = (cres or {}).get("prices") or []
+                    vals = []
+                    for p in pr:
+                        try:
+                            vals.append({"date": (p.get("closing_date") or "")[:10], "price": float(p.get("price"))})
+                        except Exception:
+                            pass
+                    if vals:
+                        dfp = pd.DataFrame(vals).drop_duplicates("date").sort_values("date")
+                        st.metric("Latest sold", f"${dfp['price'].iloc[-1]:,.2f}")
+                        st.line_chart(dfp.set_index("date")["price"], height=220)
+                    else:
+                        st.info("Cert matched, but no recent sold-price history for this exact card.")
+                else:
+                    st.warning("No card found for that cert / grader. Double-check the number and grader.")
 
 with tab2:
     st.markdown("## 📦 Inventory Check")
