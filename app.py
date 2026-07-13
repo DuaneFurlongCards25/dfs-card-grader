@@ -11,7 +11,7 @@ from pathlib import Path
 import io
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.3.3"
+APP_VERSION = "1.3.4"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -21,6 +21,16 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.3.4": {
+        "emoji": "📈",
+        "title": "Sold Price Trend chart + sales volume",
+        "items": [
+            ("📈", "New Sold Price Trend chart on Card Research — pick a grade and view the sold-price line over 7 / 30 / 60 / 90 days."),
+            ("🔀", "Δ 7d / 30d / 60d / 90d change tiles side by side — see momentum (short term) vs the longer-term trend at a glance."),
+            ("🔁", "Sales-volume tiles (7-day & 30-day counts) show how liquid a card is — how easy it'll be to sell."),
+            ("🛒", "Note: 'active for sale' shows n/a — CardHedger tracks sold sales only, not live listings."),
+        ],
+    },
     "1.3.3": {
         "emoji": "⚖️",
         "title": "FMV + Grade vs Flip now work while GemRate is offline",
@@ -1080,6 +1090,86 @@ def ch_card_image(card_id: str) -> str:
         return cards[0].get("image", "") or ""
     return result.get("image", "") or ""
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def ch_card_meta(card_id):
+    """card-details for one card — includes '7 Day Sales' / '30 Day Sales' volume."""
+    result = _ch_post("/v1/cards/card-details", {"card_id": card_id})
+    cards = (result or {}).get("cards") or []
+    return cards[0] if cards else (result or {})
+
+def render_price_trend(card_id, key_prefix="pt", default_grade="PSA 10"):
+    """Sold-price line chart with 7/30/60/90-day windows + sales-volume context.
+
+    CardHedger only has SOLD data (no active-listing counts), so 'how many are
+    for sale' is shown as n/a on purpose rather than faked.
+    """
+    if not card_id:
+        return
+    st.markdown("#### 📈 Sold Price Trend")
+    gsel, wsel = st.columns([1, 2])
+    grades = ["PSA 10", "PSA 9", "Raw"]
+    gi = grades.index(default_grade) if default_grade in grades else 0
+    grade_sel = gsel.selectbox("Grade", grades, index=gi, key=f"{key_prefix}_grade")
+    window = wsel.radio("Window", ["7d", "30d", "60d", "90d"], index=3,
+                        horizontal=True, key=f"{key_prefix}_win")
+    days_map = {"7d": 7, "30d": 30, "60d": 60, "90d": 90}
+
+    hist = ch_price_history(card_id, grade_sel, days=90)
+    pts = hist.get("prices") if isinstance(hist, dict) else hist
+    rows = []
+    for p in (pts or []):
+        try:
+            dt = (p.get("closing_date") or p.get("date") or "")[:10]
+            val = float(p.get("price"))
+            if dt and val > 0:
+                rows.append((dt, val))
+        except Exception:
+            pass
+    if not rows:
+        st.info(f"No sold-price history for {grade_sel} on this card.")
+        return
+    df = pd.DataFrame(rows, columns=["date", "price"]).drop_duplicates("date")
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values("date")
+
+    latest = df["price"].iloc[-1]
+
+    def _pct(days):
+        cutoff = df["date"].max() - pd.Timedelta(days=days)
+        win = df[df["date"] >= cutoff]
+        if len(win) < 2:
+            return None
+        a = win["price"].iloc[0]
+        return ((win["price"].iloc[-1] - a) / a * 100) if a else None
+
+    st.metric(f"{grade_sel} — latest sold", f"${latest:,.2f}")
+    cc = st.columns(4)
+    for col, w in zip(cc, ["7d", "30d", "60d", "90d"]):
+        pct = _pct(days_map[w])
+        if pct is None:
+            col.metric(f"Δ {w}", "—")
+        else:
+            arrow = "📈" if pct > 1 else "📉" if pct < -1 else "➡️"
+            col.metric(f"Δ {w}", f"{pct:+.1f}% {arrow}")
+
+    cutoff = df["date"].max() - pd.Timedelta(days=days_map[window])
+    dfw = df[df["date"] >= cutoff].set_index("date")
+    st.line_chart(dfw["price"], height=240)
+    st.caption(
+        f"Each point = a daily sold price (CardHedger). Showing last {window}. "
+        "Short windows show momentum; 90d shows the longer-term trend."
+    )
+
+    meta = ch_card_meta(card_id)
+    s7, s30 = meta.get("7 Day Sales"), meta.get("30 Day Sales")
+    vc1, vc2, vc3 = st.columns(3)
+    vc1.metric("🔁 Sales · 7 days", f"{int(s7):,}" if isinstance(s7, (int, float)) else "—",
+               help="How many of this card sold in the last 7 days. Higher = more liquid, easier to sell.")
+    vc2.metric("🔁 Sales · 30 days", f"{int(s30):,}" if isinstance(s30, (int, float)) else "—",
+               help="30-day sales volume — a fuller read on demand.")
+    vc3.metric("🛒 Active for sale", "n/a",
+               help="CardHedger tracks SOLD sales only, not live listings — 'how many are for sale right now' isn't available from this API.")
+
 def safe_image_url(u):
     """Return a fetchable http(s) URL (normalizing protocol-relative), else None.
 
@@ -1631,6 +1721,7 @@ with tab1:
         ch_raw_sales = []
         ch_psa10_sales = []
         ch_card_name = ""
+        ch_id = None
         ch_raw_fmv = {}
         ch_psa10_fmv = {}
         ch_psa9_fmv = {}
@@ -1833,6 +1924,9 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
                 + (f" + ship ${ship_cost:.0f}" if ship_cost else "")
                 + f") for ~**{gvf['cal_days']} days** (~{gvf['cal_days']/30:.1f} months). Flipping raw frees that cash now."
             )
+
+        if CARDHEDGER_KEY and ch_id:
+            render_price_trend(ch_id, key_prefix="main")
 
         st.markdown("#### 🔍 Card Finder Links")
         st.caption("All the links you need — buy raw, check sold comps, verify gem rate, or look up the PSA pop report.")
@@ -2091,6 +2185,8 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
                 f"⏳ Grading ties up **${gvf['capital']:,.0f}** for ~**{gvf['cal_days']} days** "
                 f"(~{gvf['cal_days']/30:.1f} months). Flipping raw frees that cash now."
             )
+
+        render_price_trend(_cid, key_prefix="fb")
 
         st.markdown("#### 🔍 Card Finder Links")
         st.markdown(
