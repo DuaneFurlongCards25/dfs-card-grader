@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.2"
+APP_VERSION = "1.5.3"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,13 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.3": {
+        "emoji": "🔍",
+        "title": "Show real error message when imports fail",
+        "items": [
+            ("🔍", "Import failures now show the actual Supabase error (HTTP status + message) so the root cause is visible instead of just a count of failed rows."),
+        ],
+    },
     "1.5.2": {
         "emoji": "🐛",
         "title": "Fix eBay import crash on blank Quantity column",
@@ -4560,6 +4567,8 @@ with tab10:
             except Exception:
                 return []
 
+        _sal_last_error = {"msg": None}
+
         def _sal_post(payload, prefer="return=minimal"):
             data = json.dumps(payload).encode()
             req = urllib.request.Request(
@@ -4572,7 +4581,12 @@ with tab10:
                 with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
                     body = r.read()
                     return json.loads(body.decode()) if body else []
-            except Exception:
+            except urllib.error.HTTPError as e:
+                body = e.read().decode("utf-8", errors="replace")
+                _sal_last_error["msg"] = f"HTTP {e.code}: {body[:300]}"
+                return None
+            except Exception as ex:
+                _sal_last_error["msg"] = str(ex)
                 return None
 
         def _sal_delete(filt):
@@ -4998,6 +5012,8 @@ with tab10:
                             if failed4:
                                 msg4 += f", **{failed4}** failed"
                             st.success(msg4 + ".")
+                            if failed4 and _sal_last_error["msg"]:
+                                st.error(f"Last error: {_sal_last_error['msg']}")
                             if imported4:
                                 st.session_state.pop("sal_data", None)
                                 st.rerun()
@@ -5178,6 +5194,8 @@ with tab10:
                             if skipped6: msg6 += f", skipped **{skipped6}** duplicates"
                             if failed6: msg6 += f", **{failed6}** failed"
                             st.success(msg6 + ".")
+                            if failed6 and _sal_last_error["msg"]:
+                                st.error(f"Last error: {_sal_last_error['msg']}")
                             if imported6:
                                 st.session_state.pop("sal_data", None)
                                 st.rerun()
