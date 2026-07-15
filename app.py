@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.1"
+APP_VERSION = "1.5.2"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,13 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.2": {
+        "emoji": "🐛",
+        "title": "Fix eBay import crash on blank Quantity column",
+        "items": [
+            ("🐛", "Fixed: eBay CSV import crashed with 'cannot convert float NaN to integer' when Quantity column was blank. Rows with no quantity now default to 1."),
+        ],
+    },
     "1.5.1": {
         "emoji": "📊",
         "title": "Full multi-channel import: Whatnot, DC Sports & manual sales",
@@ -4858,14 +4865,18 @@ with tab10:
                             prog3 = st.progress(0)
                             total3 = len(ebay_df)
 
-                            for idx3, row3 in ebay_df.iterrows():
-                                prog3.progress(int((idx3 + 1) / max(total3, 1) * 100))
+                            for _i3, (idx3, row3) in enumerate(ebay_df.iterrows()):
+                                prog3.progress(int((_i3 + 1) / max(total3, 1) * 100))
                                 sale_date3 = _parse_ebay_date(row3.get("Sale Date", ""))
                                 item_num3 = str(row3.get("Item Number", "") or "").strip()
                                 sold_for3 = _parse_money(row3.get("Sold For", 0))
                                 shipping3 = _parse_money(row3.get("Shipping And Handling", 0))
                                 title3 = str(row3.get("Item Title", "") or "").strip()
-                                qty3 = int(float(str(row3.get("Quantity", 1) or 1)))
+                                _qty3_raw = row3.get("Quantity", 1)
+                                try:
+                                    qty3 = int(float(_qty3_raw)) if _qty3_raw == _qty3_raw and _qty3_raw not in (None, "") else 1
+                                except (ValueError, TypeError):
+                                    qty3 = 1
                                 gross3 = round(sold_for3 + shipping3, 2)
                                 fee3 = round(gross3 * 0.129 + 0.30, 2)
                                 net3 = round(gross3 - fee3, 2)
