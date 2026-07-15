@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.5.1"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,16 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.1": {
+        "emoji": "📊",
+        "title": "Full multi-channel import: Whatnot, DC Sports & manual sales",
+        "items": [
+            ("🎥", "Whatnot importer — upload WhatNot_Seller_Earnings XLSX. Net earnings are already after their fee, imported directly."),
+            ("🏷️", "DC Sports importer — upload their CSV export directly to Sales & P&L. Only Paid rows imported; fees and net broken out per card."),
+            ("✏️", "Manual sale entry — log social media, show sales, or any off-platform sale with a quick form. Platform, date, gross, fee, net."),
+            ("🔒", "All importers deduplicate on re-import — safe to upload the same file multiple times."),
+        ],
+    },
     "1.5.0": {
         "emoji": "💰",
         "title": "Sales & P&L + DC Sports Consignment tracking",
@@ -4809,7 +4819,7 @@ with tab10:
 
         # ── IMPORT ────────────────────────────────────────────────────────────
         with sal_t3:
-            imp_ebay, imp_collx = st.tabs(["📦 eBay Sold Report", "🃏 CollX Export"])
+            imp_ebay, imp_collx, imp_whatnot, imp_dc, imp_manual = st.tabs(["📦 eBay", "🃏 CollX", "🎥 Whatnot", "🏷️ DC Sports", "✏️ Manual"])
 
             # ── eBay import ───────────────────────────────────────────────────
             with imp_ebay:
@@ -4982,6 +4992,234 @@ with tab10:
                                 st.rerun()
                     except Exception as e4:
                         st.error(f"Error reading CollX CSV: {e4}")
+
+            # ── Whatnot import ────────────────────────────────────────────────
+            with imp_whatnot:
+                st.markdown("### Import Whatnot Seller Earnings")
+                st.caption(
+                    "Accepts the **WhatNot_Seller_Earnings_XXXX.xlsx** format "
+                    "(columns: Month, Created Date, Completed Date, Card / Item, Order ID, Listing ID, Net Earnings, Status). "
+                    "Net Earnings is already after Whatnot's fee. Re-importing is safe — duplicates skipped."
+                )
+                wn_file = st.file_uploader("Whatnot Seller Earnings XLSX", type=["xlsx"], key="sal_wn_file")
+                if wn_file:
+                    try:
+                        import openpyxl as _opxl
+                        wb5 = _opxl.load_workbook(wn_file, data_only=True)
+                        # Find the right sheet — first sheet with 'Sales' in name or first sheet
+                        ws5 = None
+                        for sn in wb5.sheetnames:
+                            if 'sale' in sn.lower() or 'earning' in sn.lower():
+                                ws5 = wb5[sn]
+                                break
+                        if not ws5:
+                            ws5 = wb5.active
+
+                        all_rows5 = list(ws5.iter_rows(values_only=True))
+                        # Find header row (has 'Order ID' or 'Net Earnings')
+                        header_idx5 = None
+                        for i, row in enumerate(all_rows5):
+                            if any(str(c or '').strip().lower() in ('order id', 'net earnings') for c in row):
+                                header_idx5 = i
+                                break
+
+                        if header_idx5 is None:
+                            st.error("Could not find header row. Expected columns: Month, Created Date, Card / Item, Order ID, Net Earnings, Status.")
+                        else:
+                            headers5 = [str(c or '').strip().lower() for c in all_rows5[header_idx5]]
+                            data_rows5 = all_rows5[header_idx5 + 1:]
+
+                            def _col5(row, name):
+                                try: return row[headers5.index(name)]
+                                except ValueError: return None
+
+                            # Filter to real sale rows: order id must be non-None and numeric-ish
+                            sale_rows5 = [r for r in data_rows5 if _col5(r, 'order id') and str(_col5(r, 'order id') or '').strip().isdigit()]
+                            st.caption(f"Found **{len(sale_rows5)}** sales. Preview:")
+                            preview5 = [{"Month": _col5(r,'month'), "Date": _col5(r,'created date'), "Card": str(_col5(r,'card / item') or '')[:60], "Order ID": _col5(r,'order id'), "Net $": _col5(r,'net earnings'), "Status": _col5(r,'status')} for r in sale_rows5[:5]]
+                            st.dataframe(pd.DataFrame(preview5), use_container_width=True, hide_index=True)
+
+                            if st.button("⬆️ Import Whatnot Sales", type="primary", key="sal_wn_btn"):
+                                existing_raw5 = _sal_get("?select=dedup_key&source=eq.whatnot")
+                                existing_keys5 = {r["dedup_key"] for r in existing_raw5 if r.get("dedup_key")}
+                                imported5 = skipped5 = failed5 = 0
+                                prog5 = st.progress(0)
+
+                                for idx5, row5 in enumerate(sale_rows5):
+                                    prog5.progress(int((idx5 + 1) / max(len(sale_rows5), 1) * 100))
+                                    order_id5 = str(_col5(row5, 'order id') or '').strip()
+                                    dedup5 = f"whatnot|{order_id5}"
+                                    if dedup5 in existing_keys5:
+                                        skipped5 += 1
+                                        continue
+
+                                    created5 = _col5(row5, 'created date')
+                                    try:
+                                        sale_date5 = pd.to_datetime(str(created5)).strftime('%Y-%m-%d') if created5 else None
+                                    except Exception:
+                                        sale_date5 = str(created5)[:10] if created5 else None
+
+                                    net5 = float(_col5(row5, 'net earnings') or 0)
+                                    title5 = str(_col5(row5, 'card / item') or '').strip()[:200]
+                                    status5 = str(_col5(row5, 'status') or 'completed').strip()
+
+                                    rec5 = {
+                                        "source": "whatnot",
+                                        "order_id": order_id5 or None,
+                                        "sale_date": sale_date5,
+                                        "title": title5 or None,
+                                        "item_number": str(_col5(row5, 'listing id') or '').strip() or None,
+                                        "quantity": 1,
+                                        "sale_price": net5,
+                                        "shipping_collected": 0,
+                                        "gross_revenue": net5,
+                                        "platform_fee": 0,
+                                        "net_proceeds": net5,
+                                        "status": status5,
+                                        "dedup_key": dedup5,
+                                    }
+                                    res5 = _sal_post(rec5)
+                                    if res5 is not None:
+                                        imported5 += 1
+                                        existing_keys5.add(dedup5)
+                                    else:
+                                        failed5 += 1
+
+                                prog5.empty()
+                                msg5 = f"✅ Imported **{imported5}** Whatnot sales"
+                                if skipped5: msg5 += f", skipped **{skipped5}** duplicates"
+                                if failed5: msg5 += f", **{failed5}** failed"
+                                st.success(msg5 + ".")
+                                st.caption("Note: Whatnot Net Earnings is already after their fee — gross and fee are not broken out separately in their export.")
+                                if imported5:
+                                    st.session_state.pop("sal_data", None)
+                                    st.rerun()
+                    except Exception as e5:
+                        st.error(f"Error reading Whatnot file: {e5}")
+
+            # ── DC Sports import ───────────────────────────────────────────────
+            with imp_dc:
+                st.markdown("### Import DC Sports Sales")
+                st.caption(
+                    "Accepts the DC Sports seller CSV export "
+                    "(columns: Title, Status, ListingDate, EndingDate, BuyItNow, SalePrice, Fees, Net, FriendlyPackageId). "
+                    "Only **Paid** rows are imported as sales. Re-importing is safe — duplicates skipped."
+                )
+                dc_sal_file = st.file_uploader("DC Sports CSV export", type=["csv"], key="sal_dc_file")
+                if dc_sal_file:
+                    try:
+                        dc_df6 = pd.read_csv(dc_sal_file, encoding="utf-8-sig")
+                        dc_df6.columns = [c.strip() for c in dc_df6.columns]
+                        paid_df6 = dc_df6[dc_df6.get("Status", dc_df6.iloc[:,1]).astype(str).str.lower() == "paid"].copy() if "Status" in dc_df6.columns else dc_df6
+                        st.caption(f"Found **{len(dc_df6):,}** total rows, **{len(paid_df6):,}** Paid (will import as sales).")
+                        st.dataframe(paid_df6.head(5), use_container_width=True, hide_index=True)
+
+                        if st.button("⬆️ Import DC Sports Sales", type="primary", key="sal_dc_btn"):
+                            existing_raw6 = _sal_get("?select=dedup_key&source=eq.dc_sports")
+                            existing_keys6 = {r["dedup_key"] for r in existing_raw6 if r.get("dedup_key")}
+                            imported6 = skipped6 = failed6 = 0
+                            prog6 = st.progress(0)
+                            total6 = len(paid_df6)
+
+                            for idx6, row6 in paid_df6.iterrows():
+                                prog6.progress(int((list(paid_df6.index).index(idx6) + 1) / max(total6, 1) * 100))
+                                pkg6 = str(row6.get("FriendlyPackageId", "") or "").strip()
+                                title6 = str(row6.get("Title", "") or "").strip()
+                                ending6 = str(row6.get("EndingDate", "") or "").strip()[:19]
+                                dedup6 = f"dc_sports|{pkg6}|{title6}|{ending6}"
+
+                                if dedup6 in existing_keys6:
+                                    skipped6 += 1
+                                    continue
+
+                                sale_price6 = _parse_money(row6.get("SalePrice"))
+                                fees6 = _parse_money(row6.get("Fees"))
+                                net6 = _parse_money(row6.get("Net"))
+                                try:
+                                    sale_date6 = pd.to_datetime(ending6).strftime('%Y-%m-%d') if ending6 else None
+                                except Exception:
+                                    sale_date6 = ending6[:10] if ending6 else None
+
+                                rec6 = {
+                                    "source": "dc_sports",
+                                    "order_id": pkg6 or None,
+                                    "sale_date": sale_date6,
+                                    "title": title6 or None,
+                                    "item_number": None,
+                                    "quantity": 1,
+                                    "sale_price": sale_price6,
+                                    "shipping_collected": 0,
+                                    "gross_revenue": sale_price6,
+                                    "platform_fee": fees6,
+                                    "net_proceeds": net6,
+                                    "status": "paid",
+                                    "dedup_key": dedup6,
+                                }
+                                res6 = _sal_post(rec6)
+                                if res6 is not None:
+                                    imported6 += 1
+                                    existing_keys6.add(dedup6)
+                                else:
+                                    failed6 += 1
+
+                            prog6.empty()
+                            msg6 = f"✅ Imported **{imported6}** DC Sports sales"
+                            if skipped6: msg6 += f", skipped **{skipped6}** duplicates"
+                            if failed6: msg6 += f", **{failed6}** failed"
+                            st.success(msg6 + ".")
+                            if imported6:
+                                st.session_state.pop("sal_data", None)
+                                st.rerun()
+                    except Exception as e6:
+                        st.error(f"Error reading DC Sports CSV: {e6}")
+
+            # ── Manual entry ───────────────────────────────────────────────────
+            with imp_manual:
+                st.markdown("### Manual Sale Entry")
+                st.caption("Use for social media sales, cash sales, show sales, or any platform without an export.")
+
+                with st.form("sal_manual_form"):
+                    m1, m2, m3 = st.columns(3)
+                    m_platform = m1.selectbox("Platform / Channel", ["Social Media", "Facebook", "Instagram", "Card Show", "Whatnot (manual)", "Other"], key="sal_m_platform")
+                    m_date = m2.date_input("Sale Date", value=date.today(), key="sal_m_date")
+                    m_status = m3.selectbox("Status", ["completed", "pending"], key="sal_m_status")
+                    m_title = st.text_input("Card / Item Description *", placeholder="2025 Topps Chrome Aaron Judge #250 PSA 10", key="sal_m_title")
+                    m4, m5, m6 = st.columns(3)
+                    m_gross = m4.number_input("Gross / Sale Price ($)", min_value=0.0, step=0.01, format="%.2f", key="sal_m_gross")
+                    m_fee = m5.number_input("Platform Fee ($)", min_value=0.0, step=0.01, format="%.2f", key="sal_m_fee")
+                    m_net = m6.number_input("Net Proceeds ($)", min_value=0.0, step=0.01, format="%.2f", key="sal_m_net",
+                                             help="Leave 0 to auto-calc as Gross − Fee")
+                    m_submitted = st.form_submit_button("Add Sale", type="primary")
+
+                if m_submitted:
+                    if not m_title.strip():
+                        st.error("Item description is required.")
+                    else:
+                        net_m = float(m_net) if m_net else round(float(m_gross) - float(m_fee), 2)
+                        src_m = m_platform.lower().replace(" ", "_").replace("(", "").replace(")", "").replace("/", "_")
+                        dedup_m = f"manual|{src_m}|{m_date}|{m_title.strip()[:40]}|{round(float(m_gross),2)}"
+                        rec_m = {
+                            "source": "manual",
+                            "order_id": None,
+                            "sale_date": str(m_date),
+                            "title": m_title.strip(),
+                            "item_number": None,
+                            "quantity": 1,
+                            "sale_price": float(m_gross),
+                            "shipping_collected": 0,
+                            "gross_revenue": float(m_gross),
+                            "platform_fee": float(m_fee),
+                            "net_proceeds": net_m,
+                            "status": m_status,
+                            "dedup_key": dedup_m,
+                        }
+                        res_m = _sal_post(rec_m)
+                        if res_m is not None:
+                            st.success(f"✅ Added: {m_title.strip()} — net ${net_m:.2f}")
+                            st.session_state.pop("sal_data", None)
+                            st.rerun()
+                        else:
+                            st.error("Could not save. Check Supabase connection.")
 
         st.divider()
         st.markdown("**SQL — Create Sales Table** *(run once in Supabase SQL Editor)*")
