@@ -10,9 +10,12 @@ from datetime import date, datetime
 from pathlib import Path
 import io
 import base64
+import csv
+import re
+import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -22,6 +25,16 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.0": {
+        "emoji": "💰",
+        "title": "Sales & P&L + DC Sports Consignment tracking",
+        "items": [
+            ("💰", "New 💰 Sales & P&L tab — import eBay and CollX sales exports. P&L by month, channel mix (eBay vs CollX vs DC Sports), and full sales log."),
+            ("🏷️", "New 🏷️ Consignments tab — track DC Sports auction consignments. Import their CSV export, assign lot cost basis by SKU, and see net P&L per shipment and card."),
+            ("📦", "7 DC Sports shipments ready to import — 151 cards, $3,479 net across batches 221184–245869."),
+            ("📊", "1,536 eBay sales (Jul 2025–Jul 2026) ready to import into Sales & P&L — $24k gross revenue."),
+        ],
+    },
     "1.4.0": {
         "emoji": "🚀",
         "title": "CardHedger, maximized — Hot Movers, Scan, Player Demand",
@@ -1164,6 +1177,118 @@ def ch_prices_by_cert(cert, grader="PSA", days=180):
     return _ch_post("/v1/cards/prices-by-cert",
                     {"cert": str(cert), "grader": grader, "days": int(days)}) or {}
 
+# ── Cross-platform reconciliation (CollX ↔ eBay) ─────────────────────────────
+def _rec_num(x):
+    try:
+        return float(str(x).replace("$", "").replace(",", "").strip() or 0) or None
+    except Exception:
+        return None
+
+def _rec_norm(s):
+    return re.sub(r"[^a-z0-9 ]", " ", (s or "").lower())
+
+def _rec_numpart(n):
+    m = re.search(r"\d+", n or "")
+    return m.group() if m else None
+
+def _rec_header_row(rows, needle):
+    """eBay reports sometimes have a preamble row — find the real header."""
+    for i, r in enumerate(rows[:8]):
+        if any(needle in (c or "").lower() for c in r):
+            return i
+    return 0
+
+def parse_collx_csv(text):
+    return list(csv.DictReader(io.StringIO(text)))
+
+def parse_ebay_sold_csv(text):
+    rows = list(csv.reader(io.StringIO(text)))
+    if not rows:
+        return []
+    hi = _rec_header_row(rows, "item title")
+    col = {c: j for j, c in enumerate(rows[hi])}
+    def g(r, name):
+        j = col.get(name)
+        return r[j] if (j is not None and j < len(r)) else ""
+    out = []
+    for r in rows[hi + 1:]:
+        t = g(r, "Item Title").strip()
+        if not t:
+            continue
+        out.append({"title": t, "sold_for": g(r, "Sold For"),
+                    "date": g(r, "Sale Date"), "item_number": g(r, "Item Number")})
+    return out
+
+def parse_ebay_active_csv(text):
+    rows = list(csv.reader(io.StringIO(text)))
+    if not rows:
+        return []
+    hi = _rec_header_row(rows, "item number")
+    col = {c: j for j, c in enumerate(rows[hi])}
+    def g(r, name):
+        j = col.get(name)
+        return r[j] if (j is not None and j < len(r)) else ""
+    out = []
+    for r in rows[hi + 1:]:
+        t = g(r, "Title").strip()
+        itemno = g(r, "Item number").strip()
+        if not t or not itemno:
+            continue
+        out.append({"title": t, "item_number": itemno,
+                    "sku": g(r, "Custom label (SKU)"), "price": g(r, "Current price")})
+    return out
+
+def match_collx_to_ebay(collx_rows, ebay_items):
+    """Join each CollX card to its best eBay item by name+year+number.
+    Returns list of (collx_card, confidence, ebay_item)."""
+    idx = collections.defaultdict(list)
+    prepped = []
+    for e in ebay_items:
+        t = _rec_norm(e.get("title", ""))
+        ts = set(t.split())
+        prepped.append((t, ts, e))
+        for w in ts:
+            if len(w) > 2:
+                idx[w].append(len(prepped) - 1)
+    out = []
+    for c in collx_rows:
+        parts = _rec_norm(c.get("name", "")).split()
+        if not parts:
+            continue
+        last = parts[-1]
+        year = (c.get("year", "") or "").strip()
+        yr2 = year[-2:] if len(year) >= 2 else year
+        numv = _rec_numpart(c.get("number", ""))
+        best = None
+        for i in set(idx.get(last, [])):
+            t, ts, e = prepped[i]
+            if last not in ts:
+                continue
+            year_ok = (year and year in t) or (yr2 and yr2 in ts)
+            num_ok = (numv in ts) if numv else False
+            first_ok = parts[0] in ts if len(parts) > 1 else True
+            if year_ok and num_ok and first_ok:
+                conf = "High"
+            elif year_ok and num_ok:
+                conf = "Medium"
+            elif year_ok and first_ok:
+                conf = "Low"
+            else:
+                continue
+            best = (conf, e)
+            if conf == "High":
+                break
+        if best:
+            out.append((c, best[0], best[1]))
+    return out
+
+def ebay_end_file(item_numbers):
+    """eBay File Exchange 'End Listings' CSV text for bulk-ending listings."""
+    lines = ["Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8),ItemID,EndCode"]
+    for n in item_numbers:
+        lines.append(f"End,{n},NotAvailable")
+    return "\n".join(lines) + "\n"
+
 def render_price_trend(card_id, key_prefix="pt", default_grade="PSA 10"):
     """Sold-price line chart with 7/30/60/90-day windows + sales-volume context.
 
@@ -1793,7 +1918,7 @@ if not is_beta and SUPABASE_URL:
 if is_beta:
     st.info("🔓 **Beta Preview** — You have access to Card Research and Inventory Check. Submission Tracker and Downloads unlock with a full membership.", icon="💎")
 
-tab1, tab7, tab8, tab2, tab6, tab3, tab4, tab5 = st.tabs(["🔍 Card Research", "🔥 Hot Movers", "📷 Scan", "📦 Inventory Check", "🧰 Operations", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake"])
+tab1, tab7, tab8, tab2, tab6, tab3, tab4, tab5, tab9, tab10 = st.tabs(["🔍 Card Research", "🔥 Hot Movers", "📷 Scan", "📦 Inventory Check", "🧰 Operations", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake", "🏷️ Consignments", "💰 Sales & P&L"])
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — Card Research
@@ -3936,6 +4061,952 @@ with tab6:
                                 mime="text/csv", key="q_export_ref",
                                 help="Your records — current price, comp, trend, sport. Do NOT upload this to eBay.",
                             )
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 9 — Consignments (DC Sports)
+# ══════════════════════════════════════════════════════════════════════════════
+with tab9:
+    st.markdown("## 🏷️ Consignments")
+    st.caption("DC Sports auction consignment tracking — import history, assign lot cost basis, track P&L.")
+
+    if not SUPABASE_URL:
+        st.warning("Supabase not connected. Configure in sidebar to enable Consignments.")
+    else:
+        # ── Helpers ───────────────────────────────────────────────────────────
+        def _csn_get(table, params=""):
+            url = f"{SUPABASE_URL}/rest/v1/{table}{params}"
+            req = urllib.request.Request(url, headers=sb_headers())
+            try:
+                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
+                    return json.loads(r.read().decode())
+            except Exception:
+                return []
+
+        def _csn_post(table, payload, prefer="return=representation"):
+            data = json.dumps(payload).encode()
+            req = urllib.request.Request(
+                f"{SUPABASE_URL}/rest/v1/{table}",
+                data=data,
+                headers={**sb_headers(), "Prefer": prefer},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
+                    body = r.read()
+                    return json.loads(body.decode()) if body else []
+            except Exception:
+                return None
+
+        def _csn_patch(table, filt, updates):
+            data = json.dumps(updates).encode()
+            req = urllib.request.Request(
+                f"{SUPABASE_URL}/rest/v1/{table}?{filt}",
+                data=data,
+                headers={**sb_headers(), "Prefer": "return=minimal"},
+                method="PATCH",
+            )
+            try:
+                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
+                    return True
+            except Exception:
+                return False
+
+        def _csn_delete_row(table, filt):
+            req = urllib.request.Request(
+                f"{SUPABASE_URL}/rest/v1/{table}?{filt}",
+                headers=sb_headers(),
+                method="DELETE",
+            )
+            try:
+                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
+                    return True
+            except Exception:
+                return False
+
+        def _parse_dc_amount(val):
+            if val is None or str(val).strip() in ("", "nan"):
+                return 0.0
+            try:
+                return float(str(val).replace("$", "").replace(",", "").strip())
+            except ValueError:
+                return 0.0
+
+        def _load_csn():
+            lots = _csn_get("consignment_lots", "?order=lot_sku.asc")
+            ships = _csn_get("consignment_shipments", "?order=shipped_date.desc.nullslast,dc_package_id.desc")
+            items = _csn_get("consignment_items", "?order=id.asc&limit=2000")
+            return lots, ships, items
+
+        if "csn_data" not in st.session_state:
+            with st.spinner("Loading consignment data…"):
+                st.session_state["csn_data"] = _load_csn()
+
+        lots_raw, ships_raw, items_raw = st.session_state["csn_data"]
+
+        # Per-card cost by lot SKU
+        lot_per_card = {
+            lot["lot_sku"]: round(lot["total_cost"] / max(lot["card_count"], 1), 2)
+            for lot in lots_raw
+        }
+
+        # Augment items with cost + P&L
+        csn_items = []
+        for raw in items_raw:
+            item = dict(raw)
+            sku = item.get("lot_sku") or ""
+            cost = lot_per_card.get(sku, 0.0) if sku else 0.0
+            net = float(item.get("dc_net") or 0)
+            item["_cost"] = cost
+            item["_pl"] = round(net - cost, 2) if cost else None
+            csn_items.append(item)
+
+        # Business snapshot numbers
+        paid_items = [i for i in csn_items if (i.get("dc_status") or "").lower() == "paid"]
+        active_items = [i for i in csn_items if (i.get("dc_status") or "").lower() not in ("paid", "unsold")]
+        total_net = sum(float(i.get("dc_net") or 0) for i in paid_items)
+        total_invested = sum(i["_cost"] for i in paid_items if i["_cost"])
+        total_pl = round(total_net - total_invested, 2) if total_invested else None
+
+        sn1, sn2, sn3, sn4, sn5 = st.columns(5)
+        sn1.metric("Cards Still Out", f"{len(active_items)}")
+        sn2.metric("Total Cards (all)", f"{len(csn_items)}")
+        sn3.metric("Total Invested", f"${total_invested:,.2f}" if total_invested else "— (assign lots)")
+        sn4.metric("Total Net (Paid)", f"${total_net:,.2f}")
+        if total_pl is not None:
+            sn5.metric("Net P&L", f"${total_pl:+,.2f}")
+        else:
+            sn5.metric("Net P&L", "— assign lots")
+
+        st.divider()
+
+        csn_t1, csn_t2, csn_t3, csn_t4 = st.tabs(["📦 Shipments", "🃏 Cards", "🧰 Lots & Cost Basis", "⬆️ Import"])
+
+        # ── SHIPMENTS ─────────────────────────────────────────────────────────
+        with csn_t1:
+            st.markdown("### DC Sports Shipments")
+            if not ships_raw:
+                st.info("No shipments yet. Import a DC Sports CSV to get started, or run the SQL below to create the tables first.")
+            else:
+                items_by_pkg = {}
+                for item in csn_items:
+                    pkg = item.get("dc_package_id") or "?"
+                    items_by_pkg.setdefault(pkg, []).append(item)
+
+                ship_rows = []
+                for ship in ships_raw:
+                    pkg = ship.get("dc_package_id") or "?"
+                    pkg_items = items_by_pkg.get(pkg, [])
+                    paid_c = sum(1 for i in pkg_items if (i.get("dc_status") or "").lower() == "paid")
+                    unsold_c = sum(1 for i in pkg_items if (i.get("dc_status") or "").lower() == "unsold")
+                    active_c = len(pkg_items) - paid_c - unsold_c
+                    batch_net = sum(float(i.get("dc_net") or 0) for i in pkg_items if (i.get("dc_status") or "").lower() == "paid")
+                    batch_cost = sum(i["_cost"] for i in pkg_items if i["_cost"])
+                    ship_rows.append({
+                        "Package ID": pkg,
+                        "Shipped": ship.get("shipped_date") or "—",
+                        "Cards": len(pkg_items),
+                        "Paid": paid_c,
+                        "Unsold": unsold_c,
+                        "Active": active_c,
+                        "Net ($)": round(batch_net, 2),
+                        "Cost Basis ($)": round(batch_cost, 2) if batch_cost else None,
+                        "P&L ($)": round(batch_net - batch_cost, 2) if batch_cost else None,
+                        "Notes": ship.get("notes") or "",
+                    })
+
+                st.dataframe(
+                    pd.DataFrame(ship_rows),
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Net ($)": st.column_config.NumberColumn(format="$%.2f"),
+                        "Cost Basis ($)": st.column_config.NumberColumn(format="$%.2f"),
+                        "P&L ($)": st.column_config.NumberColumn(format="$%.2f"),
+                    },
+                )
+
+            with st.expander("Edit shipment notes / shipped date"):
+                if ships_raw:
+                    pkg_opts = [s["dc_package_id"] for s in ships_raw if s.get("dc_package_id")]
+                    sel_pkg = st.selectbox("Shipment", pkg_opts, key="csn_edit_pkg")
+                    match = next((s for s in ships_raw if s["dc_package_id"] == sel_pkg), None)
+                    if match:
+                        raw_date = match.get("shipped_date")
+                        default_date = pd.to_datetime(raw_date).date() if raw_date else None
+                        new_date = st.date_input("Shipped date", value=default_date, key="csn_edit_date")
+                        new_notes = st.text_input("Notes", value=match.get("notes") or "", key="csn_edit_notes")
+                        if st.button("Save", key="csn_save_ship"):
+                            _csn_patch("consignment_shipments", f"id=eq.{match['id']}", {
+                                "shipped_date": str(new_date) if new_date else None,
+                                "notes": new_notes.strip() or None,
+                            })
+                            st.success("Saved.")
+                            st.session_state.pop("csn_data", None)
+                            st.rerun()
+                else:
+                    st.caption("No shipments to edit yet.")
+
+        # ── CARDS ─────────────────────────────────────────────────────────────
+        with csn_t2:
+            st.markdown("### Card-Level Tracking")
+            st.caption("Assign a Lot SKU to any card to connect its cost basis. Click **Save Lot SKU Assignments** after editing.")
+
+            f1, f2, f3 = st.columns(3)
+            pkg_opts2 = ["All"] + sorted(set(i.get("dc_package_id") or "?" for i in csn_items))
+            pkg_filt = f1.selectbox("Shipment", pkg_opts2, key="csn_cards_pkg")
+            status_opts = ["All"] + sorted(set((i.get("dc_status") or "Unknown") for i in csn_items))
+            status_filt = f2.selectbox("Status", status_opts, key="csn_cards_status")
+            basis_opts = ["All", "Has Cost Basis", "Missing Basis"]
+            basis_filt = f3.selectbox("Cost Basis", basis_opts, key="csn_cards_basis")
+
+            filtered = csn_items
+            if pkg_filt != "All":
+                filtered = [i for i in filtered if i.get("dc_package_id") == pkg_filt]
+            if status_filt != "All":
+                filtered = [i for i in filtered if (i.get("dc_status") or "Unknown") == status_filt]
+            if basis_filt == "Has Cost Basis":
+                filtered = [i for i in filtered if i["_cost"] > 0]
+            elif basis_filt == "Missing Basis":
+                filtered = [i for i in filtered if i["_cost"] == 0]
+
+            if not filtered:
+                st.info("No cards match the current filters.")
+            else:
+                card_rows = []
+                card_ids = []
+                for i in filtered:
+                    card_ids.append(i["id"])
+                    card_rows.append({
+                        "Title": i.get("title") or "",
+                        "Status": i.get("dc_status") or "",
+                        "Package": i.get("dc_package_id") or "",
+                        "Ended": (i.get("dc_ending_date") or "")[:10],
+                        "DC Net ($)": float(i.get("dc_net") or 0),
+                        "Lot SKU": i.get("lot_sku") or "",
+                        "Cost ($)": i["_cost"] if i["_cost"] else None,
+                        "P&L ($)": i["_pl"],
+                    })
+
+                card_df = pd.DataFrame(card_rows)
+                edited_df = st.data_editor(
+                    card_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    num_rows="fixed",
+                    disabled=["Title", "Status", "Package", "Ended", "DC Net ($)", "Cost ($)", "P&L ($)"],
+                    column_config={
+                        "DC Net ($)": st.column_config.NumberColumn(format="$%.2f"),
+                        "Cost ($)": st.column_config.NumberColumn(format="$%.2f"),
+                        "P&L ($)": st.column_config.NumberColumn(format="$%.2f"),
+                        "Lot SKU": st.column_config.TextColumn(help="Type or clear a lot SKU — matches against Lots & Cost Basis tab"),
+                    },
+                    key="csn_cards_editor",
+                )
+
+                if st.button("💾 Save Lot SKU Assignments", key="csn_save_skus", type="primary"):
+                    changed = 0
+                    for idx, row in edited_df.iterrows():
+                        orig_sku = str(card_df.iloc[idx]["Lot SKU"]).strip()
+                        new_sku = str(row["Lot SKU"]).strip()
+                        if new_sku != orig_sku:
+                            item_id = card_ids[idx]
+                            _csn_patch("consignment_items", f"id=eq.{item_id}", {"lot_sku": new_sku or None})
+                            changed += 1
+                    if changed:
+                        st.success(f"Saved {changed} SKU assignment(s).")
+                        st.session_state.pop("csn_data", None)
+                        st.rerun()
+                    else:
+                        st.info("No changes detected.")
+
+        # ── LOTS & COST BASIS ─────────────────────────────────────────────────
+        with csn_t3:
+            st.markdown("### Lots & Cost Basis")
+            st.caption(
+                "Record each lot you bought. Give it a SKU (e.g. LOT-001), enter the total cost and card count — "
+                "per-card average is auto-calculated. Then assign that SKU to cards in the Cards tab."
+            )
+
+            with st.form("csn_new_lot_form"):
+                st.markdown("**Add Lot**")
+                l1, l2, l3 = st.columns(3)
+                nl_sku = l1.text_input("Lot SKU *", placeholder="LOT-001")
+                nl_name = l1.text_input("Lot Name", placeholder="eBay lot June 2026")
+                nl_cost = l2.number_input("Total Cost ($)", min_value=0.0, step=0.01, format="%.2f")
+                nl_count = l2.number_input("Card Count", min_value=1, step=1, value=1)
+                nl_notes = l3.text_area("Notes", height=80)
+                if nl_count > 0 and nl_cost > 0:
+                    l3.caption(f"Per-card avg: **${nl_cost / nl_count:.2f}**")
+                lot_submitted = st.form_submit_button("Add Lot", type="primary")
+
+            if lot_submitted:
+                if not nl_sku.strip():
+                    st.error("Lot SKU is required.")
+                else:
+                    res = _csn_post("consignment_lots", {
+                        "lot_sku": nl_sku.strip().upper(),
+                        "lot_name": nl_name.strip() or None,
+                        "total_cost": float(nl_cost),
+                        "card_count": int(nl_count),
+                        "notes": nl_notes.strip() or None,
+                    })
+                    if res is not None:
+                        st.success(f"Lot {nl_sku.strip().upper()} added. Per-card: ${nl_cost / max(nl_count, 1):.2f}")
+                        st.session_state.pop("csn_data", None)
+                        st.rerun()
+                    else:
+                        st.error("Could not save — SKU may already exist. Delete the existing lot first to replace it.")
+
+            st.divider()
+
+            if not lots_raw:
+                st.info("No lots yet. Add one above.")
+            else:
+                lot_rows2 = []
+                for lot in lots_raw:
+                    per_card = round(lot["total_cost"] / max(lot["card_count"], 1), 2)
+                    assigned = sum(1 for i in csn_items if i.get("lot_sku") == lot["lot_sku"])
+                    lot_rows2.append({
+                        "SKU": lot["lot_sku"],
+                        "Name": lot.get("lot_name") or "",
+                        "Total Cost": lot["total_cost"],
+                        "Cards": lot["card_count"],
+                        "Per-Card Avg": per_card,
+                        "Assigned Items": assigned,
+                        "Notes": lot.get("notes") or "",
+                        "_id": lot["id"],
+                    })
+                lot_df2 = pd.DataFrame(lot_rows2)
+                st.dataframe(
+                    lot_df2.drop(columns=["_id"]),
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Total Cost": st.column_config.NumberColumn(format="$%.2f"),
+                        "Per-Card Avg": st.column_config.NumberColumn(format="$%.2f"),
+                    },
+                )
+
+                del_sku_opts = ["— select to delete —"] + [lot["lot_sku"] for lot in lots_raw]
+                del_sku = st.selectbox("Delete a lot", del_sku_opts, key="csn_del_lot_sel")
+                if del_sku != "— select to delete —":
+                    lot_id = next(lot["id"] for lot in lots_raw if lot["lot_sku"] == del_sku)
+                    if st.button(f"🗑️ Delete {del_sku}", key="csn_del_lot_btn"):
+                        _csn_delete_row("consignment_lots", f"id=eq.{lot_id}")
+                        st.success(f"Deleted {del_sku}.")
+                        st.session_state.pop("csn_data", None)
+                        st.rerun()
+
+        # ── IMPORT ────────────────────────────────────────────────────────────
+        with csn_t4:
+            st.markdown("### Import DC Sports Export")
+            st.caption(
+                "In DC Sports, go to your Seller Dashboard → export your cards CSV. "
+                "The file should have columns: Title, Status, ListingDate, EndingDate, BuyItNow, "
+                "SalePrice, Fees, Net, FriendlyPackageId, FrontImageUrl. "
+                "Re-importing the same file is safe — duplicates are skipped automatically."
+            )
+
+            csn_file = st.file_uploader("DC Sports CSV", type=["csv"], key="csn_import_file")
+            if csn_file:
+                try:
+                    import_df = pd.read_csv(csn_file, encoding="utf-8-sig")
+                    st.caption(f"Found **{len(import_df):,}** rows. Preview:")
+                    st.dataframe(import_df.head(10), use_container_width=True, hide_index=True)
+
+                    uniq_pkgs = import_df["FriendlyPackageId"].dropna().astype(str).nunique() if "FriendlyPackageId" in import_df.columns else 0
+                    st.caption(f"Shipment batches detected: **{uniq_pkgs}**")
+
+                    if st.button("⬆️ Import to Supabase", type="primary", key="csn_import_btn"):
+                        existing_raw2 = _csn_get("consignment_items", "?select=dedup_key")
+                        existing_keys2 = {r["dedup_key"] for r in existing_raw2 if r.get("dedup_key")}
+
+                        # Ensure shipment rows exist
+                        pkg_ids2 = import_df["FriendlyPackageId"].dropna().astype(str).unique() if "FriendlyPackageId" in import_df.columns else []
+                        existing_ships2 = {s["dc_package_id"] for s in ships_raw if s.get("dc_package_id")}
+                        for pkg in pkg_ids2:
+                            if str(pkg) not in existing_ships2:
+                                _csn_post("consignment_shipments", {"dc_package_id": str(pkg)}, prefer="return=minimal")
+
+                        fresh_ships2 = _csn_get("consignment_shipments", "?order=id.asc")
+                        ship_id_map = {s["dc_package_id"]: s["id"] for s in fresh_ships2 if s.get("dc_package_id")}
+
+                        imported = skipped = failed = 0
+                        progress = st.progress(0)
+                        total_rows = len(import_df)
+
+                        for idx, row in import_df.iterrows():
+                            progress.progress(int((idx + 1) / total_rows * 100))
+                            pkg = str(row.get("FriendlyPackageId") or "").strip()
+                            title = str(row.get("Title") or "").strip()
+                            ending = str(row.get("EndingDate") or "").strip()[:19]
+                            dedup = f"{pkg}|{title}|{ending}"
+
+                            if dedup in existing_keys2:
+                                skipped += 1
+                                continue
+
+                            item_row = {
+                                "dc_package_id": pkg or None,
+                                "shipment_id": ship_id_map.get(pkg),
+                                "title": title or None,
+                                "dc_status": str(row.get("Status") or "").strip() or None,
+                                "dc_listing_date": str(row.get("ListingDate") or "").strip()[:19] or None,
+                                "dc_ending_date": ending or None,
+                                "dc_buy_it_now": _parse_dc_amount(row.get("BuyItNow")),
+                                "dc_sale_price": _parse_dc_amount(row.get("SalePrice")),
+                                "dc_fees": _parse_dc_amount(row.get("Fees")),
+                                "dc_net": _parse_dc_amount(row.get("Net")),
+                                "dc_front_image_url": str(row.get("FrontImageUrl") or "").strip() or None,
+                                "dedup_key": dedup,
+                            }
+                            res2 = _csn_post("consignment_items", item_row, prefer="return=minimal")
+                            if res2 is not None:
+                                imported += 1
+                                existing_keys2.add(dedup)
+                            else:
+                                failed += 1
+
+                        progress.empty()
+                        msg = f"✅ Imported **{imported}** cards"
+                        if skipped:
+                            msg += f", skipped **{skipped}** duplicates"
+                        if failed:
+                            msg += f", **{failed}** failed"
+                        st.success(msg + ".")
+                        if imported:
+                            st.session_state.pop("csn_data", None)
+                            st.rerun()
+                except Exception as e:
+                    st.error(f"Error reading CSV: {e}")
+
+            st.divider()
+            st.markdown("**SQL — Create Consignment Tables** *(run once in Supabase SQL Editor)*")
+            st.code(
+                """create table if not exists consignment_lots (
+  id bigint primary key generated always as identity,
+  lot_sku text not null unique,
+  lot_name text,
+  total_cost numeric not null default 0,
+  card_count integer not null default 1,
+  notes text,
+  created_at timestamptz default now()
+);
+
+create table if not exists consignment_shipments (
+  id bigint primary key generated always as identity,
+  dc_package_id text unique,
+  shipped_date date,
+  notes text,
+  created_at timestamptz default now()
+);
+
+create table if not exists consignment_items (
+  id bigint primary key generated always as identity,
+  shipment_id bigint references consignment_shipments(id),
+  dc_package_id text,
+  lot_sku text,
+  title text,
+  dc_status text,
+  dc_listing_date text,
+  dc_ending_date text,
+  dc_buy_it_now numeric,
+  dc_sale_price numeric,
+  dc_fees numeric,
+  dc_net numeric,
+  dc_front_image_url text,
+  dedup_key text unique,
+  created_at timestamptz default now()
+);
+create index if not exists idx_ci_shipment on consignment_items(shipment_id);
+create index if not exists idx_ci_lot_sku on consignment_items(lot_sku);""",
+                language="sql",
+            )
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 10 — Sales & P&L
+# ══════════════════════════════════════════════════════════════════════════════
+with tab10:
+    st.markdown("## 💰 Sales & P&L")
+    st.caption("Import eBay and CollX sales exports — track gross revenue, platform fees, and net proceeds across all channels.")
+
+    if not SUPABASE_URL:
+        st.warning("Supabase not connected. Configure in sidebar to enable Sales & P&L.")
+    else:
+        # ── Helpers ───────────────────────────────────────────────────────────
+        def _sal_get(params=""):
+            url = f"{SUPABASE_URL}/rest/v1/sales_records{params}"
+            req = urllib.request.Request(url, headers=sb_headers())
+            try:
+                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
+                    return json.loads(r.read().decode())
+            except Exception:
+                return []
+
+        def _sal_post(payload, prefer="return=minimal"):
+            data = json.dumps(payload).encode()
+            req = urllib.request.Request(
+                f"{SUPABASE_URL}/rest/v1/sales_records",
+                data=data,
+                headers={**sb_headers(), "Prefer": prefer},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
+                    body = r.read()
+                    return json.loads(body.decode()) if body else []
+            except Exception:
+                return None
+
+        def _sal_delete(filt):
+            req = urllib.request.Request(
+                f"{SUPABASE_URL}/rest/v1/sales_records?{filt}",
+                headers=sb_headers(),
+                method="DELETE",
+            )
+            try:
+                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
+                    return True
+            except Exception:
+                return False
+
+        def _parse_money(val):
+            if val is None or str(val).strip() in ("", "nan"):
+                return 0.0
+            try:
+                return float(str(val).replace("$", "").replace(",", "").strip())
+            except ValueError:
+                return 0.0
+
+        def _parse_ebay_date(s):
+            s = str(s).strip()
+            for fmt in ("%b-%d-%y", "%B %d, %Y", "%Y-%m-%d", "%m/%d/%Y"):
+                try:
+                    return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+                except ValueError:
+                    pass
+            return s[:10] if len(s) >= 10 else s
+
+        def _parse_collx_date(s):
+            s = str(s).strip()
+            for fmt in ("%b %d, %Y", "%B %d, %Y", "%Y-%m-%d", "%m/%d/%Y"):
+                try:
+                    return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+                except ValueError:
+                    pass
+            return s[:10] if len(s) >= 10 else s
+
+        # Load all sales records
+        if "sal_data" not in st.session_state:
+            with st.spinner("Loading sales data…"):
+                st.session_state["sal_data"] = _sal_get("?order=sale_date.desc&limit=5000")
+
+        all_sales = st.session_state.get("sal_data", [])
+
+        # ── Snapshot ──────────────────────────────────────────────────────────
+        ebay_sales = [s for s in all_sales if s.get("source") == "ebay"]
+        collx_sales = [s for s in all_sales if s.get("source") == "collx"]
+        dc_sales = [s for s in all_sales if s.get("source") == "dc_sports"]
+
+        total_gross = sum(_parse_money(s.get("gross_revenue")) for s in all_sales)
+        total_fees = sum(_parse_money(s.get("platform_fee")) for s in all_sales)
+        total_net = sum(_parse_money(s.get("net_proceeds")) for s in all_sales)
+        total_txns = len(all_sales)
+
+        sn1, sn2, sn3, sn4, sn5 = st.columns(5)
+        sn1.metric("Total Transactions", f"{total_txns:,}")
+        sn2.metric("Gross Revenue", f"${total_gross:,.2f}")
+        sn3.metric("Platform Fees", f"${total_fees:,.2f}")
+        sn4.metric("Net Proceeds", f"${total_net:,.2f}")
+        margin = round((total_net / total_gross * 100), 1) if total_gross else 0
+        sn5.metric("Keep Rate", f"{margin}%")
+
+        # Per-platform breakdown
+        if all_sales:
+            st.divider()
+            pc1, pc2, pc3 = st.columns(3)
+            with pc1:
+                eb_gross = sum(_parse_money(s.get("gross_revenue")) for s in ebay_sales)
+                eb_net = sum(_parse_money(s.get("net_proceeds")) for s in ebay_sales)
+                st.markdown(f"**eBay** — {len(ebay_sales)} sales")
+                st.markdown(f"Gross: **${eb_gross:,.2f}** · Net: **${eb_net:,.2f}**")
+            with pc2:
+                cx_gross = sum(_parse_money(s.get("gross_revenue")) for s in collx_sales)
+                cx_net = sum(_parse_money(s.get("net_proceeds")) for s in collx_sales)
+                st.markdown(f"**CollX** — {len(collx_sales)} sales")
+                st.markdown(f"Gross: **${cx_gross:,.2f}** · Net: **${cx_net:,.2f}**")
+            with pc3:
+                dc_gross = sum(_parse_money(s.get("gross_revenue")) for s in dc_sales)
+                dc_net = sum(_parse_money(s.get("net_proceeds")) for s in dc_sales)
+                st.markdown(f"**DC Sports** — {len(dc_sales)} sales")
+                st.markdown(f"Gross: **${dc_gross:,.2f}** · Net: **${dc_net:,.2f}**")
+
+        st.divider()
+
+        sal_t1, sal_t2, sal_t3 = st.tabs(["📊 P&L by Month", "📋 Sales Log", "⬆️ Import"])
+
+        # ── P&L BY MONTH ──────────────────────────────────────────────────────
+        with sal_t1:
+            if not all_sales:
+                st.info("No sales yet. Import eBay or CollX data in the Import tab.")
+            else:
+                year_opts = sorted(set(
+                    str(s.get("sale_date") or "")[:4]
+                    for s in all_sales
+                    if str(s.get("sale_date") or "")[:4].isdigit()
+                ), reverse=True)
+                sel_year = st.selectbox("Year", year_opts, key="sal_year")
+
+                from collections import defaultdict
+                monthly = defaultdict(lambda: {"gross": 0.0, "fees": 0.0, "net": 0.0, "txns": 0})
+                for s in all_sales:
+                    d = str(s.get("sale_date") or "")
+                    if not d[:4] == sel_year:
+                        continue
+                    month_key = d[:7]
+                    monthly[month_key]["gross"] += _parse_money(s.get("gross_revenue"))
+                    monthly[month_key]["fees"] += _parse_money(s.get("platform_fee"))
+                    monthly[month_key]["net"] += _parse_money(s.get("net_proceeds"))
+                    monthly[month_key]["txns"] += 1
+
+                if not monthly:
+                    st.info(f"No sales for {sel_year}.")
+                else:
+                    month_names = {
+                        "01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr",
+                        "05": "May", "06": "Jun", "07": "Jul", "08": "Aug",
+                        "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dec",
+                    }
+                    rows_m = []
+                    ytd_gross = ytd_fees = ytd_net = ytd_txns = 0
+                    for mk in sorted(monthly.keys()):
+                        m = monthly[mk]
+                        mn = month_names.get(mk[5:7], mk[5:7])
+                        rows_m.append({
+                            "Month": f"{mn} {mk[:4]}",
+                            "Sales": m["txns"],
+                            "Gross ($)": round(m["gross"], 2),
+                            "Fees ($)": round(m["fees"], 2),
+                            "Net ($)": round(m["net"], 2),
+                            "Keep %": round(m["net"] / m["gross"] * 100, 1) if m["gross"] else 0,
+                        })
+                        ytd_gross += m["gross"]; ytd_fees += m["fees"]
+                        ytd_net += m["net"]; ytd_txns += m["txns"]
+
+                    # YTD totals row
+                    rows_m.append({
+                        "Month": f"— YTD {sel_year} —",
+                        "Sales": ytd_txns,
+                        "Gross ($)": round(ytd_gross, 2),
+                        "Fees ($)": round(ytd_fees, 2),
+                        "Net ($)": round(ytd_net, 2),
+                        "Keep %": round(ytd_net / ytd_gross * 100, 1) if ytd_gross else 0,
+                    })
+
+                    st.dataframe(
+                        pd.DataFrame(rows_m),
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Gross ($)": st.column_config.NumberColumn(format="$%.2f"),
+                            "Fees ($)": st.column_config.NumberColumn(format="$%.2f"),
+                            "Net ($)": st.column_config.NumberColumn(format="$%.2f"),
+                            "Keep %": st.column_config.NumberColumn(format="%.1f%%"),
+                        },
+                    )
+
+                    # Channel mix for the year
+                    st.markdown("**Channel Mix**")
+                    ch_rows = []
+                    for src, label in [("ebay", "eBay"), ("collx", "CollX"), ("dc_sports", "DC Sports")]:
+                        src_sales = [s for s in all_sales if s.get("source") == src and str(s.get("sale_date") or "")[:4] == sel_year]
+                        if src_sales:
+                            sg = sum(_parse_money(s.get("gross_revenue")) for s in src_sales)
+                            sn_ = sum(_parse_money(s.get("net_proceeds")) for s in src_sales)
+                            sf = sum(_parse_money(s.get("platform_fee")) for s in src_sales)
+                            ch_rows.append({"Channel": label, "Sales": len(src_sales), "Gross ($)": round(sg, 2), "Fees ($)": round(sf, 2), "Net ($)": round(sn_, 2)})
+                    if ch_rows:
+                        st.dataframe(
+                            pd.DataFrame(ch_rows),
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "Gross ($)": st.column_config.NumberColumn(format="$%.2f"),
+                                "Fees ($)": st.column_config.NumberColumn(format="$%.2f"),
+                                "Net ($)": st.column_config.NumberColumn(format="$%.2f"),
+                            },
+                        )
+
+        # ── SALES LOG ─────────────────────────────────────────────────────────
+        with sal_t2:
+            if not all_sales:
+                st.info("No sales yet.")
+            else:
+                lf1, lf2, lf3 = st.columns(3)
+                src_opts = ["All"] + sorted(set(s.get("source", "") for s in all_sales))
+                src_filt = lf1.selectbox("Platform", src_opts, key="sal_log_src",
+                                          format_func=lambda x: {"ebay": "eBay", "collx": "CollX", "dc_sports": "DC Sports"}.get(x, x))
+                status_opts2 = ["All"] + sorted(set(s.get("status", "") or "" for s in all_sales if s.get("status")))
+                status_filt2 = lf2.selectbox("Status", status_opts2, key="sal_log_status")
+                year_opts2 = ["All"] + sorted(set(str(s.get("sale_date") or "")[:4] for s in all_sales if str(s.get("sale_date") or "")[:4].isdigit()), reverse=True)
+                year_filt2 = lf3.selectbox("Year", year_opts2, key="sal_log_year")
+
+                log_filtered = all_sales
+                if src_filt != "All":
+                    log_filtered = [s for s in log_filtered if s.get("source") == src_filt]
+                if status_filt2 != "All":
+                    log_filtered = [s for s in log_filtered if s.get("status") == status_filt2]
+                if year_filt2 != "All":
+                    log_filtered = [s for s in log_filtered if str(s.get("sale_date") or "")[:4] == year_filt2]
+
+                st.caption(f"Showing {len(log_filtered):,} of {len(all_sales):,} sales")
+
+                src_label = {"ebay": "eBay", "collx": "CollX", "dc_sports": "DC Sports"}
+                log_rows = []
+                for s in log_filtered[:500]:
+                    log_rows.append({
+                        "Date": str(s.get("sale_date") or "")[:10],
+                        "Platform": src_label.get(s.get("source", ""), s.get("source", "")),
+                        "Title": s.get("title") or "",
+                        "Qty": s.get("quantity") or 1,
+                        "Gross ($)": _parse_money(s.get("gross_revenue")),
+                        "Fee ($)": _parse_money(s.get("platform_fee")),
+                        "Net ($)": _parse_money(s.get("net_proceeds")),
+                        "Status": s.get("status") or "",
+                    })
+                if len(log_filtered) > 500:
+                    st.caption("Showing first 500 rows — filter by year or platform to see more.")
+
+                st.dataframe(
+                    pd.DataFrame(log_rows),
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Gross ($)": st.column_config.NumberColumn(format="$%.2f"),
+                        "Fee ($)": st.column_config.NumberColumn(format="$%.2f"),
+                        "Net ($)": st.column_config.NumberColumn(format="$%.2f"),
+                    },
+                )
+
+                # Export
+                if log_rows:
+                    csv_out = pd.DataFrame(log_rows).to_csv(index=False).encode()
+                    st.download_button("⬇️ Export filtered to CSV", data=csv_out,
+                                       file_name=f"sales_export_{date.today()}.csv",
+                                       mime="text/csv", key="sal_export")
+
+                st.divider()
+                with st.expander("🗑️ Delete sales by platform (re-import to refresh)"):
+                    del_src = st.selectbox("Delete all records from", ["— select —", "eBay", "CollX", "DC Sports"], key="sal_del_src")
+                    src_map = {"eBay": "ebay", "CollX": "collx", "DC Sports": "dc_sports"}
+                    if del_src != "— select —":
+                        st.warning(f"This permanently deletes all {del_src} sales records from Supabase. Re-import the CSV to restore.")
+                        if st.button(f"Delete all {del_src} records", type="primary", key="sal_del_btn"):
+                            _sal_delete(f"source=eq.{src_map[del_src]}")
+                            st.success(f"Deleted all {del_src} records.")
+                            st.session_state.pop("sal_data", None)
+                            st.rerun()
+
+        # ── IMPORT ────────────────────────────────────────────────────────────
+        with sal_t3:
+            imp_ebay, imp_collx = st.tabs(["📦 eBay Sold Report", "🃏 CollX Export"])
+
+            # ── eBay import ───────────────────────────────────────────────────
+            with imp_ebay:
+                st.markdown("### Import eBay Sold Report")
+                st.caption(
+                    "eBay Seller Hub → Reports → Downloads → Transactions report (CSV). "
+                    "Import as many date ranges as you like — duplicates are skipped. "
+                    "eBay's report doesn't include fees directly; final value fee is estimated at **12.9% of (item price + shipping) + $0.30**."
+                )
+                ebay_file = st.file_uploader("eBay Transactions / Sold Report CSV", type=["csv"], key="sal_ebay_file")
+                if ebay_file:
+                    try:
+                        raw_content = ebay_file.read().decode("utf-8-sig")
+                        lines = raw_content.split("\n")
+                        # eBay reports have a blank/junk first line — find the header
+                        header_idx = 0
+                        for i, line in enumerate(lines[:5]):
+                            if "Sale Date" in line or "Item Title" in line or "Sales Record" in line:
+                                header_idx = i
+                                break
+                        csv_content = "\n".join(lines[header_idx:])
+                        ebay_df = pd.read_csv(io.StringIO(csv_content), encoding="utf-8-sig")
+                        ebay_df.columns = [c.strip() for c in ebay_df.columns]
+                        # Drop completely empty rows
+                        ebay_df = ebay_df.dropna(how="all")
+                        ebay_df = ebay_df[ebay_df.get("Sale Date", ebay_df.iloc[:, 0]).astype(str).str.strip() != ""]
+
+                        st.caption(f"Found **{len(ebay_df):,}** rows. Preview:")
+                        st.dataframe(ebay_df.head(5), use_container_width=True, hide_index=True)
+
+                        if st.button("⬆️ Import eBay Sales", type="primary", key="sal_ebay_btn"):
+                            existing_raw3 = _sal_get("?select=dedup_key&source=eq.ebay")
+                            existing_keys3 = {r["dedup_key"] for r in existing_raw3 if r.get("dedup_key")}
+
+                            imported3 = skipped3 = failed3 = 0
+                            prog3 = st.progress(0)
+                            total3 = len(ebay_df)
+
+                            for idx3, row3 in ebay_df.iterrows():
+                                prog3.progress(int((idx3 + 1) / max(total3, 1) * 100))
+                                sale_date3 = _parse_ebay_date(row3.get("Sale Date", ""))
+                                item_num3 = str(row3.get("Item Number", "") or "").strip()
+                                sold_for3 = _parse_money(row3.get("Sold For", 0))
+                                shipping3 = _parse_money(row3.get("Shipping And Handling", 0))
+                                title3 = str(row3.get("Item Title", "") or "").strip()
+                                qty3 = int(float(str(row3.get("Quantity", 1) or 1)))
+                                gross3 = round(sold_for3 + shipping3, 2)
+                                fee3 = round(gross3 * 0.129 + 0.30, 2)
+                                net3 = round(gross3 - fee3, 2)
+                                dedup3 = f"ebay|{item_num3}|{sale_date3}|{round(sold_for3, 2)}"
+
+                                if dedup3 in existing_keys3:
+                                    skipped3 += 1
+                                    continue
+
+                                rec3 = {
+                                    "source": "ebay",
+                                    "order_id": str(row3.get("Order Number", "") or "").strip() or None,
+                                    "sale_date": sale_date3 or None,
+                                    "title": title3 or None,
+                                    "item_number": item_num3 or None,
+                                    "quantity": qty3,
+                                    "sale_price": sold_for3,
+                                    "shipping_collected": shipping3,
+                                    "gross_revenue": gross3,
+                                    "platform_fee": fee3,
+                                    "net_proceeds": net3,
+                                    "status": str(row3.get("Feedback Received", "") or "sold").strip() or "sold",
+                                    "dedup_key": dedup3,
+                                }
+                                res3 = _sal_post(rec3)
+                                if res3 is not None:
+                                    imported3 += 1
+                                    existing_keys3.add(dedup3)
+                                else:
+                                    failed3 += 1
+
+                            prog3.empty()
+                            msg3 = f"✅ Imported **{imported3}** eBay sales"
+                            if skipped3:
+                                msg3 += f", skipped **{skipped3}** duplicates"
+                            if failed3:
+                                msg3 += f", **{failed3}** failed"
+                            st.success(msg3 + ".")
+                            st.caption("Note: eBay fees are estimated at 12.9% + $0.30. For exact fees, cross-reference your eBay invoice.")
+                            if imported3:
+                                st.session_state.pop("sal_data", None)
+                                st.rerun()
+                    except Exception as e3:
+                        st.error(f"Error reading eBay CSV: {e3}")
+
+            # ── CollX import ──────────────────────────────────────────────────
+            with imp_collx:
+                st.markdown("### Import CollX Orders Export")
+                st.caption(
+                    "CollX app → Orders → Export. "
+                    "Columns: order_number, order_date, buyer_name, total_items, merchandise_value, gross_subtotal, net_proceeds, status. "
+                    "Net proceeds are exact from CollX (fees already deducted). Re-importing is safe — duplicates skipped."
+                )
+                collx_file = st.file_uploader("CollX orders export CSV", type=["csv"], key="sal_collx_file")
+                if collx_file:
+                    try:
+                        collx_df = pd.read_csv(collx_file, encoding="utf-8-sig")
+                        collx_df.columns = [c.strip() for c in collx_df.columns]
+                        st.caption(f"Found **{len(collx_df):,}** rows. Preview:")
+                        st.dataframe(collx_df.head(5), use_container_width=True, hide_index=True)
+
+                        date_range = ""
+                        if "order_date" in collx_df.columns:
+                            dates4 = collx_df["order_date"].dropna().tolist()
+                            if dates4:
+                                date_range = f" ({dates4[-1]} → {dates4[0]})"
+                        st.caption(f"Date range detected{date_range}")
+
+                        if st.button("⬆️ Import CollX Sales", type="primary", key="sal_collx_btn"):
+                            existing_raw4 = _sal_get("?select=dedup_key&source=eq.collx")
+                            existing_keys4 = {r["dedup_key"] for r in existing_raw4 if r.get("dedup_key")}
+
+                            imported4 = skipped4 = failed4 = 0
+                            prog4 = st.progress(0)
+                            total4 = len(collx_df)
+
+                            for idx4, row4 in collx_df.iterrows():
+                                prog4.progress(int((idx4 + 1) / max(total4, 1) * 100))
+                                order_num4 = str(row4.get("order_number", "") or "").strip()
+                                order_date4 = _parse_collx_date(row4.get("order_date", ""))
+                                gross4 = _parse_money(row4.get("gross_subtotal", 0))
+                                net4 = _parse_money(row4.get("net_proceeds", 0))
+                                merch4 = _parse_money(row4.get("merchandise_value", 0))
+                                fee4 = round(gross4 - net4, 2)
+                                qty4 = int(float(str(row4.get("total_items", 1) or 1)))
+                                status4 = str(row4.get("status", "") or "").strip()
+                                dedup4 = f"collx|{order_num4}|{order_date4}"
+
+                                if dedup4 in existing_keys4:
+                                    skipped4 += 1
+                                    continue
+
+                                rec4 = {
+                                    "source": "collx",
+                                    "order_id": order_num4 or None,
+                                    "sale_date": order_date4 or None,
+                                    "title": f"CollX order {order_num4} ({qty4} item{'s' if qty4 != 1 else ''})",
+                                    "item_number": None,
+                                    "quantity": qty4,
+                                    "sale_price": merch4,
+                                    "shipping_collected": round(gross4 - merch4, 2),
+                                    "gross_revenue": gross4,
+                                    "platform_fee": fee4,
+                                    "net_proceeds": net4,
+                                    "status": status4 or "completed",
+                                    "dedup_key": dedup4,
+                                }
+                                res4 = _sal_post(rec4)
+                                if res4 is not None:
+                                    imported4 += 1
+                                    existing_keys4.add(dedup4)
+                                else:
+                                    failed4 += 1
+
+                            prog4.empty()
+                            msg4 = f"✅ Imported **{imported4}** CollX orders"
+                            if skipped4:
+                                msg4 += f", skipped **{skipped4}** duplicates"
+                            if failed4:
+                                msg4 += f", **{failed4}** failed"
+                            st.success(msg4 + ".")
+                            if imported4:
+                                st.session_state.pop("sal_data", None)
+                                st.rerun()
+                    except Exception as e4:
+                        st.error(f"Error reading CollX CSV: {e4}")
+
+        st.divider()
+        st.markdown("**SQL — Create Sales Table** *(run once in Supabase SQL Editor)*")
+        st.code(
+            """create table if not exists sales_records (
+  id bigint primary key generated always as identity,
+  source text not null,
+  order_id text,
+  sale_date date,
+  title text,
+  item_number text,
+  quantity integer default 1,
+  sale_price numeric default 0,
+  shipping_collected numeric default 0,
+  gross_revenue numeric default 0,
+  platform_fee numeric default 0,
+  net_proceeds numeric default 0,
+  status text,
+  dedup_key text unique,
+  created_at timestamptz default now()
+);
+create index if not exists idx_sr_date on sales_records(sale_date);
+create index if not exists idx_sr_source on sales_records(source);""",
+            language="sql",
+        )
 
 # ─── Footer ───────────────────────────────────────────────────────────────────
 st.markdown("---")

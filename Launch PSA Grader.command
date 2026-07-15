@@ -21,8 +21,9 @@ echo "  Close it to shut the app down."
 echo "================================================"
 echo ""
 
-# Open browser after 3 second delay
-sleep 3 && open "http://localhost:8502" &
+# Read version from app.py and open with cache-busting param so new versions always load fresh
+VERSION=$(grep 'APP_VERSION = ' app.py | head -1 | tr -d '"' | awk -F'= ' '{print $2}' | tr -d '.')
+sleep 3 && open "http://localhost:8502/?v=${VERSION}" &
 
 # Start the app
 /Library/Frameworks/Python.framework/Versions/3.14/bin/python3 -m streamlit run app.py \
