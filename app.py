@@ -4477,6 +4477,7 @@ with tab11:
                 pl_source  = p1.text_input("Source", placeholder="Matt's FB Marketplace")
                 pl_date    = p2.date_input("Purchase Date", value=date.today())
                 pl_cost    = p2.number_input("Total Cost Paid ($)", min_value=0.0, step=0.01, format="%.2f")
+                pl_count   = p2.number_input("Card Count in Lot", min_value=0, step=1, value=0, help="Total cards you received in this lot — used as a check against imported cards")
                 pl_notes   = p3.text_area("Notes", height=80, placeholder="What was in the lot, where from, etc.")
                 lot_sub    = st.form_submit_button("Add Lot", type="primary")
 
@@ -4490,6 +4491,7 @@ with tab11:
                         "source":        pl_source.strip() or None,
                         "purchase_date": str(pl_date),
                         "total_cost":    float(pl_cost),
+                        "card_count":    int(pl_count),
                         "notes":         pl_notes.strip() or None,
                     })
                     if res is not None:
@@ -4513,11 +4515,12 @@ with tab11:
                 lot_display = []
                 for lot in lots_data:
                     lot_display.append({
-                        "Prefix":        lot["lot_prefix"],
-                        "Source":        lot.get("source") or "—",
-                        "Date":          lot.get("purchase_date") or "—",
+                        "Prefix":         lot["lot_prefix"],
+                        "Source":         lot.get("source") or "—",
+                        "Date":           lot.get("purchase_date") or "—",
                         "Total Cost ($)": lot["total_cost"],
-                        "Notes":         lot.get("notes") or "",
+                        "Card Count":     lot.get("card_count") or 0,
+                        "Notes":          lot.get("notes") or "",
                     })
                 st.dataframe(
                     pd.DataFrame(lot_display),
@@ -4544,9 +4547,13 @@ with tab11:
   source        text,
   purchase_date date,
   total_cost    numeric not null default 0,
+  card_count    integer not null default 0,
   notes         text,
   created_at    timestamptz default now()
 );
+
+-- If the table already exists, add the card_count column:
+alter table purchase_lots add column if not exists card_count integer not null default 0;
 
 -- Add SKU column to sales_records so sold cards link back to lots
 alter table sales_records add column if not exists sku text;
@@ -4656,21 +4663,25 @@ create index if not exists idx_sr_sku on sales_records(sku);""", language="sql")
 
                 pl_rows = []
                 for lot in lots_data:
-                    pfx  = lot["lot_prefix"].upper()
-                    cost = float(lot["total_cost"] or 0)
-                    rev  = prefix_revenue.get(pfx, {})
-                    net  = rev.get("net", 0.0)
-                    sold = rev.get("count", 0)
-                    pl   = round(net - cost, 2)
+                    pfx       = lot["lot_prefix"].upper()
+                    cost      = float(lot["total_cost"] or 0)
+                    expected  = int(lot.get("card_count") or 0)
+                    rev       = prefix_revenue.get(pfx, {})
+                    net       = rev.get("net", 0.0)
+                    sold      = rev.get("count", 0)
+                    remaining = (expected - sold) if expected > 0 else "—"
+                    pl        = round(net - cost, 2)
                     pl_rows.append({
-                        "Lot Prefix":    lot["lot_prefix"],
-                        "Source":        lot.get("source") or "—",
-                        "Date":          lot.get("purchase_date") or "—",
-                        "Cost Paid ($)": cost,
-                        "Cards Sold":    sold,
+                        "Lot Prefix":      lot["lot_prefix"],
+                        "Source":          lot.get("source") or "—",
+                        "Date":            lot.get("purchase_date") or "—",
+                        "Cost Paid ($)":   cost,
+                        "Expected Cards":  expected if expected > 0 else "—",
+                        "Cards Sold":      sold,
+                        "Remaining":       remaining,
                         "Net Revenue ($)": round(net, 2),
-                        "P&L ($)":       pl,
-                        "Status":        "✅ Profit" if pl > 0 else ("🔴 Loss" if pl < 0 else "— Break even"),
+                        "P&L ($)":         pl,
+                        "Status":          "✅ Profit" if pl > 0 else ("🔴 Loss" if pl < 0 else "— Break even"),
                     })
 
                 pl_df = pd.DataFrame(pl_rows)
