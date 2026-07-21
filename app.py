@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.3"
+APP_VERSION = "1.5.4"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -1942,7 +1942,7 @@ if not is_beta and SUPABASE_URL:
 if is_beta:
     st.info("🔓 **Beta Preview** — You have access to Card Research and Inventory Check. Submission Tracker and Downloads unlock with a full membership.", icon="💎")
 
-tab1, tab7, tab8, tab2, tab6, tab3, tab4, tab5, tab9, tab10 = st.tabs(["🔍 Card Research", "🔥 Hot Movers", "📷 Scan", "📦 Inventory Check", "🧰 Operations", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake", "🏷️ Consignments", "💰 Sales & P&L"])
+tab1, tab7, tab8, tab2, tab6, tab3, tab4, tab5, tab9, tab11, tab10 = st.tabs(["🔍 Card Research", "🔥 Hot Movers", "📷 Scan", "📦 Inventory Check", "🧰 Operations", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake", "🏷️ Consignments", "📦 Purchases", "💰 Sales & P&L"])
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — Card Research
@@ -4156,54 +4156,31 @@ with tab9:
                 return 0.0
 
         def _load_csn():
-            lots = _csn_get("consignment_lots", "?order=lot_sku.asc")
             ships = _csn_get("consignment_shipments", "?order=shipped_date.desc.nullslast,dc_package_id.desc")
             items = _csn_get("consignment_items", "?order=id.asc&limit=2000")
-            return lots, ships, items
+            return ships, items
 
         if "csn_data" not in st.session_state:
             with st.spinner("Loading consignment data…"):
                 st.session_state["csn_data"] = _load_csn()
 
-        lots_raw, ships_raw, items_raw = st.session_state["csn_data"]
+        ships_raw, items_raw = st.session_state["csn_data"]
+        csn_items = [dict(r) for r in items_raw]
 
-        # Per-card cost by lot SKU
-        lot_per_card = {
-            lot["lot_sku"]: round(lot["total_cost"] / max(lot["card_count"], 1), 2)
-            for lot in lots_raw
-        }
-
-        # Augment items with cost + P&L
-        csn_items = []
-        for raw in items_raw:
-            item = dict(raw)
-            sku = item.get("lot_sku") or ""
-            cost = lot_per_card.get(sku, 0.0) if sku else 0.0
-            net = float(item.get("dc_net") or 0)
-            item["_cost"] = cost
-            item["_pl"] = round(net - cost, 2) if cost else None
-            csn_items.append(item)
-
-        # Business snapshot numbers
-        paid_items = [i for i in csn_items if (i.get("dc_status") or "").lower() == "paid"]
+        # Business snapshot
+        paid_items   = [i for i in csn_items if (i.get("dc_status") or "").lower() == "paid"]
         active_items = [i for i in csn_items if (i.get("dc_status") or "").lower() not in ("paid", "unsold")]
-        total_net = sum(float(i.get("dc_net") or 0) for i in paid_items)
-        total_invested = sum(i["_cost"] for i in paid_items if i["_cost"])
-        total_pl = round(total_net - total_invested, 2) if total_invested else None
+        total_net    = sum(float(i.get("dc_net") or 0) for i in paid_items)
 
-        sn1, sn2, sn3, sn4, sn5 = st.columns(5)
-        sn1.metric("Cards Still Out", f"{len(active_items)}")
-        sn2.metric("Total Cards (all)", f"{len(csn_items)}")
-        sn3.metric("Total Invested", f"${total_invested:,.2f}" if total_invested else "— (assign lots)")
-        sn4.metric("Total Net (Paid)", f"${total_net:,.2f}")
-        if total_pl is not None:
-            sn5.metric("Net P&L", f"${total_pl:+,.2f}")
-        else:
-            sn5.metric("Net P&L", "— assign lots")
+        sn1, sn2, sn3, sn4 = st.columns(4)
+        sn1.metric("Cards Still Active", f"{len(active_items)}")
+        sn2.metric("Total Cards (all)",  f"{len(csn_items)}")
+        sn3.metric("Total Net (Paid)",   f"${total_net:,.2f}")
+        sn4.metric("Cost basis / lot P&L", "→ Purchases tab")
 
         st.divider()
 
-        csn_t1, csn_t2, csn_t3, csn_t4 = st.tabs(["📦 Shipments", "🃏 Cards", "🧰 Lots & Cost Basis", "⬆️ Import"])
+        csn_t1, csn_t2, csn_t3 = st.tabs(["📦 Shipments", "🃏 Cards", "⬆️ Import"])
 
         # ── SHIPMENTS ─────────────────────────────────────────────────────────
         with csn_t1:
@@ -4220,22 +4197,19 @@ with tab9:
                 for ship in ships_raw:
                     pkg = ship.get("dc_package_id") or "?"
                     pkg_items = items_by_pkg.get(pkg, [])
-                    paid_c = sum(1 for i in pkg_items if (i.get("dc_status") or "").lower() == "paid")
+                    paid_c   = sum(1 for i in pkg_items if (i.get("dc_status") or "").lower() == "paid")
                     unsold_c = sum(1 for i in pkg_items if (i.get("dc_status") or "").lower() == "unsold")
                     active_c = len(pkg_items) - paid_c - unsold_c
                     batch_net = sum(float(i.get("dc_net") or 0) for i in pkg_items if (i.get("dc_status") or "").lower() == "paid")
-                    batch_cost = sum(i["_cost"] for i in pkg_items if i["_cost"])
                     ship_rows.append({
                         "Package ID": pkg,
-                        "Shipped": ship.get("shipped_date") or "—",
-                        "Cards": len(pkg_items),
-                        "Paid": paid_c,
-                        "Unsold": unsold_c,
-                        "Active": active_c,
-                        "Net ($)": round(batch_net, 2),
-                        "Cost Basis ($)": round(batch_cost, 2) if batch_cost else None,
-                        "P&L ($)": round(batch_net - batch_cost, 2) if batch_cost else None,
-                        "Notes": ship.get("notes") or "",
+                        "Shipped":    ship.get("shipped_date") or "—",
+                        "Cards":      len(pkg_items),
+                        "Paid":       paid_c,
+                        "Unsold":     unsold_c,
+                        "Active":     active_c,
+                        "Net Received ($)": round(batch_net, 2),
+                        "Notes":      ship.get("notes") or "",
                     })
 
                 st.dataframe(
@@ -4243,11 +4217,10 @@ with tab9:
                     use_container_width=True,
                     hide_index=True,
                     column_config={
-                        "Net ($)": st.column_config.NumberColumn(format="$%.2f"),
-                        "Cost Basis ($)": st.column_config.NumberColumn(format="$%.2f"),
-                        "P&L ($)": st.column_config.NumberColumn(format="$%.2f"),
+                        "Net Received ($)": st.column_config.NumberColumn(format="$%.2f"),
                     },
                 )
+                st.caption("💡 Cost basis and lot P&L are tracked in the **📦 Purchases** tab.")
 
             with st.expander("Edit shipment notes / shipped date"):
                 if ships_raw:
@@ -4275,154 +4248,46 @@ with tab9:
             st.markdown("### Card-Level Tracking")
             st.caption("Assign a Lot SKU to any card to connect its cost basis. Click **Save Lot SKU Assignments** after editing.")
 
-            f1, f2, f3 = st.columns(3)
+            f1, f2 = st.columns(2)
             pkg_opts2 = ["All"] + sorted(set(i.get("dc_package_id") or "?" for i in csn_items))
             pkg_filt = f1.selectbox("Shipment", pkg_opts2, key="csn_cards_pkg")
             status_opts = ["All"] + sorted(set((i.get("dc_status") or "Unknown") for i in csn_items))
             status_filt = f2.selectbox("Status", status_opts, key="csn_cards_status")
-            basis_opts = ["All", "Has Cost Basis", "Missing Basis"]
-            basis_filt = f3.selectbox("Cost Basis", basis_opts, key="csn_cards_basis")
 
             filtered = csn_items
             if pkg_filt != "All":
                 filtered = [i for i in filtered if i.get("dc_package_id") == pkg_filt]
             if status_filt != "All":
                 filtered = [i for i in filtered if (i.get("dc_status") or "Unknown") == status_filt]
-            if basis_filt == "Has Cost Basis":
-                filtered = [i for i in filtered if i["_cost"] > 0]
-            elif basis_filt == "Missing Basis":
-                filtered = [i for i in filtered if i["_cost"] == 0]
 
             if not filtered:
                 st.info("No cards match the current filters.")
             else:
                 card_rows = []
-                card_ids = []
                 for i in filtered:
-                    card_ids.append(i["id"])
                     card_rows.append({
-                        "Title": i.get("title") or "",
-                        "Status": i.get("dc_status") or "",
-                        "Package": i.get("dc_package_id") or "",
-                        "Ended": (i.get("dc_ending_date") or "")[:10],
-                        "DC Net ($)": float(i.get("dc_net") or 0),
-                        "Lot SKU": i.get("lot_sku") or "",
-                        "Cost ($)": i["_cost"] if i["_cost"] else None,
-                        "P&L ($)": i["_pl"],
+                        "Title":       i.get("title") or "",
+                        "Status":      i.get("dc_status") or "",
+                        "Package":     i.get("dc_package_id") or "",
+                        "Listed":      (i.get("dc_listing_date") or "")[:10],
+                        "Ended":       (i.get("dc_ending_date") or "")[:10],
+                        "Sale Price":  float(i.get("dc_sale_price") or 0),
+                        "Fees":        float(i.get("dc_fees") or 0),
+                        "DC Net ($)":  float(i.get("dc_net") or 0),
                     })
-
-                card_df = pd.DataFrame(card_rows)
-                edited_df = st.data_editor(
-                    card_df,
-                    use_container_width=True,
-                    hide_index=True,
-                    num_rows="fixed",
-                    disabled=["Title", "Status", "Package", "Ended", "DC Net ($)", "Cost ($)", "P&L ($)"],
-                    column_config={
-                        "DC Net ($)": st.column_config.NumberColumn(format="$%.2f"),
-                        "Cost ($)": st.column_config.NumberColumn(format="$%.2f"),
-                        "P&L ($)": st.column_config.NumberColumn(format="$%.2f"),
-                        "Lot SKU": st.column_config.TextColumn(help="Type or clear a lot SKU — matches against Lots & Cost Basis tab"),
-                    },
-                    key="csn_cards_editor",
-                )
-
-                if st.button("💾 Save Lot SKU Assignments", key="csn_save_skus", type="primary"):
-                    changed = 0
-                    for idx, row in edited_df.iterrows():
-                        orig_sku = str(card_df.iloc[idx]["Lot SKU"]).strip()
-                        new_sku = str(row["Lot SKU"]).strip()
-                        if new_sku != orig_sku:
-                            item_id = card_ids[idx]
-                            _csn_patch("consignment_items", f"id=eq.{item_id}", {"lot_sku": new_sku or None})
-                            changed += 1
-                    if changed:
-                        st.success(f"Saved {changed} SKU assignment(s).")
-                        st.session_state.pop("csn_data", None)
-                        st.rerun()
-                    else:
-                        st.info("No changes detected.")
-
-        # ── LOTS & COST BASIS ─────────────────────────────────────────────────
-        with csn_t3:
-            st.markdown("### Lots & Cost Basis")
-            st.caption(
-                "Record each lot you bought. Give it a SKU (e.g. LOT-001), enter the total cost and card count — "
-                "per-card average is auto-calculated. Then assign that SKU to cards in the Cards tab."
-            )
-
-            with st.form("csn_new_lot_form"):
-                st.markdown("**Add Lot**")
-                l1, l2, l3 = st.columns(3)
-                nl_sku = l1.text_input("Lot SKU *", placeholder="LOT-001")
-                nl_name = l1.text_input("Lot Name", placeholder="eBay lot June 2026")
-                nl_cost = l2.number_input("Total Cost ($)", min_value=0.0, step=0.01, format="%.2f")
-                nl_count = l2.number_input("Card Count", min_value=1, step=1, value=1)
-                nl_notes = l3.text_area("Notes", height=80)
-                if nl_count > 0 and nl_cost > 0:
-                    l3.caption(f"Per-card avg: **${nl_cost / nl_count:.2f}**")
-                lot_submitted = st.form_submit_button("Add Lot", type="primary")
-
-            if lot_submitted:
-                if not nl_sku.strip():
-                    st.error("Lot SKU is required.")
-                else:
-                    res = _csn_post("consignment_lots", {
-                        "lot_sku": nl_sku.strip().upper(),
-                        "lot_name": nl_name.strip() or None,
-                        "total_cost": float(nl_cost),
-                        "card_count": int(nl_count),
-                        "notes": nl_notes.strip() or None,
-                    })
-                    if res is not None:
-                        st.success(f"Lot {nl_sku.strip().upper()} added. Per-card: ${nl_cost / max(nl_count, 1):.2f}")
-                        st.session_state.pop("csn_data", None)
-                        st.rerun()
-                    else:
-                        st.error("Could not save — SKU may already exist. Delete the existing lot first to replace it.")
-
-            st.divider()
-
-            if not lots_raw:
-                st.info("No lots yet. Add one above.")
-            else:
-                lot_rows2 = []
-                for lot in lots_raw:
-                    per_card = round(lot["total_cost"] / max(lot["card_count"], 1), 2)
-                    assigned = sum(1 for i in csn_items if i.get("lot_sku") == lot["lot_sku"])
-                    lot_rows2.append({
-                        "SKU": lot["lot_sku"],
-                        "Name": lot.get("lot_name") or "",
-                        "Total Cost": lot["total_cost"],
-                        "Cards": lot["card_count"],
-                        "Per-Card Avg": per_card,
-                        "Assigned Items": assigned,
-                        "Notes": lot.get("notes") or "",
-                        "_id": lot["id"],
-                    })
-                lot_df2 = pd.DataFrame(lot_rows2)
                 st.dataframe(
-                    lot_df2.drop(columns=["_id"]),
+                    pd.DataFrame(card_rows),
                     use_container_width=True,
                     hide_index=True,
                     column_config={
-                        "Total Cost": st.column_config.NumberColumn(format="$%.2f"),
-                        "Per-Card Avg": st.column_config.NumberColumn(format="$%.2f"),
+                        "Sale Price": st.column_config.NumberColumn(format="$%.2f"),
+                        "Fees":       st.column_config.NumberColumn(format="$%.2f"),
+                        "DC Net ($)": st.column_config.NumberColumn(format="$%.2f"),
                     },
                 )
-
-                del_sku_opts = ["— select to delete —"] + [lot["lot_sku"] for lot in lots_raw]
-                del_sku = st.selectbox("Delete a lot", del_sku_opts, key="csn_del_lot_sel")
-                if del_sku != "— select to delete —":
-                    lot_id = next(lot["id"] for lot in lots_raw if lot["lot_sku"] == del_sku)
-                    if st.button(f"🗑️ Delete {del_sku}", key="csn_del_lot_btn"):
-                        _csn_delete_row("consignment_lots", f"id=eq.{lot_id}")
-                        st.success(f"Deleted {del_sku}.")
-                        st.session_state.pop("csn_data", None)
-                        st.rerun()
 
         # ── IMPORT ────────────────────────────────────────────────────────────
-        with csn_t4:
+        with csn_t3:
             st.markdown("### Import DC Sports Export")
             st.caption(
                 "In DC Sports, go to your Seller Dashboard → export your cards CSV. "
@@ -4546,6 +4411,325 @@ create index if not exists idx_ci_shipment on consignment_items(shipment_id);
 create index if not exists idx_ci_lot_sku on consignment_items(lot_sku);""",
                 language="sql",
             )
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 11 — Purchases (Lot Tracking)
+# ══════════════════════════════════════════════════════════════════════════════
+with tab11:
+    st.markdown("## 📦 Purchases")
+    st.caption("Track card lots you buy. SKU prefix (first 2 segments, e.g. MATTSFB-072026) ties every card back to its lot.")
+
+    if not SUPABASE_URL:
+        st.warning("Supabase not connected. Configure in sidebar.")
+    else:
+        def _pur_get(table, params=""):
+            url = f"{SUPABASE_URL}/rest/v1/{table}{params}"
+            req = urllib.request.Request(url, headers=sb_headers())
+            try:
+                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
+                    return json.loads(r.read().decode())
+            except Exception:
+                return []
+
+        _pur_last_error = {"msg": None}
+
+        def _pur_post(table, payload):
+            data = json.dumps(payload).encode()
+            req = urllib.request.Request(
+                f"{SUPABASE_URL}/rest/v1/{table}",
+                data=data,
+                headers={**sb_headers(), "Prefer": "return=representation"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
+                    body = r.read()
+                    return json.loads(body.decode()) if body else []
+            except urllib.error.HTTPError as e:
+                body = e.read().decode("utf-8", errors="replace")
+                _pur_last_error["msg"] = f"HTTP {e.code}: {body[:400]}"
+                return None
+            except Exception as ex:
+                _pur_last_error["msg"] = str(ex)
+                return None
+
+        def _pur_delete(table, filt):
+            req = urllib.request.Request(
+                f"{SUPABASE_URL}/rest/v1/{table}?{filt}",
+                headers=sb_headers(),
+                method="DELETE",
+            )
+            try:
+                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
+                    return True
+            except Exception:
+                return False
+
+        def _pur_prefix(sku):
+            """Extract lot prefix: first 2 dash-separated segments of SKU."""
+            parts = str(sku or "").strip().split("-")
+            return "-".join(parts[:2]) if len(parts) >= 2 else ""
+
+        if "pur_lots" not in st.session_state:
+            st.session_state["pur_lots"] = _pur_get("purchase_lots", "?order=purchase_date.desc")
+
+        lots_data = st.session_state["pur_lots"]
+
+        pur_t1, pur_t2, pur_t3 = st.tabs(["📋 Lots", "⬆️ Import Cards", "📊 P&L by Lot"])
+
+        # ── LOTS ──────────────────────────────────────────────────────────────
+        with pur_t1:
+            st.markdown("### Purchase Lots")
+            st.caption("Each lot has a prefix matching the first 2 segments of your SKU (e.g. `MATTSFB-072026`). All cards with that prefix roll up to this lot.")
+
+            with st.form("pur_new_lot"):
+                st.markdown("**Add Lot**")
+                p1, p2, p3 = st.columns(3)
+                pl_prefix  = p1.text_input("Lot Prefix *", placeholder="MATTSFB-072026")
+                pl_source  = p1.text_input("Source", placeholder="Matt's FB Marketplace")
+                pl_date    = p2.date_input("Purchase Date", value=date.today())
+                pl_cost    = p2.number_input("Total Cost Paid ($)", min_value=0.0, step=0.01, format="%.2f")
+                pl_notes   = p3.text_area("Notes", height=80, placeholder="What was in the lot, where from, etc.")
+                lot_sub    = st.form_submit_button("Add Lot", type="primary")
+
+            if lot_sub:
+                prefix_clean = pl_prefix.strip().upper()
+                if not prefix_clean or len(prefix_clean.split("-")) < 2:
+                    st.error("Prefix must have at least 2 dash-separated segments (e.g. MATTSFB-072026).")
+                else:
+                    res = _pur_post("purchase_lots", {
+                        "lot_prefix":    prefix_clean,
+                        "source":        pl_source.strip() or None,
+                        "purchase_date": str(pl_date),
+                        "total_cost":    float(pl_cost),
+                        "notes":         pl_notes.strip() or None,
+                    })
+                    if res is not None:
+                        st.success(f"Lot **{prefix_clean}** added — ${pl_cost:,.2f} paid.")
+                        st.session_state.pop("pur_lots", None)
+                        st.rerun()
+                    else:
+                        err = _pur_last_error.get("msg") or "Unknown error"
+                        if "does not exist" in err or "42P01" in err:
+                            st.error("Table not found — run the SQL block below to create the `purchase_lots` table first.")
+                        elif "duplicate" in err.lower() or "unique" in err.lower():
+                            st.error(f"Prefix **{prefix_clean}** already exists — delete it first to replace it.")
+                        else:
+                            st.error(f"Save failed: {err}")
+
+            st.divider()
+
+            if not lots_data:
+                st.info("No lots yet. Add one above.")
+            else:
+                lot_display = []
+                for lot in lots_data:
+                    lot_display.append({
+                        "Prefix":        lot["lot_prefix"],
+                        "Source":        lot.get("source") or "—",
+                        "Date":          lot.get("purchase_date") or "—",
+                        "Total Cost ($)": lot["total_cost"],
+                        "Notes":         lot.get("notes") or "",
+                    })
+                st.dataframe(
+                    pd.DataFrame(lot_display),
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={"Total Cost ($)": st.column_config.NumberColumn(format="$%.2f")},
+                )
+
+                del_opts = ["— select to delete —"] + [l["lot_prefix"] for l in lots_data]
+                del_sel  = st.selectbox("Delete a lot", del_opts, key="pur_del_sel")
+                if del_sel != "— select to delete —":
+                    lot_id = next(l["id"] for l in lots_data if l["lot_prefix"] == del_sel)
+                    if st.button(f"🗑️ Delete {del_sel}", key="pur_del_btn"):
+                        _pur_delete("purchase_lots", f"id=eq.{lot_id}")
+                        st.success(f"Deleted {del_sel}.")
+                        st.session_state.pop("pur_lots", None)
+                        st.rerun()
+
+            st.divider()
+            st.markdown("**SQL — Run once in Supabase SQL Editor**")
+            st.code("""create table if not exists purchase_lots (
+  id            bigint primary key generated always as identity,
+  lot_prefix    text not null unique,
+  source        text,
+  purchase_date date,
+  total_cost    numeric not null default 0,
+  notes         text,
+  created_at    timestamptz default now()
+);
+
+-- Add SKU column to sales_records so sold cards link back to lots
+alter table sales_records add column if not exists sku text;
+create index if not exists idx_sr_sku on sales_records(sku);""", language="sql")
+
+        # ── IMPORT CARDS ──────────────────────────────────────────────────────
+        with pur_t2:
+            st.markdown("### Import Cards from Haystack or eBay CSV")
+            st.caption(
+                "Upload a Haystack CSV (`CustomLabel` column) or eBay active listings CSV (`Custom label (SKU)` column). "
+                "The app reads the SKU, extracts the lot prefix (first 2 segments), and shows you which cards belong to which lot. "
+                "No separate card storage — the SKU on the card IS the link. This is just a preview to verify your lot assignments."
+            )
+
+            pur_file = st.file_uploader("Haystack or eBay CSV", type=["csv"], key="pur_import_file")
+            if pur_file:
+                try:
+                    raw = pur_file.read().decode("utf-8-sig")
+                    lines = raw.split("\n")
+                    # Skip Haystack Info row if present
+                    start = 0
+                    if lines and lines[0].strip().startswith("Info,"):
+                        start = 1
+                    import io as _io
+                    card_df_raw = pd.read_csv(_io.StringIO("\n".join(lines[start:])), encoding="utf-8-sig")
+                    card_df_raw.columns = [c.strip() for c in card_df_raw.columns]
+
+                    # Find SKU column
+                    sku_col = None
+                    for candidate in ["CustomLabel", "Custom label (SKU)", "Custom Label (SKU)", "Custom label"]:
+                        if candidate in card_df_raw.columns:
+                            sku_col = candidate
+                            break
+
+                    title_col = None
+                    for candidate in ["*Title", "Title"]:
+                        if candidate in card_df_raw.columns:
+                            title_col = candidate
+                            break
+
+                    price_col = None
+                    for candidate in ["*StartPrice", "Current price", "Start price"]:
+                        if candidate in card_df_raw.columns:
+                            price_col = candidate
+                            break
+
+                    if not sku_col:
+                        st.error("Could not find a SKU column. Expected: `CustomLabel` (Haystack) or `Custom label (SKU)` (eBay).")
+                    else:
+                        card_df_raw = card_df_raw[card_df_raw[sku_col].astype(str).str.strip() != ""].copy()
+                        card_df_raw["_prefix"] = card_df_raw[sku_col].apply(_pur_prefix)
+                        card_df_raw = card_df_raw[card_df_raw["_prefix"] != ""]
+
+                        known_prefixes = {l["lot_prefix"] for l in lots_data}
+                        card_df_raw["_lot_status"] = card_df_raw["_prefix"].apply(
+                            lambda p: "✅ Matches lot" if p.upper() in known_prefixes else "⚠️ No lot found"
+                        )
+
+                        preview_cols = {"SKU": sku_col, "Lot Prefix": "_prefix", "Lot Status": "_lot_status"}
+                        if title_col: preview_cols["Title"] = title_col
+                        if price_col: preview_cols["Price"] = price_col
+
+                        display_df = pd.DataFrame({
+                            label: card_df_raw[src_col].values
+                            for label, src_col in preview_cols.items()
+                        })
+
+                        matched   = (card_df_raw["_lot_status"].str.startswith("✅")).sum()
+                        unmatched = len(card_df_raw) - matched
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("Cards found", len(card_df_raw))
+                        c2.metric("✅ Matched to lot", matched)
+                        c3.metric("⚠️ No lot match", unmatched)
+
+                        if unmatched:
+                            missing = card_df_raw[~card_df_raw["_lot_status"].str.startswith("✅")]["_prefix"].unique().tolist()
+                            st.warning(f"These prefixes have no lot yet — add them in the **Lots** tab: `{'`, `'.join(missing)}`")
+
+                        st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+                except Exception as e:
+                    st.error(f"Error reading file: {e}")
+
+        # ── P&L BY LOT ────────────────────────────────────────────────────────
+        with pur_t3:
+            st.markdown("### P&L by Lot")
+            st.caption("Revenue pulled from Sales & P&L records where the sold card's SKU prefix matches the lot. Import your eBay sold report in the Sales & P&L tab to populate this.")
+
+            if not lots_data:
+                st.info("No lots yet — add them in the Lots tab first.")
+            else:
+                # Load sales records that have a SKU
+                sales_with_sku = _pur_get("sales_records", "?select=sku,net_proceeds,gross_revenue,source,sale_date,title&sku=not.is.null&limit=5000")
+
+                # Group sales by lot prefix
+                prefix_revenue = {}
+                for s in sales_with_sku:
+                    prefix = _pur_prefix(s.get("sku", ""))
+                    if prefix:
+                        prefix_up = prefix.upper()
+                        if prefix_up not in prefix_revenue:
+                            prefix_revenue[prefix_up] = {"net": 0.0, "gross": 0.0, "count": 0, "sales": []}
+                        prefix_revenue[prefix_up]["net"]   += float(s.get("net_proceeds") or 0)
+                        prefix_revenue[prefix_up]["gross"] += float(s.get("gross_revenue") or 0)
+                        prefix_revenue[prefix_up]["count"] += 1
+                        prefix_revenue[prefix_up]["sales"].append(s)
+
+                pl_rows = []
+                for lot in lots_data:
+                    pfx  = lot["lot_prefix"].upper()
+                    cost = float(lot["total_cost"] or 0)
+                    rev  = prefix_revenue.get(pfx, {})
+                    net  = rev.get("net", 0.0)
+                    sold = rev.get("count", 0)
+                    pl   = round(net - cost, 2)
+                    pl_rows.append({
+                        "Lot Prefix":    lot["lot_prefix"],
+                        "Source":        lot.get("source") or "—",
+                        "Date":          lot.get("purchase_date") or "—",
+                        "Cost Paid ($)": cost,
+                        "Cards Sold":    sold,
+                        "Net Revenue ($)": round(net, 2),
+                        "P&L ($)":       pl,
+                        "Status":        "✅ Profit" if pl > 0 else ("🔴 Loss" if pl < 0 else "— Break even"),
+                    })
+
+                pl_df = pd.DataFrame(pl_rows)
+                total_cost = sum(r["Cost Paid ($)"] for r in pl_rows)
+                total_rev  = sum(r["Net Revenue ($)"] for r in pl_rows)
+                total_pl   = round(total_rev - total_cost, 2)
+
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Total Invested", f"${total_cost:,.2f}")
+                m2.metric("Total Net Revenue", f"${total_rev:,.2f}")
+                m3.metric("Overall P&L", f"${total_pl:+,.2f}")
+
+                st.divider()
+                st.dataframe(
+                    pl_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Cost Paid ($)":    st.column_config.NumberColumn(format="$%.2f"),
+                        "Net Revenue ($)":  st.column_config.NumberColumn(format="$%.2f"),
+                        "P&L ($)":          st.column_config.NumberColumn(format="$%.2f"),
+                    },
+                )
+
+                # Drill-down: click a lot to see its sold cards
+                st.divider()
+                st.markdown("**Drill into a lot**")
+                lot_opts = ["— select —"] + [l["lot_prefix"] for l in lots_data]
+                sel_lot  = st.selectbox("Lot", lot_opts, key="pur_drill_sel")
+                if sel_lot != "— select —":
+                    lot_sales = prefix_revenue.get(sel_lot.upper(), {}).get("sales", [])
+                    if not lot_sales:
+                        st.info("No sales recorded for this lot yet.")
+                    else:
+                        drill_rows = [{
+                            "Date":   s.get("sale_date", "")[:10],
+                            "Title":  s.get("title") or "",
+                            "SKU":    s.get("sku") or "",
+                            "Channel": s.get("source") or "",
+                            "Net ($)": float(s.get("net_proceeds") or 0),
+                        } for s in sorted(lot_sales, key=lambda x: x.get("sale_date",""), reverse=True)]
+                        st.dataframe(
+                            pd.DataFrame(drill_rows),
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={"Net ($)": st.column_config.NumberColumn(format="$%.2f")},
+                        )
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 10 — Sales & P&L
@@ -4900,12 +5084,14 @@ with tab10:
                                     skipped3 += 1
                                     continue
 
+                                sku3 = str(row3.get("Custom label", "") or row3.get("Custom label (SKU)", "") or "").strip()
                                 rec3 = {
                                     "source": "ebay",
                                     "order_id": str(row3.get("Order Number", "") or "").strip() or None,
                                     "sale_date": sale_date3 or None,
                                     "title": title3 or None,
                                     "item_number": item_num3 or None,
+                                    "sku": sku3 or None,
                                     "quantity": qty3,
                                     "sale_price": sold_for3,
                                     "shipping_collected": shipping3,
