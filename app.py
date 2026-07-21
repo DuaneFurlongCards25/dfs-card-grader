@@ -54,7 +54,7 @@ RELEASE_NOTES = {
         "title": "Sales & P&L + DC Sports Consignment tracking",
         "items": [
             ("💰", "New 💰 Sales & P&L tab — import eBay and CollX sales exports. P&L by month, channel mix (eBay vs CollX vs DC Sports), and full sales log."),
-            ("🏷️", "New 🏷️ Consignments tab — track DC Sports auction consignments. Import their CSV export, assign lot cost basis by SKU, and see net P&L per shipment and card."),
+            ("🏷️", "New 🏷️ Consignments tab — track DC Sports auction consignments. Import send history and settled results. Lot P&L lives in the Purchases tab."),
             ("📦", "7 DC Sports shipments ready to import — 151 cards, $3,479 net across batches 221184–245869."),
             ("📊", "1,536 eBay sales (Jul 2025–Jul 2026) ready to import into Sales & P&L — $24k gross revenue."),
         ],
@@ -4091,7 +4091,7 @@ with tab6:
 # ══════════════════════════════════════════════════════════════════════════════
 with tab9:
     st.markdown("## 🏷️ Consignments")
-    st.caption("DC Sports auction consignment tracking — import history, assign lot cost basis, track P&L.")
+    st.caption("DC Sports auction consignment tracking — import send history, track what sold and what was paid.")
 
     if not SUPABASE_URL:
         st.warning("Supabase not connected. Configure in sidebar to enable Consignments.")
@@ -4176,7 +4176,7 @@ with tab9:
         sn1.metric("Cards Still Active", f"{len(active_items)}")
         sn2.metric("Total Cards (all)",  f"{len(csn_items)}")
         sn3.metric("Total Net (Paid)",   f"${total_net:,.2f}")
-        sn4.metric("Cost basis / lot P&L", "→ Purchases tab")
+        sn4.metric("Lot P&L", "→ Purchases tab")
 
         st.divider()
 
@@ -4372,17 +4372,7 @@ with tab9:
             st.divider()
             st.markdown("**SQL — Create Consignment Tables** *(run once in Supabase SQL Editor)*")
             st.code(
-                """create table if not exists consignment_lots (
-  id bigint primary key generated always as identity,
-  lot_sku text not null unique,
-  lot_name text,
-  total_cost numeric not null default 0,
-  card_count integer not null default 1,
-  notes text,
-  created_at timestamptz default now()
-);
-
-create table if not exists consignment_shipments (
+                """create table if not exists consignment_shipments (
   id bigint primary key generated always as identity,
   dc_package_id text unique,
   shipped_date date,
@@ -4394,7 +4384,6 @@ create table if not exists consignment_items (
   id bigint primary key generated always as identity,
   shipment_id bigint references consignment_shipments(id),
   dc_package_id text,
-  lot_sku text,
   title text,
   dc_status text,
   dc_listing_date text,
@@ -4407,8 +4396,7 @@ create table if not exists consignment_items (
   dedup_key text unique,
   created_at timestamptz default now()
 );
-create index if not exists idx_ci_shipment on consignment_items(shipment_id);
-create index if not exists idx_ci_lot_sku on consignment_items(lot_sku);""",
+create index if not exists idx_ci_shipment on consignment_items(shipment_id);""",
                 language="sql",
             )
 
