@@ -4667,11 +4667,9 @@ create index if not exists idx_sr_sku on sales_records(sku);""", language="sql")
                         c3.metric("⚠️ No lot match", unmatched)
 
                         # Group by prefix
-                        groups = card_df_raw.groupby("_prefix", sort=True)
-
-                        # Known lots first, then unmatched
-                        known_groups   = [(pfx, grp) for pfx, grp in groups if pfx.upper() in known_prefixes]
-                        unknown_groups = [(pfx, grp) for pfx, grp in groups if pfx.upper() not in known_prefixes]
+                        all_groups     = list(card_df_raw.groupby("_prefix", sort=True))
+                        known_groups   = [(pfx, grp) for pfx, grp in all_groups if pfx.upper() in known_prefixes]
+                        unknown_groups = [(pfx, grp) for pfx, grp in all_groups if pfx.upper() not in known_prefixes]
 
                         if unknown_groups:
                             missing = [pfx for pfx, _ in unknown_groups]
