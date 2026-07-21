@@ -4160,11 +4160,11 @@ with tab9:
             items = _csn_get("consignment_items", "?order=id.asc&limit=2000")
             return ships, items
 
-        if "csn_data" not in st.session_state:
+        if "csn_data_v2" not in st.session_state:
             with st.spinner("Loading consignment data…"):
-                st.session_state["csn_data"] = _load_csn()
+                st.session_state["csn_data_v2"] = _load_csn()
 
-        ships_raw, items_raw = st.session_state["csn_data"]
+        ships_raw, items_raw = st.session_state["csn_data_v2"]
         csn_items = [dict(r) for r in items_raw]
 
         # Business snapshot
@@ -4238,7 +4238,7 @@ with tab9:
                                 "notes": new_notes.strip() or None,
                             })
                             st.success("Saved.")
-                            st.session_state.pop("csn_data", None)
+                            st.session_state.pop("csn_data_v2", None)
                             st.rerun()
                 else:
                     st.caption("No shipments to edit yet.")
@@ -4364,7 +4364,7 @@ with tab9:
                             msg += f", **{failed}** failed"
                         st.success(msg + ".")
                         if imported:
-                            st.session_state.pop("csn_data", None)
+                            st.session_state.pop("csn_data_v2", None)
                             st.rerun()
                 except Exception as e:
                     st.error(f"Error reading CSV: {e}")
