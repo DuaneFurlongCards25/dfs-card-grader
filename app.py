@@ -4453,6 +4453,23 @@ with tab11:
             except Exception:
                 return False
 
+        def _pur_patch(table, filt, payload):
+            data = json.dumps(payload).encode()
+            hdrs = {**sb_headers(), "Content-Type": "application/json", "Prefer": "return=representation"}
+            req  = urllib.request.Request(
+                f"{SUPABASE_URL}/rest/v1/{table}?{filt}",
+                data=data, headers=hdrs, method="PATCH",
+            )
+            try:
+                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
+                    return json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                _pur_last_error["msg"] = e.read().decode(errors="replace")
+                return None
+            except Exception as ex:
+                _pur_last_error["msg"] = str(ex)
+                return None
+
         def _pur_prefix(sku):
             """Extract lot prefix: first 2 dash-separated segments of SKU."""
             parts = str(sku or "").strip().split("-")
@@ -4529,6 +4546,38 @@ with tab11:
                     column_config={"Total Cost ($)": st.column_config.NumberColumn(format="$%.2f")},
                 )
 
+                st.markdown("**Edit a lot**")
+                edit_opts = ["— select to edit —"] + [l["lot_prefix"] for l in lots_data]
+                edit_sel  = st.selectbox("Select lot to edit", edit_opts, key="pur_edit_sel")
+                if edit_sel != "— select to edit —":
+                    el = next(l for l in lots_data if l["lot_prefix"] == edit_sel)
+                    with st.form("pur_edit_lot"):
+                        e1, e2, e3 = st.columns(3)
+                        e_source = e1.text_input("Source", value=el.get("source") or "")
+                        e_date   = e2.date_input("Purchase Date",
+                                       value=date.fromisoformat(el["purchase_date"]) if el.get("purchase_date") else date.today())
+                        e_cost   = e2.number_input("Total Cost Paid ($)", min_value=0.0, step=0.01,
+                                       format="%.2f", value=float(el.get("total_cost") or 0))
+                        e_count  = e2.number_input("Card Count in Lot", min_value=0, step=1,
+                                       value=int(el.get("card_count") or 0))
+                        e_notes  = e3.text_area("Notes", height=80, value=el.get("notes") or "")
+                        edit_sub = st.form_submit_button("💾 Save Changes", type="primary")
+                    if edit_sub:
+                        res = _pur_patch("purchase_lots", f"id=eq.{el['id']}", {
+                            "source":        e_source.strip() or None,
+                            "purchase_date": str(e_date),
+                            "total_cost":    float(e_cost),
+                            "card_count":    int(e_count),
+                            "notes":         e_notes.strip() or None,
+                        })
+                        if res is not None:
+                            st.success(f"**{edit_sel}** updated.")
+                            st.session_state.pop("pur_lots", None)
+                            st.rerun()
+                        else:
+                            st.error(f"Update failed: {_pur_last_error.get('msg') or 'Unknown error'}")
+
+                st.divider()
                 del_opts = ["— select to delete —"] + [l["lot_prefix"] for l in lots_data]
                 del_sel  = st.selectbox("Delete a lot", del_opts, key="pur_del_sel")
                 if del_sel != "— select to delete —":
