@@ -4529,22 +4529,84 @@ with tab11:
             if not lots_data:
                 st.info("No lots yet. Add one above.")
             else:
-                lot_display = []
-                for lot in lots_data:
-                    lot_display.append({
-                        "Prefix":         lot["lot_prefix"],
-                        "Source":         lot.get("source") or "—",
-                        "Date":           lot.get("purchase_date") or "—",
-                        "Total Cost ($)": lot["total_cost"],
-                        "Card Count":     lot.get("card_count") or 0,
-                        "Notes":          lot.get("notes") or "",
-                    })
-                st.dataframe(
-                    pd.DataFrame(lot_display),
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={"Total Cost ($)": st.column_config.NumberColumn(format="$%.2f")},
+                # ── Card CSV loader (persists in session state) ────────────────
+                st.markdown("**Load cards from CSV to see them under each lot**")
+                lot_csv = st.file_uploader(
+                    "Haystack or eBay active listings CSV",
+                    type=["csv"], key="pur_lot_csv",
+                    help="Upload once — cards stay visible until you reload the page or upload a new file."
                 )
+                if lot_csv:
+                    try:
+                        raw_lc = lot_csv.read().decode("utf-8-sig")
+                        lines_lc = raw_lc.split("\n")
+                        start_lc = 1 if lines_lc and lines_lc[0].strip().startswith("Info,") else 0
+                        import io as _io2
+                        lc_df = pd.read_csv(_io2.StringIO("\n".join(lines_lc[start_lc:])), encoding="utf-8-sig")
+                        lc_df.columns = [c.strip() for c in lc_df.columns]
+                        sku_lc = next((c for c in ["CustomLabel","Custom label (SKU)","Custom Label (SKU)","Custom label"] if c in lc_df.columns), None)
+                        title_lc = next((c for c in ["*Title","Title"] if c in lc_df.columns), None)
+                        price_lc = next((c for c in ["*StartPrice","Current price","Start price"] if c in lc_df.columns), None)
+                        if sku_lc:
+                            lc_df = lc_df[lc_df[sku_lc].astype(str).str.strip() != ""].copy()
+                            lc_df["_prefix"] = lc_df[sku_lc].apply(_pur_prefix)
+                            st.session_state["pur_lot_cards"] = {
+                                "df": lc_df, "sku_col": sku_lc,
+                                "title_col": title_lc, "price_col": price_lc,
+                            }
+                            st.success(f"Loaded {len(lc_df):,} cards from CSV.")
+                        else:
+                            st.error("No SKU column found — expected CustomLabel or 'Custom label (SKU)'.")
+                    except Exception as lc_e:
+                        st.error(f"Error reading CSV: {lc_e}")
+
+                lc_state = st.session_state.get("pur_lot_cards")
+
+                st.divider()
+                st.markdown("**Your Lots**")
+                for lot in lots_data:
+                    pfx      = lot["lot_prefix"]
+                    expected = int(lot.get("card_count") or 0)
+                    cost     = float(lot.get("total_cost") or 0)
+                    source   = lot.get("source") or "—"
+                    pdate    = lot.get("purchase_date") or "—"
+
+                    # Count cards from CSV for this lot
+                    lot_cards_df = None
+                    card_count_csv = 0
+                    if lc_state:
+                        mask = lc_state["df"]["_prefix"].str.upper() == pfx.upper()
+                        lot_cards_df = lc_state["df"][mask]
+                        card_count_csv = len(lot_cards_df)
+
+                    count_label = ""
+                    if lc_state:
+                        if expected > 0:
+                            diff = card_count_csv - expected
+                            count_label = f" · {card_count_csv}/{expected} cards" + (" ✅" if diff == 0 else f" ({'+'if diff>0 else ''}{diff})")
+                        else:
+                            count_label = f" · {card_count_csv} cards"
+
+                    header = f"**{pfx}** — {source} · {pdate} · ${cost:,.2f}{count_label}"
+                    with st.expander(header, expanded=False):
+                        ec1, ec2, ec3 = st.columns(3)
+                        ec1.metric("Cost Paid", f"${cost:,.2f}")
+                        if expected > 0:
+                            ec2.metric("Expected Cards", expected)
+                        if lc_state:
+                            ec3.metric("Cards in CSV", card_count_csv)
+                        if lot.get("notes"):
+                            st.caption(lot["notes"])
+                        if lc_state and lot_cards_df is not None and not lot_cards_df.empty:
+                            st.divider()
+                            row_data = {"SKU": lot_cards_df[lc_state["sku_col"]].values}
+                            if lc_state["title_col"]: row_data["Title"] = lot_cards_df[lc_state["title_col"]].values
+                            if lc_state["price_col"]: row_data["Price ($)"] = lot_cards_df[lc_state["price_col"]].values
+                            cfg = {}
+                            if lc_state["price_col"]: cfg["Price ($)"] = st.column_config.NumberColumn(format="$%.2f")
+                            st.dataframe(pd.DataFrame(row_data), use_container_width=True, hide_index=True, column_config=cfg)
+                        elif lc_state:
+                            st.info("No cards in the CSV matched this lot prefix.")
 
                 st.markdown("**Edit a lot**")
                 edit_opts = ["— select to edit —"] + [l["lot_prefix"] for l in lots_data]
@@ -4611,11 +4673,7 @@ create index if not exists idx_sr_sku on sales_records(sku);""", language="sql")
         # ── IMPORT CARDS ──────────────────────────────────────────────────────
         with pur_t2:
             st.markdown("### Verify Card → Lot Assignments")
-            st.caption(
-                "Upload your Haystack or eBay active listings CSV. The app extracts the lot prefix from each SKU "
-                "(first 2 dash segments) and groups cards by lot so you can confirm everything landed in the right bucket. "
-                "Nothing is saved here — the SKU on the card IS the permanent link."
-            )
+            st.info("💡 Cards are now viewable directly on the **Lots** tab — upload your CSV there and click any lot to expand it. This tab shows the same data as a flat cross-lot view if you prefer it.")
 
             pur_file = st.file_uploader("Haystack or eBay Active Listings CSV", type=["csv"], key="pur_import_file")
             if pur_file:
@@ -4707,7 +4765,7 @@ create index if not exists idx_sr_sku on sales_records(sku);""", language="sql")
         # ── P&L BY LOT ────────────────────────────────────────────────────────
         with pur_t3:
             st.markdown("### P&L by Lot")
-            st.caption("Revenue pulled from Sales & P&L records where the sold card's SKU prefix matches the lot. Import your eBay sold report in the Sales & P&L tab to populate this.")
+            st.info("💡 **To see revenue here:** go to the **💰 Sales & P&L** tab → Import → 📦 eBay (upload your eBay sold transactions CSV) or 🃏 CollX. Once imported, sold cards with a matching SKU prefix will automatically roll up to their lot below.")
 
             if not lots_data:
                 st.info("No lots yet — add them in the Lots tab first.")
