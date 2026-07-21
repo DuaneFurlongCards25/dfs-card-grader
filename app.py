@@ -4610,14 +4610,14 @@ create index if not exists idx_sr_sku on sales_records(sku);""", language="sql")
 
         # ── IMPORT CARDS ──────────────────────────────────────────────────────
         with pur_t2:
-            st.markdown("### Import Cards from Haystack or eBay CSV")
+            st.markdown("### Verify Card → Lot Assignments")
             st.caption(
-                "Upload a Haystack CSV (`CustomLabel` column) or eBay active listings CSV (`Custom label (SKU)` column). "
-                "The app reads the SKU, extracts the lot prefix (first 2 segments), and shows you which cards belong to which lot. "
-                "No separate card storage — the SKU on the card IS the link. This is just a preview to verify your lot assignments."
+                "Upload your Haystack or eBay active listings CSV. The app extracts the lot prefix from each SKU "
+                "(first 2 dash segments) and groups cards by lot so you can confirm everything landed in the right bucket. "
+                "Nothing is saved here — the SKU on the card IS the permanent link."
             )
 
-            pur_file = st.file_uploader("Haystack or eBay CSV", type=["csv"], key="pur_import_file")
+            pur_file = st.file_uploader("Haystack or eBay Active Listings CSV", type=["csv"], key="pur_import_file")
             if pur_file:
                 try:
                     raw = pur_file.read().decode("utf-8-sig")
@@ -4656,32 +4656,52 @@ create index if not exists idx_sr_sku on sales_records(sku);""", language="sql")
                         card_df_raw["_prefix"] = card_df_raw[sku_col].apply(_pur_prefix)
                         card_df_raw = card_df_raw[card_df_raw["_prefix"] != ""]
 
-                        known_prefixes = {l["lot_prefix"] for l in lots_data}
-                        card_df_raw["_lot_status"] = card_df_raw["_prefix"].apply(
-                            lambda p: "✅ Matches lot" if p.upper() in known_prefixes else "⚠️ No lot found"
-                        )
+                        known_prefixes = {l["lot_prefix"].upper() for l in lots_data}
+                        lot_card_count = {l["lot_prefix"].upper(): int(l.get("card_count") or 0) for l in lots_data}
 
-                        preview_cols = {"SKU": sku_col, "Lot Prefix": "_prefix", "Lot Status": "_lot_status"}
-                        if title_col: preview_cols["Title"] = title_col
-                        if price_col: preview_cols["Price"] = price_col
-
-                        display_df = pd.DataFrame({
-                            label: card_df_raw[src_col].values
-                            for label, src_col in preview_cols.items()
-                        })
-
-                        matched   = (card_df_raw["_lot_status"].str.startswith("✅")).sum()
+                        matched   = card_df_raw["_prefix"].str.upper().isin(known_prefixes).sum()
                         unmatched = len(card_df_raw) - matched
                         c1, c2, c3 = st.columns(3)
-                        c1.metric("Cards found", len(card_df_raw))
-                        c2.metric("✅ Matched to lot", matched)
+                        c1.metric("Cards in CSV", len(card_df_raw))
+                        c2.metric("✅ Matched to a lot", matched)
                         c3.metric("⚠️ No lot match", unmatched)
 
-                        if unmatched:
-                            missing = card_df_raw[~card_df_raw["_lot_status"].str.startswith("✅")]["_prefix"].unique().tolist()
-                            st.warning(f"These prefixes have no lot yet — add them in the **Lots** tab: `{'`, `'.join(missing)}`")
+                        # Group by prefix
+                        groups = card_df_raw.groupby("_prefix", sort=True)
 
-                        st.dataframe(display_df, use_container_width=True, hide_index=True)
+                        # Known lots first, then unmatched
+                        known_groups   = [(pfx, grp) for pfx, grp in groups if pfx.upper() in known_prefixes]
+                        unknown_groups = [(pfx, grp) for pfx, grp in groups if pfx.upper() not in known_prefixes]
+
+                        if unknown_groups:
+                            missing = [pfx for pfx, _ in unknown_groups]
+                            st.warning(f"⚠️ These prefixes have no lot — add them in the Lots tab: `{'`, `'.join(missing)}`")
+
+                        st.divider()
+
+                        for pfx, grp in known_groups:
+                            expected = lot_card_count.get(pfx.upper(), 0)
+                            count    = len(grp)
+                            diff     = count - expected if expected > 0 else None
+                            badge    = ""
+                            if diff is not None:
+                                badge = f"  —  {count}/{expected} cards" + (" ✅" if diff == 0 else f" ({'+'if diff>0 else ''}{diff} vs expected)")
+                            else:
+                                badge = f"  —  {count} cards"
+                            with st.expander(f"✅ **{pfx}**{badge}", expanded=(diff not in (None, 0))):
+                                row_data = {"SKU": grp[sku_col].values}
+                                if title_col: row_data["Title"] = grp[title_col].values
+                                if price_col: row_data["Price ($)"] = grp[price_col].values
+                                cfg = {}
+                                if price_col: cfg["Price ($)"] = st.column_config.NumberColumn(format="$%.2f")
+                                st.dataframe(pd.DataFrame(row_data), use_container_width=True, hide_index=True, column_config=cfg)
+
+                        for pfx, grp in unknown_groups:
+                            with st.expander(f"⚠️ **{pfx}** — {len(grp)} cards (no matching lot)", expanded=True):
+                                row_data = {"SKU": grp[sku_col].values}
+                                if title_col: row_data["Title"] = grp[title_col].values
+                                if price_col: row_data["Price ($)"] = grp[price_col].values
+                                st.dataframe(pd.DataFrame(row_data), use_container_width=True, hide_index=True)
 
                 except Exception as e:
                     st.error(f"Error reading file: {e}")
