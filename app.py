@@ -4180,7 +4180,7 @@ with tab9:
 
         st.divider()
 
-        csn_t1, csn_t2, csn_t3 = st.tabs(["📦 Shipments", "🃏 Cards", "⬆️ Import"])
+        csn_t1, csn_t2, csn_t3, csn_t4 = st.tabs(["📦 Shipments", "🃏 Cards", "⬆️ Import", "🔍 Duplicates"])
 
         # ── SHIPMENTS ─────────────────────────────────────────────────────────
         with csn_t1:
@@ -4197,19 +4197,24 @@ with tab9:
                 for ship in ships_raw:
                     pkg = ship.get("dc_package_id") or "?"
                     pkg_items = items_by_pkg.get(pkg, [])
-                    paid_c   = sum(1 for i in pkg_items if (i.get("dc_status") or "").lower() == "paid")
-                    unsold_c = sum(1 for i in pkg_items if (i.get("dc_status") or "").lower() == "unsold")
-                    active_c = len(pkg_items) - paid_c - unsold_c
-                    batch_net = sum(float(i.get("dc_net") or 0) for i in pkg_items if (i.get("dc_status") or "").lower() == "paid")
+                    paid_c    = sum(1 for i in pkg_items if (i.get("dc_status") or "").lower() == "paid")
+                    unsold_c  = sum(1 for i in pkg_items if (i.get("dc_status") or "").lower() == "unsold")
+                    active_c  = len(pkg_items) - paid_c - unsold_c
+                    paid_items = [i for i in pkg_items if (i.get("dc_status") or "").lower() == "paid"]
+                    batch_gross = sum(float(i.get("dc_sale_price") or 0) for i in paid_items)
+                    batch_fees  = sum(float(i.get("dc_fees") or 0) for i in paid_items)
+                    batch_net   = sum(float(i.get("dc_net") or 0) for i in paid_items)
                     ship_rows.append({
-                        "Package ID": pkg,
-                        "Shipped":    ship.get("shipped_date") or "—",
-                        "Cards":      len(pkg_items),
-                        "Paid":       paid_c,
-                        "Unsold":     unsold_c,
-                        "Active":     active_c,
-                        "Net Received ($)": round(batch_net, 2),
-                        "Notes":      ship.get("notes") or "",
+                        "Package ID":   pkg,
+                        "Shipped":      ship.get("shipped_date") or "—",
+                        "Cards":        len(pkg_items),
+                        "Paid":         paid_c,
+                        "Unsold":       unsold_c,
+                        "Active":       active_c,
+                        "Gross ($)":    round(batch_gross, 2),
+                        "Fees ($)":     round(batch_fees, 2),
+                        "Net ($)":      round(batch_net, 2),
+                        "Notes":        ship.get("notes") or "",
                     })
 
                 st.dataframe(
@@ -4217,7 +4222,9 @@ with tab9:
                     use_container_width=True,
                     hide_index=True,
                     column_config={
-                        "Net Received ($)": st.column_config.NumberColumn(format="$%.2f"),
+                        "Gross ($)": st.column_config.NumberColumn(format="$%.2f"),
+                        "Fees ($)":  st.column_config.NumberColumn(format="$%.2f"),
+                        "Net ($)":   st.column_config.NumberColumn(format="$%.2f"),
                     },
                 )
                 st.caption("💡 Cost basis and lot P&L are tracked in the **📦 Purchases** tab.")
@@ -4266,23 +4273,23 @@ with tab9:
                 card_rows = []
                 for i in filtered:
                     card_rows.append({
-                        "Title":       i.get("title") or "",
-                        "Status":      i.get("dc_status") or "",
-                        "Package":     i.get("dc_package_id") or "",
-                        "Listed":      (i.get("dc_listing_date") or "")[:10],
-                        "Ended":       (i.get("dc_ending_date") or "")[:10],
-                        "Sale Price":  float(i.get("dc_sale_price") or 0),
-                        "Fees":        float(i.get("dc_fees") or 0),
-                        "DC Net ($)":  float(i.get("dc_net") or 0),
+                        "Title":      i.get("title") or "",
+                        "Status":     i.get("dc_status") or "",
+                        "Package":    i.get("dc_package_id") or "",
+                        "Listed":     (i.get("dc_listing_date") or "")[:10],
+                        "Ended":      (i.get("dc_ending_date") or "")[:10],
+                        "Gross ($)":  float(i.get("dc_sale_price") or 0),
+                        "Fees ($)":   float(i.get("dc_fees") or 0),
+                        "Net ($)":    float(i.get("dc_net") or 0),
                     })
                 st.dataframe(
                     pd.DataFrame(card_rows),
                     use_container_width=True,
                     hide_index=True,
                     column_config={
-                        "Sale Price": st.column_config.NumberColumn(format="$%.2f"),
-                        "Fees":       st.column_config.NumberColumn(format="$%.2f"),
-                        "DC Net ($)": st.column_config.NumberColumn(format="$%.2f"),
+                        "Gross ($)": st.column_config.NumberColumn(format="$%.2f"),
+                        "Fees ($)":  st.column_config.NumberColumn(format="$%.2f"),
+                        "Net ($)":   st.column_config.NumberColumn(format="$%.2f"),
                     },
                 )
 
@@ -4290,84 +4297,267 @@ with tab9:
         with csn_t3:
             st.markdown("### Import DC Sports Export")
             st.caption(
-                "In DC Sports, go to your Seller Dashboard → export your cards CSV. "
-                "The file should have columns: Title, Status, ListingDate, EndingDate, BuyItNow, "
-                "SalePrice, Fees, Net, FriendlyPackageId, FrontImageUrl. "
-                "Re-importing the same file is safe — duplicates are skipped automatically."
+                "Accepts **two formats** — auto-detected on upload:\n\n"
+                "• **Seller Dashboard CSV** — columns: Title, Status, ListingDate, EndingDate, BuyItNow, SalePrice, Fees, Net, FriendlyPackageId\n\n"
+                "• **Financial Ledger** — Payments download with TransactionType, Description, GrossAmount, Fees, NetAmount columns. "
+                "Only Sale rows are imported. These appear as settled items not tied to a shipment batch."
             )
 
             csn_file = st.file_uploader("DC Sports CSV", type=["csv"], key="csn_import_file")
             if csn_file:
                 try:
-                    import_df = pd.read_csv(csn_file, encoding="utf-8-sig")
+                    raw_csn = csn_file.read().decode("utf-8-sig")
+                    first_csn = raw_csn.split("\n")[0]
+                    is_ledger_csn = "TransactionType" in first_csn and "GrossAmount" in first_csn
+
+                    import_df = pd.read_csv(io.StringIO(raw_csn))
+                    import_df.columns = [c.strip() for c in import_df.columns]
+
+                    if is_ledger_csn:
+                        import_df = import_df[import_df["TransactionType"].astype(str).str.strip() == "Sale"].copy()
+                        st.info(f"📊 **Financial Ledger detected** — {len(import_df)} Sale rows will be imported as settled consignment results.")
+                    else:
+                        uniq_pkgs = import_df["FriendlyPackageId"].dropna().astype(str).nunique() if "FriendlyPackageId" in import_df.columns else 0
+                        st.caption(f"Shipment batches detected: **{uniq_pkgs}**")
+
                     st.caption(f"Found **{len(import_df):,}** rows. Preview:")
                     st.dataframe(import_df.head(10), use_container_width=True, hide_index=True)
 
-                    uniq_pkgs = import_df["FriendlyPackageId"].dropna().astype(str).nunique() if "FriendlyPackageId" in import_df.columns else 0
-                    st.caption(f"Shipment batches detected: **{uniq_pkgs}**")
-
                     if st.button("⬆️ Import to Supabase", type="primary", key="csn_import_btn"):
-                        existing_raw2 = _csn_get("consignment_items", "?select=dedup_key")
-                        existing_keys2 = {r["dedup_key"] for r in existing_raw2 if r.get("dedup_key")}
+                        # Load all existing items for matching
+                        all_existing = _csn_get("consignment_items", "?select=id,title,dedup_key")
+                        existing_keys2 = {r["dedup_key"] for r in all_existing if r.get("dedup_key")}
+                        # Title → id lookup for ledger match-and-update
+                        title_to_id = {
+                            (r.get("title") or "").strip().lower(): r["id"]
+                            for r in all_existing if r.get("title") and r.get("id")
+                        }
 
-                        # Ensure shipment rows exist
-                        pkg_ids2 = import_df["FriendlyPackageId"].dropna().astype(str).unique() if "FriendlyPackageId" in import_df.columns else []
-                        existing_ships2 = {s["dc_package_id"] for s in ships_raw if s.get("dc_package_id")}
-                        for pkg in pkg_ids2:
-                            if str(pkg) not in existing_ships2:
-                                _csn_post("consignment_shipments", {"dc_package_id": str(pkg)}, prefer="return=minimal")
+                        if not is_ledger_csn:
+                            # Ensure shipment rows exist for the seller export format
+                            pkg_ids2 = import_df["FriendlyPackageId"].dropna().astype(str).unique() if "FriendlyPackageId" in import_df.columns else []
+                            existing_ships2 = {s["dc_package_id"] for s in ships_raw if s.get("dc_package_id")}
+                            for pkg in pkg_ids2:
+                                if str(pkg) not in existing_ships2:
+                                    _csn_post("consignment_shipments", {"dc_package_id": str(pkg)}, prefer="return=minimal")
 
                         fresh_ships2 = _csn_get("consignment_shipments", "?order=id.asc")
                         ship_id_map = {s["dc_package_id"]: s["id"] for s in fresh_ships2 if s.get("dc_package_id")}
 
-                        imported = skipped = failed = 0
+                        imported = updated = skipped = failed = 0
                         progress = st.progress(0)
                         total_rows = len(import_df)
 
-                        for idx, row in import_df.iterrows():
-                            progress.progress(int((idx + 1) / total_rows * 100))
-                            pkg = str(row.get("FriendlyPackageId") or "").strip()
-                            title = str(row.get("Title") or "").strip()
-                            ending = str(row.get("EndingDate") or "").strip()[:19]
-                            dedup = f"{pkg}|{title}|{ending}"
+                        for _ci, (idx, row) in enumerate(import_df.iterrows()):
+                            progress.progress(int((_ci + 1) / max(total_rows, 1) * 100))
 
-                            if dedup in existing_keys2:
-                                skipped += 1
-                                continue
+                            if is_ledger_csn:
+                                title   = str(row.get("Description") or "").strip()
+                                gross   = _parse_dc_amount(row.get("GrossAmount", 0))
+                                fees    = abs(_parse_dc_amount(row.get("Fees", 0)))
+                                net     = _parse_dc_amount(row.get("NetAmount", 0))
+                                dedup   = f"dc_ledger|{title}|{round(gross, 2)}"
 
-                            item_row = {
-                                "dc_package_id": pkg or None,
-                                "shipment_id": ship_id_map.get(pkg),
-                                "title": title or None,
-                                "dc_status": str(row.get("Status") or "").strip() or None,
-                                "dc_listing_date": str(row.get("ListingDate") or "").strip()[:19] or None,
-                                "dc_ending_date": ending or None,
-                                "dc_buy_it_now": _parse_dc_amount(row.get("BuyItNow")),
-                                "dc_sale_price": _parse_dc_amount(row.get("SalePrice")),
-                                "dc_fees": _parse_dc_amount(row.get("Fees")),
-                                "dc_net": _parse_dc_amount(row.get("Net")),
-                                "dc_front_image_url": str(row.get("FrontImageUrl") or "").strip() or None,
-                                "dedup_key": dedup,
-                            }
-                            res2 = _csn_post("consignment_items", item_row, prefer="return=minimal")
-                            if res2 is not None:
-                                imported += 1
-                                existing_keys2.add(dedup)
+                                # Try to match an existing card by title and patch it
+                                match_id = title_to_id.get(title.lower())
+                                if match_id:
+                                    ok = _csn_patch("consignment_items", f"id=eq.{match_id}", {
+                                        "dc_status":     "Paid",
+                                        "dc_sale_price": gross,
+                                        "dc_fees":       fees,
+                                        "dc_net":        net,
+                                    })
+                                    if ok:
+                                        updated += 1
+                                    else:
+                                        failed += 1
+                                    continue  # never insert a duplicate
+
+                                # No title match — insert as new only if not already in DB
+                                if dedup in existing_keys2:
+                                    skipped += 1
+                                    continue
+
+                                item_row = {
+                                    "dc_package_id": None,
+                                    "shipment_id":   None,
+                                    "title":         title or None,
+                                    "dc_status":     "Paid",
+                                    "dc_sale_price": gross,
+                                    "dc_fees":       fees,
+                                    "dc_net":        net,
+                                    "dedup_key":     dedup,
+                                }
+                                res2 = _csn_post("consignment_items", item_row, prefer="return=minimal")
+                                if res2 is not None:
+                                    imported += 1
+                                    existing_keys2.add(dedup)
+                                else:
+                                    failed += 1
+
                             else:
-                                failed += 1
+                                pkg     = str(row.get("FriendlyPackageId") or "").strip()
+                                title   = str(row.get("Title") or "").strip()
+                                ending  = str(row.get("EndingDate") or "").strip()[:19]
+                                dedup   = f"{pkg}|{title}|{ending}"
+
+                                if dedup in existing_keys2:
+                                    skipped += 1
+                                    continue
+
+                                item_row = {
+                                    "dc_package_id": pkg or None,
+                                    "shipment_id":   ship_id_map.get(pkg),
+                                    "title":         title or None,
+                                    "dc_status":     str(row.get("Status") or "").strip() or None,
+                                    "dc_listing_date": str(row.get("ListingDate") or "").strip()[:19] or None,
+                                    "dc_ending_date":  ending or None,
+                                    "dc_buy_it_now":   _parse_dc_amount(row.get("BuyItNow")),
+                                    "dc_sale_price":   _parse_dc_amount(row.get("SalePrice")),
+                                    "dc_fees":         _parse_dc_amount(row.get("Fees")),
+                                    "dc_net":          _parse_dc_amount(row.get("Net")),
+                                    "dc_front_image_url": str(row.get("FrontImageUrl") or "").strip() or None,
+                                    "dedup_key":       dedup,
+                                }
+                                res2 = _csn_post("consignment_items", item_row, prefer="return=minimal")
+                                if res2 is not None:
+                                    imported += 1
+                                    existing_keys2.add(dedup)
+                                else:
+                                    failed += 1
 
                         progress.empty()
-                        msg = f"✅ Imported **{imported}** cards"
-                        if skipped:
-                            msg += f", skipped **{skipped}** duplicates"
-                        if failed:
-                            msg += f", **{failed}** failed"
-                        st.success(msg + ".")
+                        parts = []
+                        if updated:  parts.append(f"**{updated}** cards updated with settlement data")
+                        if imported: parts.append(f"**{imported}** new cards added")
+                        if skipped:  parts.append(f"**{skipped}** already up to date")
+                        if failed:   parts.append(f"**{failed}** failed")
+                        st.success("✅ " + ", ".join(parts) + "." if parts else "✅ Done.")
                         if imported:
                             st.session_state.pop("csn_data_v2", None)
                             st.rerun()
                 except Exception as e:
                     st.error(f"Error reading CSV: {e}")
+
+        # ── DUPLICATES ────────────────────────────────────────────────────────
+        with csn_t4:
+            st.markdown("### 🔍 Duplicate Finder")
+            st.caption(
+                "Groups cards with the same card number together. "
+                "Keep the row with sale data (Paid / AwaitingPayment); delete the stale $0 copy."
+            )
+
+            import re as _re
+
+            # Card-type words that should never count as a player name
+            _DUP_STOP = {
+                "TOPPS","PANINI","BOWMAN","CHROME","PRIZM","REFRACTOR","ROOKIE","AUTO",
+                "AUTOGRAPH","GOLD","SILVER","BLUE","RED","GREEN","PURPLE","ORANGE","BLACK",
+                "YELLOW","MOJO","WAVE","CRACKED","GEOMETRIC","REPTILIAN","SHIMMER","AQUA",
+                "SAPPHIRE","STERLING","FOIL","RAINBOW","KABOOM","FINEST","OPTIC","DONRUSS",
+                "SELECT","MEGA","DRAFT","SERIES","EDITION","LOGOFRACTOR","METEORIC","RISE",
+                "SHOWPIECES","COLLECTORS","KIT","EXCLUSIVE","MINI","DIAMOND","PERFORMANCE",
+                "PROSPECTS","SANDGLITTER","NOW","SLEEK","FINISHERS","LAZER","RARE","HOLO",
+                "FIRST","STAGE","ULTIMATE","ILLUMINATION","PSA","GEM","MINT","CHROME",
+                "PRIZM","AUTOS","PICKS","HOUSE","BASKETBALL","FOOTBALL","SOCCER","BASEBALL",
+                "SPORTS","CARD","CARDS","CHROME","FRESH","SEASON","TIP","OFF","LAVA","SKY",
+            }
+
+            def _card_num(title):
+                """Extract card number token like #BCP-63, #MR-3, #75, #17b."""
+                m = _re.search(r'#([A-Z0-9]+-[A-Z0-9]+|[A-Z]{1,3}[0-9]+|[0-9]+[A-Z]?)', str(title or ""), _re.IGNORECASE)
+                return m.group(1).upper() if m else None
+
+            def _player_hint(title):
+                """Return first all-caps word (4+ chars) that isn't a set/type word."""
+                for w in _re.findall(r'[A-Z]{4,}', str(title or "")):
+                    if w not in _DUP_STOP:
+                        return w
+                return ""
+
+            # Build groups: key = (card_number, player_hint_if_short_num)
+            _groups: dict = {}
+            for item in csn_items:
+                num = _card_num(item.get("title") or "")
+                if not num:
+                    continue
+                # Short numbers like "75" or "16" need a player name anchor to avoid false matches
+                if len(num) <= 3:
+                    hint = _player_hint(item.get("title") or "")
+                    key = (num, hint)
+                else:
+                    key = (num, "")
+                _groups.setdefault(key, []).append(item)
+
+            dupe_groups = [(k, rows) for k, rows in _groups.items() if len(rows) >= 2]
+            dupe_groups.sort(key=lambda x: x[0][0])
+
+            if not csn_items:
+                st.info("No cards loaded yet. Import a CSV first.")
+            elif not dupe_groups:
+                st.success("✅ No duplicates detected across your consignment cards.")
+            else:
+                st.warning(
+                    f"**{len(dupe_groups)} potential duplicate group(s)** found. "
+                    "Review each — keep the row with actual sale data, delete the stale $0 copy."
+                )
+
+                for (card_num_key, _), rows in dupe_groups:
+                    # Header line uses the most informative title
+                    best_title = max(rows, key=lambda r: len(r.get("title") or "")).get("title") or "?"
+                    label = f"#{card_num_key}  ·  {len(rows)} entries  —  {best_title[:60]}"
+                    with st.expander(label, expanded=True):
+                        for row in rows:
+                            row_id   = row["id"]
+                            status   = row.get("dc_status") or "Sent"
+                            net      = float(row.get("dc_net") or 0)
+                            sale     = float(row.get("dc_sale_price") or 0)
+                            pkg      = row.get("dc_package_id") or "—"
+                            title    = row.get("title") or "—"
+                            has_data = sale > 0
+
+                            badge = "✅ Paid" if status.lower() == "paid" \
+                                else "⏳ AwaitingPayment" if "awaiting" in status.lower() \
+                                else "📦 Sent"
+
+                            confirm_key = f"csn_del_confirm_{row_id}"
+
+                            col_info, col_btn = st.columns([6, 1])
+                            with col_info:
+                                if has_data:
+                                    st.markdown(
+                                        f"**ID {row_id}** &nbsp; {badge} &nbsp; 📦 `{pkg}` &nbsp; "
+                                        f"💰 **${net:.2f}** net (${sale:.2f} gross) — ✅ has sale data"
+                                    )
+                                else:
+                                    st.markdown(
+                                        f"**ID {row_id}** &nbsp; {badge} &nbsp; 📦 `{pkg}` &nbsp; "
+                                        f"$0 — likely the stale copy"
+                                    )
+                                st.caption(title)
+
+                            with col_btn:
+                                if st.session_state.get(confirm_key):
+                                    st.markdown("**Sure?**")
+                                    if st.button("Yes, delete", key=f"csn_del_yes_{row_id}", type="primary"):
+                                        ok = _csn_delete_row("consignment_items", f"id=eq.{row_id}")
+                                        st.session_state.pop(confirm_key, None)
+                                        if ok:
+                                            st.session_state.pop("csn_data_v2", None)
+                                            st.success(f"Deleted ID {row_id}")
+                                            st.rerun()
+                                        else:
+                                            st.error("Delete failed — check Supabase connection.")
+                                    if st.button("Cancel", key=f"csn_del_no_{row_id}"):
+                                        st.session_state.pop(confirm_key, None)
+                                        st.rerun()
+                                else:
+                                    st.button(
+                                        "🗑️ Delete",
+                                        key=f"csn_del_btn_{row_id}",
+                                        on_click=lambda k=confirm_key: st.session_state.update({k: True}),
+                                    )
+                            st.divider()
 
             st.divider()
             st.markdown("**SQL — Create Consignment Tables** *(run once in Supabase SQL Editor)*")
@@ -5152,31 +5342,44 @@ with tab10:
 
             # ── eBay import ───────────────────────────────────────────────────
             with imp_ebay:
-                st.markdown("### Import eBay Sold Report")
+                st.markdown("### Import eBay Sales")
                 st.caption(
-                    "eBay Seller Hub → Reports → Downloads → Transactions report (CSV). "
-                    "Import as many date ranges as you like — duplicates are skipped. "
-                    "eBay's report doesn't include fees directly; final value fee is estimated at **12.9% of (item price + shipping) + $0.30**."
+                    "Accepts **two formats** — auto-detected on upload:\n\n"
+                    "• **Seller Hub Transactions Report** — Seller Hub → Reports → Downloads → Transactions report. "
+                    "Fees are estimated at 12.9% + $0.30.\n\n"
+                    "• **eBay Financial Ledger** — Payments → Transactions → Download (TransactionType / GrossAmount / Fees / NetAmount columns). "
+                    "Uses your actual eBay fees — more accurate."
                 )
-                ebay_file = st.file_uploader("eBay Transactions / Sold Report CSV", type=["csv"], key="sal_ebay_file")
+                ebay_file = st.file_uploader("eBay Transactions / Sold Report / Ledger CSV", type=["csv"], key="sal_ebay_file")
                 if ebay_file:
                     try:
                         raw_content = ebay_file.read().decode("utf-8-sig")
-                        lines = raw_content.split("\n")
-                        # eBay reports have a blank/junk first line — find the header
-                        header_idx = 0
-                        for i, line in enumerate(lines[:5]):
-                            if "Sale Date" in line or "Item Title" in line or "Sales Record" in line:
-                                header_idx = i
-                                break
-                        csv_content = "\n".join(lines[header_idx:])
-                        ebay_df = pd.read_csv(io.StringIO(csv_content), encoding="utf-8-sig")
-                        ebay_df.columns = [c.strip() for c in ebay_df.columns]
-                        # Drop completely empty rows
-                        ebay_df = ebay_df.dropna(how="all")
-                        ebay_df = ebay_df[ebay_df.get("Sale Date", ebay_df.iloc[:, 0]).astype(str).str.strip() != ""]
 
-                        st.caption(f"Found **{len(ebay_df):,}** rows. Preview:")
+                        # Auto-detect format: ledger has TransactionType + GrossAmount headers
+                        first_line = raw_content.split("\n")[0]
+                        is_ledger = "TransactionType" in first_line and "GrossAmount" in first_line
+
+                        if is_ledger:
+                            ebay_df = pd.read_csv(io.StringIO(raw_content))
+                            ebay_df.columns = [c.strip() for c in ebay_df.columns]
+                            # Keep only Sale rows; drop totals/blank rows
+                            ebay_df = ebay_df[ebay_df["TransactionType"].astype(str).str.strip() == "Sale"].copy()
+                            st.info(f"📊 **eBay Financial Ledger detected** — using actual fees from your ledger.")
+                            st.caption(f"Found **{len(ebay_df):,}** Sale rows. Preview:")
+                        else:
+                            lines = raw_content.split("\n")
+                            header_idx = 0
+                            for i, line in enumerate(lines[:5]):
+                                if "Sale Date" in line or "Item Title" in line or "Sales Record" in line:
+                                    header_idx = i
+                                    break
+                            csv_content = "\n".join(lines[header_idx:])
+                            ebay_df = pd.read_csv(io.StringIO(csv_content), encoding="utf-8-sig")
+                            ebay_df.columns = [c.strip() for c in ebay_df.columns]
+                            ebay_df = ebay_df.dropna(how="all")
+                            ebay_df = ebay_df[ebay_df.get("Sale Date", ebay_df.iloc[:, 0]).astype(str).str.strip() != ""]
+                            st.caption(f"Found **{len(ebay_df):,}** rows. Preview:")
+
                         st.dataframe(ebay_df.head(5), use_container_width=True, hide_index=True)
 
                         if st.button("⬆️ Import eBay Sales", type="primary", key="sal_ebay_btn"):
@@ -5189,42 +5392,63 @@ with tab10:
 
                             for _i3, (idx3, row3) in enumerate(ebay_df.iterrows()):
                                 prog3.progress(int((_i3 + 1) / max(total3, 1) * 100))
-                                sale_date3 = _parse_ebay_date(row3.get("Sale Date", ""))
-                                item_num3 = str(row3.get("Item Number", "") or "").strip()
-                                sold_for3 = _parse_money(row3.get("Sold For", 0))
-                                shipping3 = _parse_money(row3.get("Shipping And Handling", 0))
-                                title3 = str(row3.get("Item Title", "") or "").strip()
-                                _qty3_raw = row3.get("Quantity", 1)
-                                try:
-                                    qty3 = int(float(_qty3_raw)) if _qty3_raw == _qty3_raw and _qty3_raw not in (None, "") else 1
-                                except (ValueError, TypeError):
-                                    qty3 = 1
-                                gross3 = round(sold_for3 + shipping3, 2)
-                                fee3 = round(gross3 * 0.129 + 0.30, 2)
-                                net3 = round(gross3 - fee3, 2)
-                                dedup3 = f"ebay|{item_num3}|{sale_date3}|{round(sold_for3, 2)}"
+
+                                if is_ledger:
+                                    title3  = str(row3.get("Description", "") or "").strip()
+                                    gross3  = _parse_money(row3.get("GrossAmount", 0))
+                                    fee3    = abs(_parse_money(row3.get("Fees", 0)))
+                                    net3    = _parse_money(row3.get("NetAmount", 0))
+                                    dedup3  = f"ebay_ledger|{title3}|{round(gross3, 2)}"
+                                    rec3 = {
+                                        "source": "ebay",
+                                        "sale_date": None,
+                                        "title": title3 or None,
+                                        "gross_revenue": gross3,
+                                        "platform_fee": fee3,
+                                        "net_proceeds": net3,
+                                        "quantity": 1,
+                                        "sale_price": gross3,
+                                        "shipping_collected": 0,
+                                        "status": "sold",
+                                        "dedup_key": dedup3,
+                                    }
+                                else:
+                                    sale_date3 = _parse_ebay_date(row3.get("Sale Date", ""))
+                                    item_num3  = str(row3.get("Item Number", "") or "").strip()
+                                    sold_for3  = _parse_money(row3.get("Sold For", 0))
+                                    shipping3  = _parse_money(row3.get("Shipping And Handling", 0))
+                                    title3     = str(row3.get("Item Title", "") or "").strip()
+                                    _qty3_raw  = row3.get("Quantity", 1)
+                                    try:
+                                        qty3 = int(float(_qty3_raw)) if _qty3_raw == _qty3_raw and _qty3_raw not in (None, "") else 1
+                                    except (ValueError, TypeError):
+                                        qty3 = 1
+                                    gross3 = round(sold_for3 + shipping3, 2)
+                                    fee3   = round(gross3 * 0.129 + 0.30, 2)
+                                    net3   = round(gross3 - fee3, 2)
+                                    dedup3 = f"ebay|{item_num3}|{sale_date3}|{round(sold_for3, 2)}"
+                                    sku3   = str(row3.get("Custom label", "") or row3.get("Custom label (SKU)", "") or "").strip()
+                                    rec3 = {
+                                        "source": "ebay",
+                                        "order_id": str(row3.get("Order Number", "") or "").strip() or None,
+                                        "sale_date": sale_date3 or None,
+                                        "title": title3 or None,
+                                        "item_number": item_num3 or None,
+                                        "sku": sku3 or None,
+                                        "quantity": qty3,
+                                        "sale_price": sold_for3,
+                                        "shipping_collected": shipping3,
+                                        "gross_revenue": gross3,
+                                        "platform_fee": fee3,
+                                        "net_proceeds": net3,
+                                        "status": str(row3.get("Feedback Received", "") or "sold").strip() or "sold",
+                                        "dedup_key": dedup3,
+                                    }
 
                                 if dedup3 in existing_keys3:
                                     skipped3 += 1
                                     continue
 
-                                sku3 = str(row3.get("Custom label", "") or row3.get("Custom label (SKU)", "") or "").strip()
-                                rec3 = {
-                                    "source": "ebay",
-                                    "order_id": str(row3.get("Order Number", "") or "").strip() or None,
-                                    "sale_date": sale_date3 or None,
-                                    "title": title3 or None,
-                                    "item_number": item_num3 or None,
-                                    "sku": sku3 or None,
-                                    "quantity": qty3,
-                                    "sale_price": sold_for3,
-                                    "shipping_collected": shipping3,
-                                    "gross_revenue": gross3,
-                                    "platform_fee": fee3,
-                                    "net_proceeds": net3,
-                                    "status": str(row3.get("Feedback Received", "") or "sold").strip() or "sold",
-                                    "dedup_key": dedup3,
-                                }
                                 res3 = _sal_post(rec3)
                                 if res3 is not None:
                                     imported3 += 1
@@ -5239,7 +5463,8 @@ with tab10:
                             if failed3:
                                 msg3 += f", **{failed3}** failed"
                             st.success(msg3 + ".")
-                            st.caption("Note: eBay fees are estimated at 12.9% + $0.30. For exact fees, cross-reference your eBay invoice.")
+                            if not is_ledger:
+                                st.caption("Note: eBay fees estimated at 12.9% + $0.30. For exact fees, use the eBay Financial Ledger format.")
                             if imported3:
                                 st.session_state.pop("sal_data", None)
                                 st.rerun()
@@ -5438,17 +5663,28 @@ with tab10:
             with imp_dc:
                 st.markdown("### Import DC Sports Sales")
                 st.caption(
-                    "Accepts the DC Sports seller CSV export "
-                    "(columns: Title, Status, ListingDate, EndingDate, BuyItNow, SalePrice, Fees, Net, FriendlyPackageId). "
-                    "Only **Paid** rows are imported as sales. Re-importing is safe — duplicates skipped."
+                    "Accepts **two DC Sports export formats** — auto-detected:\n\n"
+                    "• **Seller/Consignment CSV** — Seller Dashboard export (Title, Status, SalePrice, Fees, Net, FriendlyPackageId). Only **Paid** rows imported.\n\n"
+                    "• **Financial Ledger** — Payments → Download (TransactionType, Description, GrossAmount, Fees, NetAmount). Only **Sale** rows imported. Uses your actual fees."
                 )
                 dc_sal_file = st.file_uploader("DC Sports CSV export", type=["csv"], key="sal_dc_file")
                 if dc_sal_file:
                     try:
-                        dc_df6 = pd.read_csv(dc_sal_file, encoding="utf-8-sig")
+                        raw6 = dc_sal_file.read().decode("utf-8-sig")
+                        first6 = raw6.split("\n")[0]
+                        is_ledger6 = "TransactionType" in first6 and "GrossAmount" in first6
+
+                        dc_df6 = pd.read_csv(io.StringIO(raw6))
                         dc_df6.columns = [c.strip() for c in dc_df6.columns]
-                        paid_df6 = dc_df6[dc_df6.get("Status", dc_df6.iloc[:,1]).astype(str).str.lower() == "paid"].copy() if "Status" in dc_df6.columns else dc_df6
-                        st.caption(f"Found **{len(dc_df6):,}** total rows, **{len(paid_df6):,}** Paid (will import as sales).")
+
+                        if is_ledger6:
+                            paid_df6 = dc_df6[dc_df6["TransactionType"].astype(str).str.strip() == "Sale"].copy()
+                            st.info(f"📊 **DC Sports Financial Ledger detected** — using your actual fees.")
+                            st.caption(f"Found **{len(dc_df6):,}** total rows, **{len(paid_df6):,}** Sale rows (will import).")
+                        else:
+                            paid_df6 = dc_df6[dc_df6.get("Status", dc_df6.iloc[:,1]).astype(str).str.lower() == "paid"].copy() if "Status" in dc_df6.columns else dc_df6
+                            st.caption(f"Found **{len(dc_df6):,}** total rows, **{len(paid_df6):,}** Paid (will import as sales).")
+
                         st.dataframe(paid_df6.head(5), use_container_width=True, hide_index=True)
 
                         if st.button("⬆️ Import DC Sports Sales", type="primary", key="sal_dc_btn"):
@@ -5458,40 +5694,60 @@ with tab10:
                             prog6 = st.progress(0)
                             total6 = len(paid_df6)
 
-                            for idx6, row6 in paid_df6.iterrows():
-                                prog6.progress(int((list(paid_df6.index).index(idx6) + 1) / max(total6, 1) * 100))
-                                pkg6 = str(row6.get("FriendlyPackageId", "") or "").strip()
-                                title6 = str(row6.get("Title", "") or "").strip()
-                                ending6 = str(row6.get("EndingDate", "") or "").strip()[:19]
-                                dedup6 = f"dc_sports|{pkg6}|{title6}|{ending6}"
+                            for _i6, (idx6, row6) in enumerate(paid_df6.iterrows()):
+                                prog6.progress(int((_i6 + 1) / max(total6, 1) * 100))
+
+                                if is_ledger6:
+                                    title6  = str(row6.get("Description", "") or "").strip()
+                                    gross6  = _parse_money(row6.get("GrossAmount", 0))
+                                    fees6   = abs(_parse_money(row6.get("Fees", 0)))
+                                    net6    = _parse_money(row6.get("NetAmount", 0))
+                                    dedup6  = f"dc_sports_ledger|{title6}|{round(gross6, 2)}"
+                                    rec6 = {
+                                        "source": "dc_sports",
+                                        "sale_date": None,
+                                        "title": title6 or None,
+                                        "quantity": 1,
+                                        "sale_price": gross6,
+                                        "shipping_collected": 0,
+                                        "gross_revenue": gross6,
+                                        "platform_fee": fees6,
+                                        "net_proceeds": net6,
+                                        "status": "paid",
+                                        "dedup_key": dedup6,
+                                    }
+                                else:
+                                    pkg6    = str(row6.get("FriendlyPackageId", "") or "").strip()
+                                    title6  = str(row6.get("Title", "") or "").strip()
+                                    ending6 = str(row6.get("EndingDate", "") or "").strip()[:19]
+                                    dedup6  = f"dc_sports|{pkg6}|{title6}|{ending6}"
+                                    sale_price6 = _parse_money(row6.get("SalePrice"))
+                                    fees6       = _parse_money(row6.get("Fees"))
+                                    net6        = _parse_money(row6.get("Net"))
+                                    try:
+                                        sale_date6 = pd.to_datetime(ending6).strftime('%Y-%m-%d') if ending6 else None
+                                    except Exception:
+                                        sale_date6 = ending6[:10] if ending6 else None
+                                    rec6 = {
+                                        "source": "dc_sports",
+                                        "order_id": pkg6 or None,
+                                        "sale_date": sale_date6,
+                                        "title": title6 or None,
+                                        "item_number": None,
+                                        "quantity": 1,
+                                        "sale_price": sale_price6,
+                                        "shipping_collected": 0,
+                                        "gross_revenue": sale_price6,
+                                        "platform_fee": fees6,
+                                        "net_proceeds": net6,
+                                        "status": "paid",
+                                        "dedup_key": dedup6,
+                                    }
 
                                 if dedup6 in existing_keys6:
                                     skipped6 += 1
                                     continue
 
-                                sale_price6 = _parse_money(row6.get("SalePrice"))
-                                fees6 = _parse_money(row6.get("Fees"))
-                                net6 = _parse_money(row6.get("Net"))
-                                try:
-                                    sale_date6 = pd.to_datetime(ending6).strftime('%Y-%m-%d') if ending6 else None
-                                except Exception:
-                                    sale_date6 = ending6[:10] if ending6 else None
-
-                                rec6 = {
-                                    "source": "dc_sports",
-                                    "order_id": pkg6 or None,
-                                    "sale_date": sale_date6,
-                                    "title": title6 or None,
-                                    "item_number": None,
-                                    "quantity": 1,
-                                    "sale_price": sale_price6,
-                                    "shipping_collected": 0,
-                                    "gross_revenue": sale_price6,
-                                    "platform_fee": fees6,
-                                    "net_proceeds": net6,
-                                    "status": "paid",
-                                    "dedup_key": dedup6,
-                                }
                                 res6 = _sal_post(rec6)
                                 if res6 is not None:
                                     imported6 += 1
