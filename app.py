@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.8"
+APP_VERSION = "1.5.9"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -3028,28 +3028,12 @@ with tab8:
         scan_raw, scan_cert = st.tabs(["🃏 Raw card photo", "🎫 Graded slab (cert #)"])
 
         with scan_raw:
-            # Cap image width on desktop; full-width on phone
-            st.markdown("""
-            <style>
-            div[data-testid="stImage"] > img { max-width: 300px; border-radius: 8px; }
-            @media (max-width: 600px) {
-                div[data-testid="stImage"] > img { max-width: 100%; }
-            }
-            </style>
-            """, unsafe_allow_html=True)
+            st.caption("Upload a photo of the **front of a raw card**. On iPhone, tap the button and choose **Take Photo** to snap one directly.")
+            up = st.file_uploader("Card photo", type=["jpg", "jpeg", "png", "webp"], key="scan_up")
 
-            # ── Camera-first input ────────────────────────────────────────
-            _inp_cam, _inp_up = st.tabs(["📸 Take Photo", "📁 Upload File"])
-            with _inp_cam:
-                cam_src = st.camera_input("Point at the front of the card", key="scan_cam", label_visibility="collapsed")
-            with _inp_up:
-                up_src = st.file_uploader("Card photo", type=["jpg", "jpeg", "png", "webp"], key="scan_up", label_visibility="collapsed")
-
-            _src = cam_src or up_src
-
-            if _src is not None:
+            if up is not None:
                 import io as _io
-                _up_bytes = _src.getvalue()
+                _up_bytes = up.getvalue()
 
                 try:
                     from PIL import Image as _PIL
@@ -3061,8 +3045,8 @@ with tab8:
                 except Exception:
                     b64 = base64.b64encode(_up_bytes).decode()
 
-                # Clear cache only when a new image arrives
-                _up_key = getattr(_src, "name", "") + str(len(_up_bytes))
+                # Clear cache only when a new file is uploaded
+                _up_key = up.name + str(up.size)
                 if st.session_state.get("_scan_last_file") != _up_key:
                     st.session_state["_scan_last_file"] = _up_key
                     ch_image_match.clear()
@@ -3082,44 +3066,45 @@ with tab8:
 
                 # ── No image match → text search fallback ─────────────────
                 if not cands:
-                    st.image(_up_bytes, use_container_width=True)
-                    _ch_err  = (res or {}).get("_ch_error", "")
-                    _ch_body = (res or {}).get("_ch_body", "")
-                    if _ch_err:
-                        st.error(f"API error: **{_ch_err}**")
-                        if _ch_body:
-                            st.code(_ch_body, language="json")
-                    else:
-                        st.warning("📷 Image not recognized — type the card name to search manually.")
-
-                    _mq = st.text_input(
-                        "🔍 Search by card name",
-                        placeholder="e.g. Jacob Misiorowski 2026 Bowman",
-                        key="scan_manual_q",
-                    )
-                    if _mq:
-                        with st.spinner("Searching…"):
-                            _sr = ch_search(_mq)
-                            _mm = ch_card_match(_mq) if not _sr else None
-                        _found = _sr[0] if _sr else _mm
-                        if _found:
-                            cands = [{
-                                "card_id":     _found.get("card_id") or _found.get("id") or "",
-                                "description": _found.get("description") or _found.get("name") or _found.get("title") or "Unknown",
-                                "similarity":  "text match",
-                                "set":         _found.get("set") or _found.get("set_name") or "",
-                                "variant":     _found.get("variant") or "",
-                            }]
-                            if len(_sr) > 1:
-                                st.caption(f"Top result from {len(_sr)} matches — be more specific if wrong.")
+                    _nm_left, _nm_right = st.columns([1, 2])
+                    with _nm_left:
+                        st.image(_up_bytes, width=220)
+                    with _nm_right:
+                        _ch_err  = (res or {}).get("_ch_error", "")
+                        _ch_body = (res or {}).get("_ch_body", "")
+                        if _ch_err:
+                            st.error(f"API error: **{_ch_err}**")
+                            if _ch_body:
+                                st.code(_ch_body, language="json")
                         else:
-                            st.error("No card found — try a shorter or different search term.")
-
+                            st.warning("📷 Image not recognized — type the card name to search manually.")
+                        _mq = st.text_input(
+                            "🔍 Search by card name",
+                            placeholder="e.g. Jacob Misiorowski 2026 Bowman",
+                            key="scan_manual_q",
+                        )
+                        if _mq:
+                            with st.spinner("Searching…"):
+                                _sr = ch_search(_mq)
+                                _mm = ch_card_match(_mq) if not _sr else None
+                            _found = _sr[0] if _sr else _mm
+                            if _found:
+                                cands = [{
+                                    "card_id":     _found.get("card_id") or _found.get("id") or "",
+                                    "description": _found.get("description") or _found.get("name") or _found.get("title") or "Unknown",
+                                    "similarity":  "text match",
+                                    "set":         _found.get("set") or _found.get("set_name") or "",
+                                    "variant":     _found.get("variant") or "",
+                                }]
+                                if len(_sr) > 1:
+                                    st.caption(f"Top result from {len(_sr)} matches — be more specific if wrong.")
+                            else:
+                                st.error("No card found — try a shorter or different search term.")
                     if not cands:
                         with st.expander("🔍 Debug — raw API response"):
                             st.json(res if res else {"error": "API returned nothing"})
 
-                # ── Matched → identity + market data (mobile-stacked) ──────
+                # ── Matched → identity + market data ──────────────────────
                 if cands:
                     top = cands[0]
                     scan_card_id = (top.get("card_id") or top.get("id") or top.get("cardId") or "")
@@ -3128,17 +3113,20 @@ with tab8:
                     _top_set     = (top.get("set") or top.get("set_name") or top.get("setName") or "")
                     _top_var     = (top.get("variant") or top.get("parallel") or top.get("card_number") or "")
 
-                    card_img_url = safe_image_url(ch_card_image(scan_card_id) if scan_card_id else "")
-                    st.image(card_img_url if card_img_url else _up_bytes, use_container_width=True)
-                    st.markdown(f"### {_top_desc}")
-                    _sim_label = f"Match confidence: **{_top_sim}%** · " if _top_sim != "text match" else "✅ Text search · "
-                    st.caption(f"{_sim_label}{_top_set}{' · ' + _top_var if _top_var else ''}")
-
-                    scan_grade = st.selectbox(
-                        "Grade to price",
-                        ["Raw", "PSA 10", "PSA 9"],
-                        key="scan_grade_sel",
-                    )
+                    id_img, id_info = st.columns([1, 2])
+                    with id_img:
+                        card_img_url = safe_image_url(ch_card_image(scan_card_id) if scan_card_id else "")
+                        st.image(card_img_url if card_img_url else _up_bytes, use_container_width=True)
+                    with id_info:
+                        st.markdown(f"### {_top_desc}")
+                        _sim_label = f"Match confidence: **{_top_sim}%** · " if _top_sim != "text match" else "✅ Text search · "
+                        st.caption(f"{_sim_label}{_top_set}{' · ' + _top_var if _top_var else ''}")
+                        scan_grade = st.selectbox(
+                            "Grade to price",
+                            ["Raw", "PSA 10", "PSA 9"],
+                            key="scan_grade_sel",
+                            help="Raw = what you'd pay today for an ungraded card. PSA 10/9 = check graded value.",
+                        )
 
                     if len(cands) > 1:
                         with st.expander("Other possible matches"):
@@ -3150,7 +3138,7 @@ with tab8:
                     st.divider()
 
                     if scan_card_id:
-                        with st.spinner(f"Loading {scan_grade} pricing…"):
+                        with st.spinner(f"Loading {scan_grade} market data…"):
                             _sc_comp = ch_comps(scan_card_id, scan_grade)
                             _sc_fmv  = ch_fmv(scan_card_id, scan_grade)
                             _sc_hist = ch_price_history(scan_card_id, scan_grade, 90)
@@ -3171,18 +3159,18 @@ with tab8:
 
                         # ── BUY SIGNAL ────────────────────────────────────
                         if _sc_dir == "up" and _sc_pct > 5:
-                            st.success(f"🔥 **HOT** — Up **{_sc_pct:+.0f}%** in 90 days. Buy now.")
+                            st.success(f"🔥 **HOT** — Up **{_sc_pct:+.0f}%** over 90 days. Demand is rising — buy now before price climbs.")
                         elif _sc_dir == "down" and _sc_pct < -5:
-                            st.error(f"🛑 **COOLING** — Down **{abs(_sc_pct):.0f}%** in 90 days. Negotiate hard.")
+                            st.error(f"🛑 **COOLING** — Down **{abs(_sc_pct):.0f}%** over 90 days. Market softening — negotiate hard or wait for the floor.")
                         elif _sc_dir is not None:
-                            st.info(f"➡️ **STABLE** — {_sc_pct:+.0f}% in 90 days. FMV is a fair anchor.")
+                            st.info(f"➡️ **STABLE** — Flat market ({_sc_pct:+.0f}% in 90d). No urgency either way — FMV below is a fair anchor.")
                         else:
-                            st.warning("⚠️ Not enough history to call direction.")
+                            st.warning("⚠️ Not enough history to call direction. Check recent sales below.")
 
-                        # ── Price metrics (2×2 for mobile) ───────────────
-                        pm1, pm2 = st.columns(2)
-                        pm3, pm4 = st.columns(2)
-                        pm1.metric(f"{scan_grade} value", f"${_sc_show:,.2f}" if _sc_show else "—")
+                        # ── Price metrics ─────────────────────────────────
+                        pm1, pm2, pm3, pm4 = st.columns(4)
+                        pm1.metric(f"{scan_grade} value", f"${_sc_show:,.2f}" if _sc_show else "—",
+                                   help="FMV (Winsorized median) if available, else comp average.")
                         try:
                             _lo = float(_sc_fmv.get("price_low") or 0)
                             _hi = float(_sc_fmv.get("price_high") or 0)
@@ -3194,10 +3182,10 @@ with tab8:
 
                         _conf = _sc_fmv.get("confidence_grade")
                         if _conf:
-                            st.caption(f"🎯 FMV confidence: **{_conf}**")
+                            st.caption(f"🎯 FMV confidence: **{_conf}** (A = highest — based on recent sold volume)")
 
-                        # ── Recent sales ──────────────────────────────────
-                        st.markdown(f"**📋 Recent {scan_grade} sales**")
+                        # ── Recent individual sales ───────────────────────
+                        st.markdown(f"**📋 Recent {scan_grade} individual sales**")
 
                         import datetime as _dt_scan
 
@@ -3229,9 +3217,9 @@ with tab8:
                                         "Type":  st.column_config.TextColumn("Type"),
                                     },
                                 )
-                                st.caption("🏷 BIN = fixed price · 🔨 Auction = competitive bid · 💬 Offer = accepted below ask")
+                                st.caption("🏷 BIN = fixed price · 🔨 Auction = competitive bid · 💬 Offer = accepted below ask. BIN prices are most reliable for fair value.")
                             else:
-                                st.info(f"No {scan_grade} sales returned.")
+                                st.info(f"No {scan_grade} individual sales returned.")
                         else:
                             st.info(f"No {scan_grade} sales data for this card.")
 
