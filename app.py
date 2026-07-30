@@ -3015,14 +3015,31 @@ with tab8:
                 b64 = base64.b64encode(up.getvalue()).decode()
                 with st.spinner("Identifying card…"):
                     res = ch_image_match(b64)
-                cands = (res or {}).get("candidates") or []
+
+                # CardHedger may use different keys depending on API version
+                cands = []
+                if isinstance(res, list):
+                    cands = res
+                elif isinstance(res, dict):
+                    for _ck in ("candidates", "matches", "cards", "results", "data", "items"):
+                        _v = res.get(_ck)
+                        if isinstance(_v, list) and _v:
+                            cands = _v
+                            break
 
                 if not cands:
                     st.image(up, width=220)
                     st.warning("No match found. Try a straighter, well-lit photo of the card front only.")
+                    with st.expander("🔍 Debug — raw API response"):
+                        st.json(res if res else {"error": "API returned nothing"})
                 else:
                     top = cands[0]
-                    scan_card_id = top.get("card_id")
+                    # Normalize — CardHedger may use different field names per version
+                    scan_card_id = (top.get("card_id") or top.get("id") or top.get("cardId") or "")
+                    _top_desc    = (top.get("description") or top.get("title") or top.get("name") or top.get("card_name") or "Unknown card")
+                    _top_sim     = (top.get("similarity") or top.get("score") or top.get("confidence") or "?")
+                    _top_set     = (top.get("set") or top.get("set_name") or top.get("setName") or "")
+                    _top_var     = (top.get("variant") or top.get("parallel") or top.get("card_number") or "")
 
                     # ── Identity row ─────────────────────────────────────────
                     id_img, id_info = st.columns([1, 2])
@@ -3030,8 +3047,8 @@ with tab8:
                         card_img_url = ch_card_image(scan_card_id) if scan_card_id else ""
                         st.image(card_img_url if card_img_url else up, use_container_width=True)
                     with id_info:
-                        st.markdown(f"### {top.get('description', '')}")
-                        st.caption(f"Match confidence: **{top.get('similarity', '?')}%** · {top.get('set', '')} · {top.get('variant', '')}")
+                        st.markdown(f"### {_top_desc}")
+                        st.caption(f"Match confidence: **{_top_sim}%** · {_top_set} · {_top_var}")
                         scan_grade = st.selectbox(
                             "Grade to price",
                             ["Raw", "PSA 10", "PSA 9"],
@@ -3042,7 +3059,9 @@ with tab8:
                     if len(cands) > 1:
                         with st.expander("Other possible matches"):
                             for c in cands[1:5]:
-                                st.markdown(f"- {c.get('description', '')} · _sim {c.get('similarity')}%_")
+                                _cd = c.get("description") or c.get("title") or c.get("name") or "?"
+                                _cs = c.get("similarity") or c.get("score") or c.get("confidence") or "?"
+                                st.markdown(f"- {_cd} · _sim {_cs}%_")
 
                     st.divider()
 
