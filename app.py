@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.4"
+APP_VERSION = "1.5.5"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -3035,7 +3035,7 @@ with tab8:
                 import io as _io
                 _up_bytes = up.getvalue()
 
-                # Resize to ≤800px before sending — reduces payload from ~200KB to ~50KB base64
+                # Resize to ≤800px before sending — reduces payload size
                 try:
                     from PIL import Image as _PIL
                     _img = _PIL.open(_io.BytesIO(_up_bytes))
@@ -3046,10 +3046,13 @@ with tab8:
                 except Exception:
                     b64 = base64.b64encode(_up_bytes).decode()
 
-                # Clear any stale cached result so a fresh call goes through
-                ch_image_match.clear()
+                # Clear cache only when a NEW file is uploaded, not on every rerender
+                _up_key = up.name + str(up.size)
+                if st.session_state.get("_scan_last_file") != _up_key:
+                    st.session_state["_scan_last_file"] = _up_key
+                    ch_image_match.clear()
 
-                with st.spinner("Identifying card…"):
+                with st.spinner("Identifying card via image…"):
                     res = ch_image_match(b64)
 
                 # CardHedger may use different keys depending on API version
@@ -3063,19 +3066,47 @@ with tab8:
                             cands = _v
                             break
 
+                # ── No image match → text search fallback ─────────────────
                 if not cands:
-                    st.image(_up_bytes, width=220)
-                    _ch_err = (res or {}).get("_ch_error", "")
-                    _ch_body = (res or {}).get("_ch_body", "")
-                    if _ch_err:
-                        st.error(f"CardHedger API error: **{_ch_err}**")
-                        if _ch_body:
-                            st.code(_ch_body, language="json")
-                    else:
-                        st.warning("No match found — CardHedger returned no candidates for this image.")
-                    with st.expander("🔍 Debug — raw API response"):
-                        st.json(res if res else {"error": "API returned nothing"})
-                else:
+                    _nm_left, _nm_right = st.columns([1, 2])
+                    with _nm_left:
+                        st.image(_up_bytes, width=220)
+                    with _nm_right:
+                        _ch_err  = (res or {}).get("_ch_error", "")
+                        _ch_body = (res or {}).get("_ch_body", "")
+                        if _ch_err:
+                            st.error(f"CardHedger API error: **{_ch_err}**")
+                            if _ch_body:
+                                st.code(_ch_body, language="json")
+                        else:
+                            st.warning(
+                                "📷 Image not recognized — this card may not be in "
+                                "CardHedger's database yet. Type the card name below to search manually."
+                            )
+                        _mq = st.text_input(
+                            "🔍 Search by card name",
+                            placeholder="e.g. Aaron Judge 2025 Topps Tribute Yellow",
+                            key="scan_manual_q",
+                        )
+                        if _mq:
+                            with st.spinner("Searching…"):
+                                _mm = ch_card_match(_mq)
+                            if _mm:
+                                cands = [{
+                                    "card_id":     _mm.get("id") or _mm.get("card_id") or "",
+                                    "description": _mm.get("name") or _mm.get("description") or _mm.get("title") or "Unknown",
+                                    "similarity":  "text match",
+                                    "set":         _mm.get("set") or _mm.get("set_name") or "",
+                                    "variant":     _mm.get("variant") or "",
+                                }]
+                            else:
+                                st.error("No card found — try a shorter or different search term.")
+                    if not cands:
+                        with st.expander("🔍 Debug — raw API response"):
+                            st.json(res if res else {"error": "API returned nothing"})
+
+                # ── Matched (image or text) → identity + market data ───────
+                if cands:
                     top = cands[0]
                     # Normalize — CardHedger may use different field names per version
                     scan_card_id = (top.get("card_id") or top.get("id") or top.get("cardId") or "")
@@ -3091,7 +3122,8 @@ with tab8:
                         st.image(card_img_url if card_img_url else _up_bytes, use_container_width=True)
                     with id_info:
                         st.markdown(f"### {_top_desc}")
-                        st.caption(f"Match confidence: **{_top_sim}%** · {_top_set} · {_top_var}")
+                        _sim_label = f"Match confidence: **{_top_sim}%** · " if _top_sim != "text match" else "✅ Found via text search · "
+                        st.caption(f"{_sim_label}{_top_set} · {_top_var}")
                         scan_grade = st.selectbox(
                             "Grade to price",
                             ["Raw", "PSA 10", "PSA 9"],
