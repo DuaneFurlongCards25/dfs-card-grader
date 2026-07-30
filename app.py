@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.7"
+APP_VERSION = "1.5.8"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -3028,6 +3028,16 @@ with tab8:
         scan_raw, scan_cert = st.tabs(["🃏 Raw card photo", "🎫 Graded slab (cert #)"])
 
         with scan_raw:
+            # Cap image width on desktop; full-width on phone
+            st.markdown("""
+            <style>
+            div[data-testid="stImage"] > img { max-width: 300px; border-radius: 8px; }
+            @media (max-width: 600px) {
+                div[data-testid="stImage"] > img { max-width: 100%; }
+            }
+            </style>
+            """, unsafe_allow_html=True)
+
             # ── Camera-first input ────────────────────────────────────────
             _inp_cam, _inp_up = st.tabs(["📸 Take Photo", "📁 Upload File"])
             with _inp_cam:
