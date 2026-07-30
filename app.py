@@ -3031,18 +3031,20 @@ with tab8:
             st.caption("Upload or take a photo of the **front of a raw card**. CardHedger's AI identifies the card + loads live comps, trend, and a buy signal.")
             up = st.file_uploader("Card photo", type=["jpg", "jpeg", "png", "webp"], key="scan_up")
             if up is not None:
-                b64 = base64.b64encode(up.getvalue()).decode()
-                # Resize large images before sending — CardHedger may reject payloads > ~1MB
+                # Read bytes once — UploadedFile is a stream; re-reading after seek is unreliable
                 import io as _io
+                _up_bytes = up.getvalue()
+
+                # Resize to ≤800px before sending — reduces payload from ~200KB to ~50KB base64
                 try:
                     from PIL import Image as _PIL
-                    _img = _PIL.open(_io.BytesIO(up.getvalue()))
+                    _img = _PIL.open(_io.BytesIO(_up_bytes))
                     _img.thumbnail((800, 800), _PIL.LANCZOS)
                     _buf = _io.BytesIO()
                     _img.save(_buf, format="JPEG", quality=85)
                     b64 = base64.b64encode(_buf.getvalue()).decode()
                 except Exception:
-                    b64 = base64.b64encode(up.getvalue()).decode()
+                    b64 = base64.b64encode(_up_bytes).decode()
 
                 # Clear any stale cached result so a fresh call goes through
                 ch_image_match.clear()
@@ -3062,7 +3064,7 @@ with tab8:
                             break
 
                 if not cands:
-                    st.image(up, width=220)
+                    st.image(_up_bytes, width=220)
                     _ch_err = (res or {}).get("_ch_error", "")
                     _ch_body = (res or {}).get("_ch_body", "")
                     if _ch_err:
@@ -3086,7 +3088,7 @@ with tab8:
                     id_img, id_info = st.columns([1, 2])
                     with id_img:
                         card_img_url = ch_card_image(scan_card_id) if scan_card_id else ""
-                        st.image(card_img_url if card_img_url else up, use_container_width=True)
+                        st.image(card_img_url if card_img_url else _up_bytes, use_container_width=True)
                     with id_info:
                         st.markdown(f"### {_top_desc}")
                         st.caption(f"Match confidence: **{_top_sim}%** · {_top_set} · {_top_var}")
