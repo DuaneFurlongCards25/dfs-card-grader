@@ -3009,55 +3009,159 @@ with tab8:
         scan_raw, scan_cert = st.tabs(["🃏 Raw card photo", "🎫 Graded slab (cert #)"])
 
         with scan_raw:
-            st.caption("Upload or take a photo of the **front of a raw card**. CardHedger's AI returns the closest matches + prices.")
+            st.caption("Upload or take a photo of the **front of a raw card**. CardHedger's AI identifies the card + loads live comps, trend, and a buy signal.")
             up = st.file_uploader("Card photo", type=["jpg", "jpeg", "png", "webp"], key="scan_up")
             if up is not None:
-                pcol, rcol = st.columns([1, 2])
-                with pcol:
-                    st.image(up, caption="Your photo", use_container_width=True)
-                with rcol:
-                    with st.spinner("Identifying card..."):
-                        b64 = base64.b64encode(up.getvalue()).decode()
-                        res = ch_image_match(b64)
-                    cands = (res or {}).get("candidates") or []
-                    if not cands:
-                        st.warning("No match found. Try a straighter, well-lit photo of the card front.")
-                    else:
-                        top = cands[0]
-                        sim = top.get("similarity")
-                        st.markdown(f"**Best match:** {top.get('description','')}")
-                        st.caption(f"Similarity {sim}% · {top.get('set','')} · {top.get('variant','')}")
-                        prices = ch_all_prices(top.get("card_id"))
-                        if prices:
-                            prows = []
-                            for p in prices:
-                                try:
-                                    prows.append({"Grade": p.get("grade", ""), "Price": float(p.get("price"))})
-                                except Exception:
-                                    pass
-                            if prows:
+                b64 = base64.b64encode(up.getvalue()).decode()
+                with st.spinner("Identifying card…"):
+                    res = ch_image_match(b64)
+                cands = (res or {}).get("candidates") or []
+
+                if not cands:
+                    st.image(up, width=220)
+                    st.warning("No match found. Try a straighter, well-lit photo of the card front only.")
+                else:
+                    top = cands[0]
+                    scan_card_id = top.get("card_id")
+
+                    # ── Identity row ─────────────────────────────────────────
+                    id_img, id_info = st.columns([1, 2])
+                    with id_img:
+                        card_img_url = ch_card_image(scan_card_id) if scan_card_id else ""
+                        st.image(card_img_url if card_img_url else up, use_container_width=True)
+                    with id_info:
+                        st.markdown(f"### {top.get('description', '')}")
+                        st.caption(f"Match confidence: **{top.get('similarity', '?')}%** · {top.get('set', '')} · {top.get('variant', '')}")
+                        scan_grade = st.selectbox(
+                            "Grade to price",
+                            ["Raw", "PSA 10", "PSA 9"],
+                            key="scan_grade_sel",
+                            help="Raw = what you'd pay today for an ungraded card. PSA 10/9 = check graded value.",
+                        )
+
+                    if len(cands) > 1:
+                        with st.expander("Other possible matches"):
+                            for c in cands[1:5]:
+                                st.markdown(f"- {c.get('description', '')} · _sim {c.get('similarity')}%_")
+
+                    st.divider()
+
+                    # ── Market data ──────────────────────────────────────────
+                    if scan_card_id:
+                        with st.spinner(f"Loading {scan_grade} market data…"):
+                            _sc_comp = ch_comps(scan_card_id, scan_grade)
+                            _sc_fmv  = ch_fmv(scan_card_id, scan_grade)
+                            _sc_hist = ch_price_history(scan_card_id, scan_grade, 90)
+                            _sc_meta = ch_card_meta(scan_card_id)
+
+                        _sc_avg   = _sc_comp.get("comp_price") or _sc_comp.get("average") or _sc_comp.get("mean")
+                        _sc_fmv_v = fmv_price(_sc_fmv)
+                        _sc_show  = _sc_fmv_v or _sc_avg
+
+                        _sc_sales = []
+                        for _k in ("raw_prices", "sales", "comps", "data"):
+                            if _k in _sc_comp and isinstance(_sc_comp[_k], list):
+                                _sc_sales = _sc_comp[_k]; break
+
+                        _sc_dir, _sc_pct = calculate_trend(_sc_hist)
+                        _s7  = _sc_meta.get("7 Day Sales")
+                        _s30 = _sc_meta.get("30 Day Sales")
+
+                        # ── BUY SIGNAL ────────────────────────────────────
+                        if _sc_dir == "up" and _sc_pct > 5:
+                            st.success(
+                                f"🔥 **HOT** — Up **{_sc_pct:+.0f}%** over 90 days. "
+                                "Demand is rising — buy now before price climbs."
+                            )
+                        elif _sc_dir == "down" and _sc_pct < -5:
+                            st.error(
+                                f"🛑 **COOLING** — Down **{abs(_sc_pct):.0f}%** over 90 days. "
+                                "Market softening — negotiate hard or wait for the floor."
+                            )
+                        elif _sc_dir is not None:
+                            st.info(
+                                f"➡️ **STABLE** — Flat market ({_sc_pct:+.0f}% in 90d). "
+                                "No urgency either way — FMV below is a fair anchor."
+                            )
+                        else:
+                            st.warning("⚠️ Not enough history to call direction. Check recent sales below.")
+
+                        # ── Price metrics ─────────────────────────────────
+                        pm1, pm2, pm3, pm4 = st.columns(4)
+                        pm1.metric(
+                            f"{scan_grade} value",
+                            f"${_sc_show:,.2f}" if _sc_show else "—",
+                            help="FMV (Winsorized median) if available, else comp average.",
+                        )
+                        try:
+                            _lo = float(_sc_fmv.get("price_low") or 0)
+                            _hi = float(_sc_fmv.get("price_high") or 0)
+                            pm2.metric("FMV range", f"${_lo:,.0f}–${_hi:,.0f}" if _lo and _hi else "—")
+                        except Exception:
+                            pm2.metric("FMV range", "—")
+                        pm3.metric("Sales · 7d",  f"{int(_s7):,}"  if isinstance(_s7,  (int, float)) else "—")
+                        pm4.metric("Sales · 30d", f"{int(_s30):,}" if isinstance(_s30, (int, float)) else "—")
+
+                        _conf = _sc_fmv.get("confidence_grade")
+                        if _conf:
+                            st.caption(f"🎯 FMV confidence: **{_conf}** (A = highest — based on recent sold volume)")
+
+                        # ── Recent individual sales ───────────────────────
+                        st.markdown(f"**📋 Recent {scan_grade} individual sales**")
+
+                        import datetime as _dt_scan
+
+                        def _fmt_scan_sale(s):
+                            p = _extract_price(s)
+                            if not p:
+                                return None
+                            _rd = s.get("sale_date", "") or s.get("closing_date", "")
+                            try:
+                                _d = _dt_scan.datetime.fromisoformat(_rd.replace("Z", "+00:00"))
+                                _ds = _d.strftime("%-m/%-d/%y")
+                            except Exception:
+                                _ds = (_rd or "")[:10]
+                            _st = s.get("sale_type", "") or ""
+                            _tl = ("🏷 BIN"     if "bin"     in _st.lower() or _st == "" else
+                                   "🔨 Auction" if "auction" in _st.lower() else
+                                   "💬 Offer"   if "offer"   in _st.lower() else _st)
+                            return {"Date": _ds, "Price": f"${p:,.2f}", "Type": _tl}
+
+                        if _sc_sales:
+                            _sale_rows = [r for s in _sc_sales[:8] if (r := _fmt_scan_sale(s))]
+                            if _sale_rows:
                                 st.dataframe(
-                                    pd.DataFrame(prows), use_container_width=True, hide_index=True,
-                                    column_config={"Price": st.column_config.NumberColumn(format="$%.2f")},
+                                    pd.DataFrame(_sale_rows),
+                                    use_container_width=True, hide_index=True, height=240,
+                                    column_config={
+                                        "Price": st.column_config.TextColumn("Price"),
+                                        "Date":  st.column_config.TextColumn("Date"),
+                                        "Type":  st.column_config.TextColumn("Type"),
+                                    },
                                 )
-                if cands and len(cands) > 1:
-                    with st.expander("Other possible matches"):
-                        for c in cands[1:5]:
-                            st.markdown(f"- {c.get('description','')} · _sim {c.get('similarity')}%_")
+                                st.caption("🏷 BIN = fixed price · 🔨 Auction = competitive bid · 💬 Offer = accepted below ask. BIN prices are most reliable for fair value.")
+                            else:
+                                st.info(f"No {scan_grade} individual sales returned.")
+                        else:
+                            st.info(f"No {scan_grade} sales data for this card.")
+
+                        # ── Trend chart (full price history) ─────────────
+                        render_price_trend(scan_card_id, key_prefix="scan_raw", default_grade=scan_grade)
 
         with scan_cert:
-            st.caption("Enter the cert number printed on the slab label to pull the card + recent sold prices.")
+            st.caption("Enter the cert number printed on the slab label to pull the card + recent sold prices and buy signal.")
             cc1, cc2, cc3 = st.columns([2, 1, 1])
             cert = cc1.text_input("Cert number", key="cert_num")
             grader = cc2.selectbox("Grader", ["PSA", "BGS", "SGC", "CGC"], key="cert_grader")
             days = cc3.selectbox("History", [90, 180, 365], index=1, key="cert_days")
             if st.button("🎫 Look up cert", key="cert_go") and cert.strip():
-                with st.spinner("Looking up cert..."):
+                with st.spinner("Looking up cert…"):
                     cres = ch_prices_by_cert(cert.strip(), grader, days)
                 info = (cres or {}).get("cert_info") or {}
                 if info.get("description"):
-                    st.markdown(f"**{info.get('description','')}**")
+                    st.markdown(f"**{info.get('description', '')}**")
                     st.caption(f"{info.get('grader','').upper()} {info.get('grade','')} · cert {info.get('cert','')}")
+
                     pr = (cres or {}).get("prices") or []
                     vals = []
                     for p in pr:
@@ -3065,10 +3169,43 @@ with tab8:
                             vals.append({"date": (p.get("closing_date") or "")[:10], "price": float(p.get("price"))})
                         except Exception:
                             pass
+
                     if vals:
                         dfp = pd.DataFrame(vals).drop_duplicates("date").sort_values("date")
-                        st.metric("Latest sold", f"${dfp['price'].iloc[-1]:,.2f}")
-                        st.line_chart(dfp.set_index("date")["price"], height=220)
+                        _cert_dir, _cert_pct = calculate_trend({"prices": pr})
+
+                        # Buy signal
+                        if _cert_dir == "up" and _cert_pct > 5:
+                            st.success(f"🔥 **HOT** — Up **{_cert_pct:+.0f}%** over {days}d. Rising demand.")
+                        elif _cert_dir == "down" and _cert_pct < -5:
+                            st.error(f"🛑 **COOLING** — Down **{abs(_cert_pct):.0f}%** over {days}d. Softening market.")
+                        elif _cert_dir is not None:
+                            st.info(f"➡️ **STABLE** — Flat ({_cert_pct:+.0f}% over {days}d).")
+                        else:
+                            st.warning("⚠️ Not enough history to call direction.")
+
+                        cl1, cl2, cl3 = st.columns(3)
+                        cl1.metric("Latest sold",  f"${dfp['price'].iloc[-1]:,.2f}")
+                        cl2.metric("90d high",     f"${dfp['price'].max():,.2f}")
+                        cl3.metric("90d low",      f"${dfp['price'].min():,.2f}")
+
+                        # Individual sales table
+                        st.markdown("**📋 Individual sales**")
+                        cert_sale_rows = []
+                        for p in pr[:10]:
+                            try:
+                                cert_sale_rows.append({
+                                    "Date":  (p.get("closing_date") or "")[:10],
+                                    "Price": f"${float(p.get('price')):,.2f}",
+                                })
+                            except Exception:
+                                pass
+                        if cert_sale_rows:
+                            st.dataframe(pd.DataFrame(cert_sale_rows), use_container_width=True, hide_index=True, height=240)
+
+                        st.markdown("**📈 Price trend**")
+                        st.line_chart(dfp.set_index("date")["price"], height=240)
+                        st.caption(f"Each point = one sold transaction (CardHedger). Showing last {days} days.")
                     else:
                         st.info("Cert matched, but no recent sold-price history for this exact card.")
                 else:
