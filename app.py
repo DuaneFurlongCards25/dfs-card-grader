@@ -3087,7 +3087,7 @@ with tab8:
                     # ── Identity row ─────────────────────────────────────────
                     id_img, id_info = st.columns([1, 2])
                     with id_img:
-                        card_img_url = ch_card_image(scan_card_id) if scan_card_id else ""
+                        card_img_url = safe_image_url(ch_card_image(scan_card_id) if scan_card_id else "")
                         st.image(card_img_url if card_img_url else _up_bytes, use_container_width=True)
                     with id_info:
                         st.markdown(f"### {_top_desc}")
