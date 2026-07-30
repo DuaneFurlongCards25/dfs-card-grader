@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.5"
+APP_VERSION = "1.5.6"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -3090,15 +3090,19 @@ with tab8:
                         )
                         if _mq:
                             with st.spinner("Searching…"):
-                                _mm = ch_card_match(_mq)
-                            if _mm:
+                                _sr = ch_search(_mq)
+                                _mm = ch_card_match(_mq) if not _sr else None
+                            _found = _sr[0] if _sr else _mm
+                            if _found:
                                 cands = [{
-                                    "card_id":     _mm.get("id") or _mm.get("card_id") or "",
-                                    "description": _mm.get("name") or _mm.get("description") or _mm.get("title") or "Unknown",
+                                    "card_id":     _found.get("card_id") or _found.get("id") or "",
+                                    "description": _found.get("description") or _found.get("name") or _found.get("title") or "Unknown",
                                     "similarity":  "text match",
-                                    "set":         _mm.get("set") or _mm.get("set_name") or "",
-                                    "variant":     _mm.get("variant") or "",
+                                    "set":         _found.get("set") or _found.get("set_name") or "",
+                                    "variant":     _found.get("variant") or "",
                                 }]
+                                if len(_sr) > 1:
+                                    st.caption(f"Showing top result from {len(_sr)} matches. Search more specifically if this isn't right.")
                             else:
                                 st.error("No card found — try a shorter or different search term.")
                     if not cands:
