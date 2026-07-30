@@ -4270,6 +4270,7 @@ with tab9:
             if not filtered:
                 st.info("No cards match the current filters.")
             else:
+                csn_card_ids = [i["id"] for i in filtered]
                 card_rows = []
                 for i in filtered:
                     card_rows.append({
@@ -4281,8 +4282,9 @@ with tab9:
                         "Gross ($)":  float(i.get("dc_sale_price") or 0),
                         "Fees ($)":   float(i.get("dc_fees") or 0),
                         "Net ($)":    float(i.get("dc_net") or 0),
+                        "🗑️":         False,
                     })
-                st.dataframe(
+                edited_cards = st.data_editor(
                     pd.DataFrame(card_rows),
                     use_container_width=True,
                     hide_index=True,
@@ -4290,8 +4292,41 @@ with tab9:
                         "Gross ($)": st.column_config.NumberColumn(format="$%.2f"),
                         "Fees ($)":  st.column_config.NumberColumn(format="$%.2f"),
                         "Net ($)":   st.column_config.NumberColumn(format="$%.2f"),
+                        "🗑️":        st.column_config.CheckboxColumn("🗑️", help="Check row(s) to delete, then click Delete below"),
                     },
+                    disabled=["Title", "Status", "Package", "Listed", "Ended", "Gross ($)", "Fees ($)", "Net ($)"],
+                    key="csn_cards_editor",
                 )
+
+                # Collect checked rows
+                checked_mask  = edited_cards["🗑️"].tolist()
+                del_ids       = [csn_card_ids[i] for i, v in enumerate(checked_mask) if v]
+                del_titles    = edited_cards[edited_cards["🗑️"]]["Title"].tolist()
+
+                if del_ids:
+                    st.warning(
+                        f"**{len(del_ids)} card(s) marked for deletion:**\n"
+                        + "\n".join(f"- {t}" for t in del_titles)
+                    )
+                    _del_confirm_key = "csn_del_confirm_ids"
+                    if st.session_state.get(_del_confirm_key) == del_ids:
+                        c1, c2 = st.columns(2)
+                        if c1.button("✅ Yes, permanently delete", type="primary", key="csn_del_yes"):
+                            n_ok = 0
+                            for rid in del_ids:
+                                if _csn_delete_row("consignment_items", f"id=eq.{rid}"):
+                                    n_ok += 1
+                            st.session_state.pop(_del_confirm_key, None)
+                            st.session_state.pop("csn_data_v2", None)
+                            st.success(f"Deleted {n_ok} of {len(del_ids)} card(s).")
+                            st.rerun()
+                        if c2.button("✗ Cancel", key="csn_del_cancel"):
+                            st.session_state.pop(_del_confirm_key, None)
+                            st.rerun()
+                    else:
+                        if st.button("🗑️ Delete Selected", type="primary", key="csn_del_btn"):
+                            st.session_state[_del_confirm_key] = del_ids
+                            st.rerun()
 
         # ── IMPORT ────────────────────────────────────────────────────────────
         with csn_t3:
