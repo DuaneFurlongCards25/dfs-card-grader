@@ -1052,10 +1052,17 @@ def _ch_post(endpoint: str, payload: dict):
         headers={"X-API-Key": CARDHEDGER_KEY, "Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=15) as r:
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=30) as r:
             return json.loads(r.read().decode())
-    except Exception:
-        return None
+    except urllib.error.HTTPError as e:
+        _body = ""
+        try:
+            _body = e.read().decode("utf-8", errors="replace")[:500]
+        except Exception:
+            pass
+        return {"_ch_error": f"HTTP {e.code} {e.reason}", "_ch_body": _body}
+    except Exception as _ex:
+        return {"_ch_error": str(_ex)}
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def ch_search(query: str):
@@ -1193,7 +1200,19 @@ def ch_sales_stats(player, interval="week", periods=8):
 @st.cache_data(ttl=900, show_spinner=False)
 def ch_image_match(image_b64):
     """Identify a raw card from a photo (base64). Returns dict with candidates[]."""
-    return _ch_post("/v1/cards/image-match", {"image_base64": image_b64}) or {}
+    # Try both field names the CardHedger API has used across versions
+    for _field in ("image_base64", "image"):
+        _r = _ch_post("/v1/cards/image-match", {_field: image_b64})
+        if _r and not _r.get("_ch_error"):
+            # Check if this response has actual match data (not just an empty success)
+            for _ck in ("candidates", "matches", "cards", "results", "data", "items"):
+                if isinstance((_r or {}).get(_ck), list) and _r[_ck]:
+                    return _r
+            # Non-error response but no list found — return it anyway for inspection
+            if _r:
+                return _r
+    # Return last error so caller can show it
+    return _r or {}
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def ch_prices_by_cert(cert, grader="PSA", days=180):
@@ -3013,6 +3032,21 @@ with tab8:
             up = st.file_uploader("Card photo", type=["jpg", "jpeg", "png", "webp"], key="scan_up")
             if up is not None:
                 b64 = base64.b64encode(up.getvalue()).decode()
+                # Resize large images before sending — CardHedger may reject payloads > ~1MB
+                import io as _io
+                try:
+                    from PIL import Image as _PIL
+                    _img = _PIL.open(_io.BytesIO(up.getvalue()))
+                    _img.thumbnail((800, 800), _PIL.LANCZOS)
+                    _buf = _io.BytesIO()
+                    _img.save(_buf, format="JPEG", quality=85)
+                    b64 = base64.b64encode(_buf.getvalue()).decode()
+                except Exception:
+                    b64 = base64.b64encode(up.getvalue()).decode()
+
+                # Clear any stale cached result so a fresh call goes through
+                ch_image_match.clear()
+
                 with st.spinner("Identifying card…"):
                     res = ch_image_match(b64)
 
@@ -3029,7 +3063,14 @@ with tab8:
 
                 if not cands:
                     st.image(up, width=220)
-                    st.warning("No match found. Try a straighter, well-lit photo of the card front only.")
+                    _ch_err = (res or {}).get("_ch_error", "")
+                    _ch_body = (res or {}).get("_ch_body", "")
+                    if _ch_err:
+                        st.error(f"CardHedger API error: **{_ch_err}**")
+                        if _ch_body:
+                            st.code(_ch_body, language="json")
+                    else:
+                        st.warning("No match found — CardHedger returned no candidates for this image.")
                     with st.expander("🔍 Debug — raw API response"):
                         st.json(res if res else {"error": "API returned nothing"})
                 else:
