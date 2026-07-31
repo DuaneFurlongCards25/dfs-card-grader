@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.9"
+APP_VERSION = "1.5.10"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -5595,7 +5595,7 @@ with tab10:
                 st.caption(
                     "Accepts **two formats** — auto-detected on upload:\n\n"
                     "• **Seller Hub Transactions Report** — Seller Hub → Reports → Downloads → Transactions report. "
-                    "Fees are estimated at 12.9% + $0.30.\n\n"
+                    "Fees are estimated at 12.35% + $0.40 (sales over $10) or $0.30 (under $10).\n\n"
                     "• **eBay Financial Ledger** — Payments → Transactions → Download (TransactionType / GrossAmount / Fees / NetAmount columns). "
                     "Uses your actual eBay fees — more accurate."
                 )
@@ -5673,7 +5673,8 @@ with tab10:
                                     except (ValueError, TypeError):
                                         qty3 = 1
                                     gross3 = round(sold_for3 + shipping3, 2)
-                                    fee3   = round(gross3 * 0.129 + 0.30, 2)
+                                    _per_item_fee3 = 0.40 if gross3 > 10 else 0.30
+                                    fee3   = round(gross3 * 0.1235 + _per_item_fee3, 2)
                                     net3   = round(gross3 - fee3, 2)
                                     dedup3 = f"ebay|{item_num3}|{sale_date3}|{round(sold_for3, 2)}"
                                     sku3   = str(row3.get("Custom label", "") or row3.get("Custom label (SKU)", "") or "").strip()
@@ -5713,7 +5714,7 @@ with tab10:
                                 msg3 += f", **{failed3}** failed"
                             st.success(msg3 + ".")
                             if not is_ledger:
-                                st.caption("Note: eBay fees estimated at 12.9% + $0.30. For exact fees, use the eBay Financial Ledger format.")
+                                st.caption("Note: eBay fees estimated at 12.35% + $0.40 (>$10 sales) or $0.30 (≤$10). For exact fees, use the eBay Financial Ledger format.")
                             if imported3:
                                 st.session_state.pop("sal_data", None)
                                 st.rerun()
