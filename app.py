@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.11"
+APP_VERSION = "1.5.12"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,16 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.12": {
+        "emoji": "📅",
+        "title": "Sunday Reprice tab — bulk CardHedger FMV for 7–30 day listings",
+        "items": [
+            ("📅", "New 📅 Sunday Reprice tab in Operations — upload eBay active listings CSV, filter to any age range (default 7–30 days), run CardHedger FMV on every card with a progress bar."),
+            ("💾", "Results cached in session — re-running the page after pricing burns zero extra API calls."),
+            ("📤", "Downloads eBay Seller Hub bulk-edit CSV (Item number + Start price) and a full reference sheet with comp, trend, and ∆ vs current price."),
+            ("⚾", "Cards auto-prioritized: Baseball rookies → Baseball → Soccer → Other, same order as the main Reprice Queue."),
+        ],
+    },
     "1.5.3": {
         "emoji": "🔍",
         "title": "Show real error message when imports fail",
@@ -4051,7 +4061,7 @@ with tab6:
     else:
         from datetime import timezone as _optz
 
-        op_tab_inv, op_tab_queue = st.tabs(["📦 Inventory & Aging", "🔄 Reprice Queue"])
+        op_tab_inv, op_tab_queue, op_tab_sunday = st.tabs(["📦 Inventory & Aging", "🔄 Reprice Queue", "📅 Sunday Reprice"])
 
         # ── helpers shared across both sub-tabs ───────────────────────────────
         def _days_since(dt_str):
@@ -4299,6 +4309,210 @@ with tab6:
                                 mime="text/csv", key="q_export_ref",
                                 help="Your records — current price, comp, trend, sport. Do NOT upload this to eBay.",
                             )
+
+        # ── SUNDAY REPRICE ────────────────────────────────────────────────────
+        with op_tab_sunday:
+            st.markdown("### 📅 Sunday Reprice")
+            st.caption(
+                "Upload your eBay active listings CSV → filter to cards listed 7–30 days ago → "
+                "run CardHedger FMV on every one → download the eBay revise CSV. "
+                "Results are cached for the session so re-running the page burns zero extra API calls."
+            )
+
+            used_sun = pricing_used_today()
+            if pricing_unlimited():
+                st.caption("⚡ Live pricing: **unlimited** on your account.")
+            else:
+                st.progress(min(1.0, used_sun / DAILY_PRICING_CAP),
+                            text=f"Live look-ups today: {used_sun} / {DAILY_PRICING_CAP}")
+                if pricing_remaining() == 0:
+                    st.warning(f"You've used today's {DAILY_PRICING_CAP} live look-ups.")
+
+            sun_file = st.file_uploader(
+                "eBay active listings CSV", type=["csv"], key="sun_csv",
+                help="eBay Seller Hub → Reports → Active listings → Download CSV",
+            )
+
+            sc1, sc2, sc3 = st.columns(3)
+            sun_min_days = sc1.number_input("Min days listed", 1, 60, 7, 1, key="sun_min_d")
+            sun_max_days = sc2.number_input("Max days listed", 7, 180, 30, 1, key="sun_max_d")
+            sun_floor    = sc3.number_input("Min price ($)", 0, 500, 10, 5, key="sun_floor",
+                                             help="Skip cards listed below this price — not worth the API call")
+
+            if sun_file:
+                sun_df = pd.read_csv(sun_file, encoding="utf-8-sig")
+                col_map_s = {str(c).lower(): c for c in sun_df.columns}
+                def _scol(name):
+                    return col_map_s.get(name.lower(), name)
+
+                today_dt = datetime.utcnow()
+                candidates = []
+                for _, r in sun_df.iterrows():
+                    item_num = str(r.get(_scol("item number"), "") or "").strip()
+                    if not item_num:
+                        continue
+                    title = str(r.get(_scol("title"), "") or "").strip()
+                    try:
+                        price = float(r.get(_scol("current price"), 0) or 0)
+                    except Exception:
+                        price = 0.0
+                    if price < sun_floor:
+                        continue
+                    raw_date = str(r.get(_scol("start date"), "") or "").strip()
+                    for tz_s in [" PDT", " PST", " EDT", " EST"]:
+                        raw_date = raw_date.replace(tz_s, "")
+                    try:
+                        listed_dt = datetime.strptime(raw_date, "%b-%d-%y %H:%M:%S")
+                        days_listed = (today_dt - listed_dt).days
+                    except Exception:
+                        continue
+                    if days_listed < sun_min_days or days_listed > sun_max_days:
+                        continue
+                    candidates.append({
+                        "item_number": item_num,
+                        "title":       title,
+                        "current_price": price,
+                        "days_listed": days_listed,
+                        "sport": detect_sport(title),
+                    })
+
+                # Sort: baseball rookies first, then baseball, then soccer, then other
+                def _sun_priority(c):
+                    s, t = c["sport"], c["title"].upper()
+                    rc = is_rookie_card(t)
+                    if s == "Baseball" and rc: return 0
+                    if s == "Baseball": return 1
+                    if s == "Soccer": return 2
+                    return 3
+                candidates.sort(key=_sun_priority)
+
+                m1, m2, m3 = st.columns(3)
+                m1.metric("In range", f"{len(candidates)}")
+                m2.metric("Est. API calls", f"~{len(candidates) * 2}")
+                m3.metric("Days filter", f"{sun_min_days}–{sun_max_days} days")
+
+                if candidates:
+                    # Cache key: date + file length + filter params so Sunday's run
+                    # persists through reruns but a new file/filter clears it
+                    cache_key = f"sun_results_{date.today().isoformat()}_{len(candidates)}_{sun_min_days}_{sun_max_days}_{sun_floor}"
+
+                    already_run = st.session_state.get("sun_cache_key") == cache_key
+                    sun_results = st.session_state.get("sun_results", []) if already_run else []
+
+                    if already_run and sun_results:
+                        matched   = sum(1 for r in sun_results if r.get("comp"))
+                        no_match  = len(sun_results) - matched
+                        st.success(
+                            f"✅ Cached from this session — {matched} priced, {no_match} no match. "
+                            "Re-run below only to refresh."
+                        )
+                    else:
+                        budget = pricing_remaining()
+                        can_run = pricing_unlimited() or budget >= len(candidates)
+                        if not can_run:
+                            st.warning(f"Only {budget} look-ups left today — {len(candidates)} needed. Run tomorrow or reduce the range.")
+
+                        if st.button(
+                            f"🔄 Run CardHedger on {len(candidates)} listings",
+                            type="primary", key="sun_run",
+                            disabled=(not can_run),
+                        ):
+                            prog = st.progress(0.0, text="Looking up prices…")
+                            results = []
+                            for i, c in enumerate(candidates):
+                                grade = detect_grade(c["title"])
+                                mkt   = fetch_market(c["title"], grade)
+                                sugg  = suggest_reprice(mkt["comp_avg"], mkt["trend_pct"], "Match market", 0)
+                                results.append({
+                                    **c,
+                                    "grade":   grade,
+                                    "comp":    mkt["comp_avg"],
+                                    "trend":   trend_label(mkt["trend_dir"], mkt["trend_pct"] or 0),
+                                    "matched": mkt["matched"],
+                                    "suggested": sugg,
+                                })
+                                prog.progress((i + 1) / len(candidates),
+                                              text=f"Pricing… {i+1}/{len(candidates)}")
+                            pricing_bump(len(candidates))
+                            prog.empty()
+                            st.session_state["sun_results"]   = results
+                            st.session_state["sun_cache_key"] = cache_key
+                            st.rerun()
+
+                    if sun_results:
+                        has_price = [r for r in sun_results if r.get("suggested")]
+                        no_price  = [r for r in sun_results if not r.get("suggested")]
+
+                        tbl = []
+                        for r in sun_results:
+                            tbl.append({
+                                "Title":         r["title"][:60],
+                                "Sport":         r["sport"],
+                                "Days":          r["days_listed"],
+                                "Current ($)":   r["current_price"],
+                                "Comp ($)":      r.get("comp"),
+                                "Suggested ($)": r.get("suggested"),
+                                "Trend":         r.get("trend","—"),
+                                "∆":             (
+                                    f"{(r['suggested']-r['current_price'])/r['current_price']*100:+.0f}%"
+                                    if r.get("suggested") and r["current_price"] else "—"
+                                ),
+                                "Item #":        r["item_number"],
+                            })
+                        st.dataframe(
+                            pd.DataFrame(tbl), use_container_width=True, hide_index=True,
+                            column_config={
+                                "Current ($)":   st.column_config.NumberColumn(format="$%.2f"),
+                                "Comp ($)":      st.column_config.NumberColumn(format="$%.2f"),
+                                "Suggested ($)": st.column_config.NumberColumn(format="$%.2f"),
+                            },
+                        )
+                        if no_price:
+                            st.caption(f"⚠️ {len(no_price)} listings had no CardHedger match — excluded from download.")
+
+                        if has_price:
+                            # eBay Seller Hub bulk-edit upload format
+                            ebay_buf = io.StringIO()
+                            pd.DataFrame([{
+                                "Item number": r["item_number"],
+                                "Start price": round(r["suggested"], 2),
+                            } for r in has_price]).to_csv(ebay_buf, index=False)
+
+                            # Reference sheet
+                            ref_buf2 = io.StringIO()
+                            pd.DataFrame([{
+                                "Item number":   r["item_number"],
+                                "Title":         r["title"],
+                                "Sport":         r["sport"],
+                                "Days Listed":   r["days_listed"],
+                                "Current Price": r["current_price"],
+                                "Comp FMV":      round(r["comp"], 2) if r.get("comp") else "",
+                                "Suggested":     round(r["suggested"], 2),
+                                "Trend":         r.get("trend","—"),
+                                "∆ vs Listed":   (
+                                    f"{(r['suggested']-r['current_price'])/r['current_price']*100:+.1f}%"
+                                    if r["current_price"] else ""
+                                ),
+                            } for r in has_price]).to_csv(ref_buf2, index=False)
+
+                            dl1, dl2 = st.columns(2)
+                            dl1.download_button(
+                                f"📤 Upload to eBay ({len(has_price)} listings)",
+                                data=ebay_buf.getvalue().encode(),
+                                file_name=f"sunday_reprice_{date.today().isoformat()}.csv",
+                                mime="text/csv", key="sun_dl_ebay",
+                                help="eBay Seller Hub → Listings → Bulk Edit → Upload. Only Item number + Start price — nothing else touched.",
+                            )
+                            dl2.download_button(
+                                "📋 Reference sheet",
+                                data=ref_buf2.getvalue().encode(),
+                                file_name=f"sunday_reprice_ref_{date.today().isoformat()}.csv",
+                                mime="text/csv", key="sun_dl_ref",
+                            )
+                else:
+                    st.info(f"No listings found in the {sun_min_days}–{sun_max_days} day range above ${sun_floor}. Try widening the filter.")
+            else:
+                st.info("Upload your eBay active listings CSV above to get started.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 9 — Consignments (DC Sports)
