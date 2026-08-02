@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.10"
+APP_VERSION = "1.5.11"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -4931,6 +4931,7 @@ with tab11:
                 p1, p2, p3 = st.columns(3)
                 pl_prefix  = p1.text_input("Lot Prefix *", placeholder="MATTSFB-072026")
                 pl_source  = p1.text_input("Source", placeholder="Matt's FB Marketplace")
+                pl_aliases = p1.text_input("Alias Prefixes", placeholder="RBLOT_-_07, OTHER-ALT", help="Comma-separated alternate SKU prefixes that also belong to this lot")
                 pl_date    = p2.date_input("Purchase Date", value=date.today())
                 pl_cost    = p2.number_input("Total Cost Paid ($)", min_value=0.0, step=0.01, format="%.2f")
                 pl_count   = p2.number_input("Card Count in Lot", min_value=0, step=1, value=0, help="Total cards you received in this lot — used as a check against imported cards")
@@ -4942,13 +4943,15 @@ with tab11:
                 if not prefix_clean or len(prefix_clean.split("-")) < 2:
                     st.error("Prefix must have at least 2 dash-separated segments (e.g. MATTSFB-072026).")
                 else:
+                    aliases_clean = ",".join([a.strip().upper() for a in pl_aliases.split(",") if a.strip()]) or None
                     res = _pur_post("purchase_lots", {
-                        "lot_prefix":    prefix_clean,
-                        "source":        pl_source.strip() or None,
-                        "purchase_date": str(pl_date),
-                        "total_cost":    float(pl_cost),
-                        "card_count":    int(pl_count),
-                        "notes":         pl_notes.strip() or None,
+                        "lot_prefix":      prefix_clean,
+                        "source":          pl_source.strip() or None,
+                        "purchase_date":   str(pl_date),
+                        "total_cost":      float(pl_cost),
+                        "card_count":      int(pl_count),
+                        "notes":           pl_notes.strip() or None,
+                        "alias_prefixes":  aliases_clean,
                     })
                     if res is not None:
                         st.success(f"Lot **{prefix_clean}** added — ${pl_cost:,.2f} paid.")
@@ -5054,22 +5057,26 @@ with tab11:
                     el = next(l for l in lots_data if l["lot_prefix"] == edit_sel)
                     with st.form("pur_edit_lot"):
                         e1, e2, e3 = st.columns(3)
-                        e_source = e1.text_input("Source", value=el.get("source") or "")
-                        e_date   = e2.date_input("Purchase Date",
-                                       value=date.fromisoformat(el["purchase_date"]) if el.get("purchase_date") else date.today())
-                        e_cost   = e2.number_input("Total Cost Paid ($)", min_value=0.0, step=0.01,
-                                       format="%.2f", value=float(el.get("total_cost") or 0))
-                        e_count  = e2.number_input("Card Count in Lot", min_value=0, step=1,
-                                       value=int(el.get("card_count") or 0))
-                        e_notes  = e3.text_area("Notes", height=80, value=el.get("notes") or "")
-                        edit_sub = st.form_submit_button("💾 Save Changes", type="primary")
+                        e_source   = e1.text_input("Source", value=el.get("source") or "")
+                        e_aliases  = e1.text_input("Alias Prefixes", value=el.get("alias_prefixes") or "",
+                                        help="Comma-separated alternate SKU prefixes that roll up to this lot (e.g. RBLOT_-_07)")
+                        e_date     = e2.date_input("Purchase Date",
+                                        value=date.fromisoformat(el["purchase_date"]) if el.get("purchase_date") else date.today())
+                        e_cost     = e2.number_input("Total Cost Paid ($)", min_value=0.0, step=0.01,
+                                        format="%.2f", value=float(el.get("total_cost") or 0))
+                        e_count    = e2.number_input("Card Count in Lot", min_value=0, step=1,
+                                        value=int(el.get("card_count") or 0))
+                        e_notes    = e3.text_area("Notes", height=80, value=el.get("notes") or "")
+                        edit_sub   = st.form_submit_button("💾 Save Changes", type="primary")
                     if edit_sub:
+                        aliases_edit = ",".join([a.strip().upper() for a in e_aliases.split(",") if a.strip()]) or None
                         res = _pur_patch("purchase_lots", f"id=eq.{el['id']}", {
-                            "source":        e_source.strip() or None,
-                            "purchase_date": str(e_date),
-                            "total_cost":    float(e_cost),
-                            "card_count":    int(e_count),
-                            "notes":         e_notes.strip() or None,
+                            "source":          e_source.strip() or None,
+                            "purchase_date":   str(e_date),
+                            "total_cost":      float(e_cost),
+                            "card_count":      int(e_count),
+                            "notes":           e_notes.strip() or None,
+                            "alias_prefixes":  aliases_edit,
                         })
                         if res is not None:
                             st.success(f"**{edit_sel}** updated.")
@@ -5104,6 +5111,7 @@ with tab11:
 
 -- If the table already exists, add the card_count column:
 alter table purchase_lots add column if not exists card_count integer not null default 0;
+alter table purchase_lots add column if not exists alias_prefixes text;
 
 -- Add SKU column to sales_records so sold cards link back to lots
 alter table sales_records add column if not exists sku text;
@@ -5153,7 +5161,14 @@ create index if not exists idx_sr_sku on sales_records(sku);""", language="sql")
                         card_df_raw["_prefix"] = card_df_raw[sku_col].apply(_pur_prefix)
                         card_df_raw = card_df_raw[card_df_raw["_prefix"] != ""]
 
-                        known_prefixes = {l["lot_prefix"].upper() for l in lots_data}
+                        # Build prefix → lot mapping including alias_prefixes
+                        known_prefixes = {}
+                        for l in lots_data:
+                            known_prefixes[l["lot_prefix"].upper()] = l["lot_prefix"]
+                            for alias in (l.get("alias_prefixes") or "").split(","):
+                                alias = alias.strip().upper()
+                                if alias:
+                                    known_prefixes[alias] = l["lot_prefix"]
                         lot_card_count = {l["lot_prefix"].upper(): int(l.get("card_count") or 0) for l in lots_data}
 
                         matched   = card_df_raw["_prefix"].str.upper().isin(known_prefixes).sum()
@@ -5163,10 +5178,13 @@ create index if not exists idx_sr_sku on sales_records(sku);""", language="sql")
                         c2.metric("✅ Matched to a lot", matched)
                         c3.metric("⚠️ No lot match", unmatched)
 
-                        # Group by prefix
-                        all_groups     = list(card_df_raw.groupby("_prefix", sort=True))
-                        known_groups   = [(pfx, grp) for pfx, grp in all_groups if pfx.upper() in known_prefixes]
-                        unknown_groups = [(pfx, grp) for pfx, grp in all_groups if pfx.upper() not in known_prefixes]
+                        # Group by canonical lot prefix (aliases redirect to their parent lot)
+                        card_df_raw["_canon_prefix"] = card_df_raw["_prefix"].apply(
+                            lambda p: known_prefixes.get(p.upper(), p)
+                        )
+                        all_groups     = list(card_df_raw.groupby("_canon_prefix", sort=True))
+                        known_groups   = [(pfx, grp) for pfx, grp in all_groups if pfx.upper() in {v.upper() for v in known_prefixes.values()}]
+                        unknown_groups = [(pfx, grp) for pfx, grp in all_groups if pfx.upper() not in {v.upper() for v in known_prefixes.values()}]
 
                         if unknown_groups:
                             missing = [pfx for pfx, _ in unknown_groups]
@@ -5212,18 +5230,27 @@ create index if not exists idx_sr_sku on sales_records(sku);""", language="sql")
                 # Load sales records that have a SKU
                 sales_with_sku = _pur_get("sales_records", "?select=sku,net_proceeds,gross_revenue,source,sale_date,title&sku=not.is.null&limit=5000")
 
-                # Group sales by lot prefix
+                # Build alias map: any prefix (main or alias) → canonical lot_prefix upper
+                pl_alias_map = {}
+                for l in lots_data:
+                    pl_alias_map[l["lot_prefix"].upper()] = l["lot_prefix"].upper()
+                    for alias in (l.get("alias_prefixes") or "").split(","):
+                        alias = alias.strip().upper()
+                        if alias:
+                            pl_alias_map[alias] = l["lot_prefix"].upper()
+
+                # Group sales by lot prefix (resolving aliases)
                 prefix_revenue = {}
                 for s in sales_with_sku:
                     prefix = _pur_prefix(s.get("sku", ""))
                     if prefix:
-                        prefix_up = prefix.upper()
-                        if prefix_up not in prefix_revenue:
-                            prefix_revenue[prefix_up] = {"net": 0.0, "gross": 0.0, "count": 0, "sales": []}
-                        prefix_revenue[prefix_up]["net"]   += float(s.get("net_proceeds") or 0)
-                        prefix_revenue[prefix_up]["gross"] += float(s.get("gross_revenue") or 0)
-                        prefix_revenue[prefix_up]["count"] += 1
-                        prefix_revenue[prefix_up]["sales"].append(s)
+                        canon = pl_alias_map.get(prefix.upper(), prefix.upper())
+                        if canon not in prefix_revenue:
+                            prefix_revenue[canon] = {"net": 0.0, "gross": 0.0, "count": 0, "sales": []}
+                        prefix_revenue[canon]["net"]   += float(s.get("net_proceeds") or 0)
+                        prefix_revenue[canon]["gross"] += float(s.get("gross_revenue") or 0)
+                        prefix_revenue[canon]["count"] += 1
+                        prefix_revenue[canon]["sales"].append(s)
 
                 pl_rows = []
                 for lot in lots_data:
