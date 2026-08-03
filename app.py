@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.12"
+APP_VERSION = "1.5.13"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,15 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.13": {
+        "emoji": "🎯",
+        "title": "Sunday Reprice: cleaner title matching + bad-match guard",
+        "items": [
+            ("🎯", "Title cleaner strips eBay noise (HTA CHOICE, trailing 'R' condition, 2025-26 season spans) before sending to CardHedger — improves match rate on ungraded cards."),
+            ("🛡️", "Bad-match guard: if suggested price is <20% or >4× the current price it's flagged ⚠️ and excluded from the eBay upload — no more -94% crash suggestions."),
+            ("📊", "Cached summary now shows: X ready to upload · X no match · X suspect (excluded)."),
+        ],
+    },
     "1.5.12": {
         "emoji": "📅",
         "title": "Sunday Reprice tab — bulk CardHedger FMV for 7–30 day listings",
@@ -2698,6 +2707,37 @@ def load_inventory(uploaded_file):
         return None, str(e)
 
 # ─── Reprice Assistant helpers ────────────────────────────────────────────────
+def clean_title_for_ch(title: str) -> str:
+    """Strip eBay-specific cruft from a listing title before sending to CardHedger.
+
+    eBay titles often include pack types, raw condition markers, and other noise
+    that confuse the AI matcher and drop match rates.
+    """
+    t = (title or "").strip()
+    # Remove trailing raw-condition marker " R" that eBay sellers append
+    t = re.sub(r'\s+R\s*$', '', t)
+    # Remove eBay pack-type descriptors that aren't part of the card identity
+    t = re.sub(r'\b(HTA CHOICE|HTA|CHOICE REFRACTOR|JUMBO PACK|JUMBO|HOBBY|RETAIL)\b', '', t, flags=re.IGNORECASE)
+    # Season-year "2025-26" → "2025" (CardHedger uses release year, not season span)
+    t = re.sub(r'\b(20\d{2})-\d{2}\b', r'\1', t)
+    # Collapse extra whitespace left by removals
+    t = re.sub(r'\s{2,}', ' ', t).strip()
+    return t
+
+
+def sane_price(suggested, current, floor_pct=0.20, ceil_mult=4.0):
+    """Return suggested price only if it passes a sanity check vs the current list price.
+
+    Drops suggestions that are <20% or >4× the current price — almost always a bad match.
+    """
+    if not suggested or not current or current <= 0:
+        return suggested
+    ratio = suggested / current
+    if ratio < floor_pct or ratio > ceil_mult:
+        return None
+    return suggested
+
+
 def detect_grade(desc):
     """Infer the grade to price against from the card description. Defaults to Raw."""
     d = (desc or "").upper()
@@ -4400,12 +4440,16 @@ with tab6:
                     sun_results = st.session_state.get("sun_results", []) if already_run else []
 
                     if already_run and sun_results:
-                        matched   = sum(1 for r in sun_results if r.get("comp"))
-                        no_match  = len(sun_results) - matched
-                        st.success(
-                            f"✅ Cached from this session — {matched} priced, {no_match} no match. "
-                            "Re-run below only to refresh."
-                        )
+                        matched  = sum(1 for r in sun_results if r.get("comp"))
+                        no_match = sum(1 for r in sun_results if not r.get("comp"))
+                        suspect  = sum(1 for r in sun_results if r.get("suspect"))
+                        usable   = sum(1 for r in sun_results if r.get("suggested"))
+                        parts = [f"✅ Cached — {usable} ready to upload"]
+                        if no_match:
+                            parts.append(f"{no_match} no match")
+                        if suspect:
+                            parts.append(f"{suspect} suspect (excluded)")
+                        st.success("  ·  ".join(parts) + "  ·  Re-run below only to refresh.")
                     else:
                         budget = pricing_remaining()
                         can_run = pricing_unlimited() or budget >= len(candidates)
@@ -4420,16 +4464,20 @@ with tab6:
                             prog = st.progress(0.0, text="Looking up prices…")
                             results = []
                             for i, c in enumerate(candidates):
-                                grade = detect_grade(c["title"])
-                                mkt   = fetch_market(c["title"], grade)
-                                sugg  = suggest_reprice(mkt["comp_avg"], mkt["trend_pct"], "Match market", 0)
+                                grade       = detect_grade(c["title"])
+                                clean_title = clean_title_for_ch(c["title"])
+                                mkt         = fetch_market(clean_title, grade)
+                                raw_sugg    = suggest_reprice(mkt["comp_avg"], mkt["trend_pct"], "Match market", 0)
+                                sugg        = sane_price(raw_sugg, c["current_price"])
+                                suspect     = (raw_sugg is not None and sugg is None)
                                 results.append({
                                     **c,
-                                    "grade":   grade,
-                                    "comp":    mkt["comp_avg"],
-                                    "trend":   trend_label(mkt["trend_dir"], mkt["trend_pct"] or 0),
-                                    "matched": mkt["matched"],
+                                    "grade":     grade,
+                                    "comp":      mkt["comp_avg"],
+                                    "trend":     trend_label(mkt["trend_dir"], mkt["trend_pct"] or 0),
+                                    "matched":   mkt["matched"],
                                     "suggested": sugg,
+                                    "suspect":   suspect,
                                 })
                                 prog.progress((i + 1) / len(candidates),
                                               text=f"Pricing… {i+1}/{len(candidates)}")
@@ -4442,11 +4490,20 @@ with tab6:
                     if sun_results:
                         has_price = [r for r in sun_results if r.get("suggested")]
                         no_price  = [r for r in sun_results if not r.get("suggested")]
+                        suspect_rows = [r for r in sun_results if r.get("suspect")]
+
+                        if suspect_rows:
+                            st.warning(
+                                f"⚠️ {len(suspect_rows)} listing(s) had a comp that was <20% or >4× "
+                                "the current price — likely a bad card match, excluded from download. "
+                                "Review and reprice manually."
+                            )
 
                         tbl = []
                         for r in sun_results:
+                            flag = " ⚠️" if r.get("suspect") else ""
                             tbl.append({
-                                "Title":         r["title"][:60],
+                                "Title":         r["title"][:60] + flag,
                                 "Sport":         r["sport"],
                                 "Days":          r["days_listed"],
                                 "Current ($)":   r["current_price"],
