@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.13"
+APP_VERSION = "1.5.14"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,15 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.14": {
+        "emoji": "🌾",
+        "title": "Sunday Reprice: Haystack structured queries + parallel matching",
+        "items": [
+            ("🌾", "Optional Haystack CSV upload in Sunday Reprice — matches on SKU, builds query from Player/Athlete + Season + Manufacturer + Card Number + Parallel/Variety for a much cleaner CardHedger lookup than the truncated eBay title."),
+            ("🔴", "Parallel variants (Red, Blue Wave, Orange, etc.) now included in the query — so CAM SCHLITTLER Red pulls Red comps, not base."),
+            ("📊", "Table shows 🌾 vs eBay source per row so you can see which listings got Haystack data vs fell back to the eBay title."),
+        ],
+    },
     "1.5.13": {
         "emoji": "🎯",
         "title": "Sunday Reprice: cleaner title matching + bad-match guard",
@@ -4368,9 +4377,15 @@ with tab6:
                 if pricing_remaining() == 0:
                     st.warning(f"You've used today's {DAILY_PRICING_CAP} live look-ups.")
 
-            sun_file = st.file_uploader(
+            uf1, uf2 = st.columns(2)
+            sun_file = uf1.file_uploader(
                 "eBay active listings CSV", type=["csv"], key="sun_csv",
                 help="eBay Seller Hub → Reports → Active listings → Download CSV",
+            )
+            hay_file = uf2.file_uploader(
+                "Haystack CSV (optional — improves match rate)",
+                type=["csv"], key="sun_hay",
+                help="Upload your Haystack listing file. Parallel/Variety, Player, Card Number fields give CardHedger a cleaner query than the eBay title alone.",
             )
 
             sc1, sc2, sc3 = st.columns(3)
@@ -4378,6 +4393,46 @@ with tab6:
             sun_max_days = sc2.number_input("Max days listed", 7, 180, 30, 1, key="sun_max_d")
             sun_floor    = sc3.number_input("Min price ($)", 0, 500, 10, 5, key="sun_floor",
                                              help="Skip cards listed below this price — not worth the API call")
+
+            # Build SKU → Haystack query lookup if a Haystack file was uploaded
+            hay_lookup = {}
+            if hay_file:
+                try:
+                    hdf = pd.read_csv(hay_file, encoding="utf-8-sig", skiprows=1)
+                    hcol = {str(c).lower(): c for c in hdf.columns}
+                    def _hcol(n):
+                        for k in hcol:
+                            if n.lower() in k:
+                                return hcol[k]
+                        return None
+                    sku_col      = _hcol("custom label")
+                    player_col   = _hcol("player/athlete")
+                    parallel_col = _hcol("parallel/variety")
+                    season_col   = _hcol("season")
+                    mfr_col      = _hcol("manufacturer")
+                    num_col      = _hcol("card number")
+                    title_col    = _hcol("title")
+                    for _, hr in hdf.iterrows():
+                        sku = str(hr.get(sku_col, "") or "").strip().upper() if sku_col else ""
+                        if not sku:
+                            continue
+                        parts = []
+                        season  = str(hr.get(season_col, "") or "").strip() if season_col else ""
+                        mfr     = str(hr.get(mfr_col, "") or "").strip() if mfr_col else ""
+                        player  = str(hr.get(player_col, "") or "").strip() if player_col else ""
+                        cardnum = str(hr.get(num_col, "") or "").strip() if num_col else ""
+                        para    = str(hr.get(parallel_col, "") or "").strip() if parallel_col else ""
+                        htitle  = str(hr.get(title_col, "") or "").strip() if title_col else ""
+                        if season:  parts.append(season)
+                        if mfr:     parts.append(mfr)
+                        if player:  parts.append(player)
+                        if cardnum: parts.append(f"#{cardnum}")
+                        if para and para.lower() not in ("base", "n/a", ""):
+                            parts.append(para)
+                        hay_lookup[sku] = " ".join(parts) if parts else htitle
+                    st.caption(f"✅ Haystack loaded — {len(hay_lookup):,} SKUs mapped for cleaner queries.")
+                except Exception as e:
+                    st.warning(f"Haystack parse error: {e}")
 
             if sun_file:
                 sun_df = pd.read_csv(sun_file, encoding="utf-8-sig")
@@ -4408,12 +4463,17 @@ with tab6:
                         continue
                     if days_listed < sun_min_days or days_listed > sun_max_days:
                         continue
+                    sku = str(r.get(_scol("custom label (sku)"), "") or "").strip().upper()
+                    ch_query = hay_lookup.get(sku) or clean_title_for_ch(title)
                     candidates.append({
-                        "item_number": item_num,
-                        "title":       title,
+                        "item_number":  item_num,
+                        "title":        title,
+                        "ch_query":     ch_query,
+                        "sku":          sku,
                         "current_price": price,
-                        "days_listed": days_listed,
-                        "sport": detect_sport(title),
+                        "days_listed":  days_listed,
+                        "sport":        detect_sport(title),
+                        "hay_matched":  sku in hay_lookup,
                     })
 
                 # Sort: baseball rookies first, then baseball, then soccer, then other
@@ -4434,7 +4494,7 @@ with tab6:
                 if candidates:
                     # Cache key: date + file length + filter params so Sunday's run
                     # persists through reruns but a new file/filter clears it
-                    cache_key = f"sun_results_{date.today().isoformat()}_{len(candidates)}_{sun_min_days}_{sun_max_days}_{sun_floor}"
+                    cache_key = f"sun_results_{date.today().isoformat()}_{len(candidates)}_{sun_min_days}_{sun_max_days}_{sun_floor}_{len(hay_lookup)}"
 
                     already_run = st.session_state.get("sun_cache_key") == cache_key
                     sun_results = st.session_state.get("sun_results", []) if already_run else []
@@ -4464,20 +4524,20 @@ with tab6:
                             prog = st.progress(0.0, text="Looking up prices…")
                             results = []
                             for i, c in enumerate(candidates):
-                                grade       = detect_grade(c["title"])
-                                clean_title = clean_title_for_ch(c["title"])
-                                mkt         = fetch_market(clean_title, grade)
+                                grade = detect_grade(c["title"])
+                                mkt   = fetch_market(c["ch_query"], grade)
                                 raw_sugg    = suggest_reprice(mkt["comp_avg"], mkt["trend_pct"], "Match market", 0)
                                 sugg        = sane_price(raw_sugg, c["current_price"])
                                 suspect     = (raw_sugg is not None and sugg is None)
                                 results.append({
                                     **c,
-                                    "grade":     grade,
-                                    "comp":      mkt["comp_avg"],
-                                    "trend":     trend_label(mkt["trend_dir"], mkt["trend_pct"] or 0),
-                                    "matched":   mkt["matched"],
-                                    "suggested": sugg,
-                                    "suspect":   suspect,
+                                    "grade":       grade,
+                                    "comp":        mkt["comp_avg"],
+                                    "trend":       trend_label(mkt["trend_dir"], mkt["trend_pct"] or 0),
+                                    "matched":     mkt["matched"],
+                                    "suggested":   sugg,
+                                    "suspect":     suspect,
+                                    "hay_matched": c.get("hay_matched", False),
                                 })
                                 prog.progress((i + 1) / len(candidates),
                                               text=f"Pricing… {i+1}/{len(candidates)}")
@@ -4499,11 +4559,16 @@ with tab6:
                                 "Review and reprice manually."
                             )
 
+                        hay_count = sum(1 for r in sun_results if r.get("hay_matched"))
+                        if hay_count:
+                            st.caption(f"🌾 {hay_count} listings used Haystack structured query · {len(sun_results)-hay_count} used eBay title")
+
                         tbl = []
                         for r in sun_results:
                             flag = " ⚠️" if r.get("suspect") else ""
                             tbl.append({
-                                "Title":         r["title"][:60] + flag,
+                                "Title":         r["title"][:55] + flag,
+                                "Src":           "🌾" if r.get("hay_matched") else "eBay",
                                 "Sport":         r["sport"],
                                 "Days":          r["days_listed"],
                                 "Current ($)":   r["current_price"],
