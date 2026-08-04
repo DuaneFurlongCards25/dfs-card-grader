@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.14"
+APP_VERSION = "1.5.15"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,15 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.15": {
+        "emoji": "🔍",
+        "title": "Scan: Title Search — type a card name, get FMV + trend instantly",
+        "items": [
+            ("🔍", "New 🔍 Title Search tab in Scan — type any card name (year, set, parallel) and get live FMV, price range, 7/30-day sales volume, and trend signal. No image needed."),
+            ("📈", "Trend displayed prominently: 🔥 UP / 🛑 DOWN / ➡️ FLAT with % change over 90 days."),
+            ("📋", "Recent sales table expandable below the metrics."),
+        ],
+    },
     "1.5.14": {
         "emoji": "🌾",
         "title": "Sunday Reprice: Haystack structured queries + parallel matching",
@@ -3084,7 +3093,93 @@ with tab8:
     if not CARDHEDGER_KEY:
         st.info("📊 Connect the CardHedger API to use scanning.")
     else:
-        scan_raw, scan_cert = st.tabs(["🃏 Raw card photo", "🎫 Graded slab (cert #)"])
+        scan_search, scan_raw, scan_cert = st.tabs(["🔍 Title Search", "🃏 Raw card photo", "🎫 Graded slab (cert #)"])
+
+        # ── TITLE SEARCH ──────────────────────────────────────────────────────
+        with scan_search:
+            st.caption("Type any card title — player, year, set, parallel — and get live FMV + trend instantly. No image needed.")
+
+            _sq = st.text_input(
+                "Card title",
+                placeholder="e.g. 2026 Bowman Chrome Cam Schlittler #53 RC Red",
+                key="scan_text_q",
+                label_visibility="collapsed",
+            )
+            _sg = st.radio("Grade", ["Raw", "PSA 10", "PSA 9", "PSA 8"], horizontal=True, key="scan_text_grade")
+
+            if _sq:
+                with st.spinner("Looking up…"):
+                    _tm = ch_card_match(_sq)
+                if not _tm:
+                    st.error("No card found — try adding year, set name, or card number.")
+                else:
+                    _tid  = _tm.get("card_id") or _tm.get("id") or ""
+                    _tdsc = _tm.get("description") or _tm.get("name") or _tm.get("title") or _sq
+                    _tset = _tm.get("set") or _tm.get("set_name") or ""
+                    _tvar = _tm.get("variant") or _tm.get("parallel") or ""
+
+                    st.markdown(f"### {_tdsc}")
+                    if _tset or _tvar:
+                        st.caption(f"{_tset}{' · ' + _tvar if _tvar else ''}")
+
+                    if _tid:
+                        with st.spinner("Loading market data…"):
+                            _tc   = ch_comps(_tid, _sg)
+                            _tfmv = ch_fmv(_tid, _sg)
+                            _th   = ch_price_history(_tid, _sg, 90)
+                            _tmeta = ch_card_meta(_tid)
+
+                        _tavg  = _tc.get("comp_price") or _tc.get("average") or _tc.get("mean")
+                        _tfmvv = fmv_price(_tfmv)
+                        _tshow = _tfmvv or _tavg
+                        _tdir, _tpct = calculate_trend(_th)
+                        _ts7  = _tmeta.get("7 Day Sales")
+                        _ts30 = _tmeta.get("30 Day Sales")
+
+                        # Trend signal — big and clear
+                        if _tdir == "up" and _tpct > 5:
+                            st.success(f"🔥 **UP {_tpct:+.0f}%** over 90 days — rising demand.")
+                        elif _tdir == "down" and _tpct < -5:
+                            st.error(f"🛑 **DOWN {abs(_tpct):.0f}%** over 90 days — market softening.")
+                        elif _tdir is not None:
+                            st.info(f"➡️ **FLAT** ({_tpct:+.0f}% in 90d) — stable market.")
+                        else:
+                            st.warning("⚠️ Not enough sales history to call trend.")
+
+                        # Price metrics
+                        _pc1, _pc2, _pc3, _pc4 = st.columns(4)
+                        _pc1.metric(f"{_sg} FMV", f"${_tshow:,.2f}" if _tshow else "—")
+                        try:
+                            _lo = float(_tfmv.get("price_low") or 0)
+                            _hi = float(_tfmv.get("price_high") or 0)
+                            _pc2.metric("Range", f"${_lo:,.0f}–${_hi:,.0f}" if _lo and _hi else "—")
+                        except Exception:
+                            _pc2.metric("Range", "—")
+                        _pc3.metric("7-day sales",  str(_ts7)  if _ts7  else "—")
+                        _pc4.metric("30-day sales", str(_ts30) if _ts30 else "—")
+
+                        # Recent sales
+                        _tsales = []
+                        for _k in ("raw_prices", "sales", "comps", "data"):
+                            if _k in _tc and isinstance(_tc[_k], list):
+                                _tsales = _tc[_k]; break
+                        if _tsales:
+                            with st.expander("Recent sales"):
+                                _srows = []
+                                for _s in _tsales[:15]:
+                                    try:
+                                        _srows.append({
+                                            "Date":    _s.get("date") or _s.get("sold_date") or "",
+                                            "Price":   f"${float(_s.get('price') or _s.get('sale_price') or 0):,.2f}",
+                                            "Grade":   _s.get("grade") or _sg,
+                                            "Platform":_s.get("platform") or _s.get("source") or "eBay",
+                                        })
+                                    except Exception:
+                                        pass
+                                if _srows:
+                                    st.dataframe(pd.DataFrame(_srows), hide_index=True, use_container_width=True)
+                    else:
+                        st.warning("Card matched but no ID returned — can't pull live pricing.")
 
         with scan_raw:
             st.caption("Upload a photo of the **front of a raw card**. On iPhone, tap the button and choose **Take Photo** to snap one directly.")
