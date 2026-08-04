@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.15"
+APP_VERSION = "1.5.16"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,16 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.16": {
+        "emoji": "📊",
+        "title": "Lot P&L: inventory turn, gross revenue, per-card stats, projected P&L",
+        "items": [
+            ("📊", "P&L by Lot now shows: Gross Revenue, Net Revenue, P&L, Inventory Turn %, $/Card Cost, $/Card Net, Projected Net Revenue, Projected P&L."),
+            ("🔄", "Inventory Turn % = cards sold ÷ total cards in lot — see which lots are moving fast vs. sitting."),
+            ("📈", "Projected P&L extrapolates from your current avg net/card × remaining cards — rough estimate of where the lot ends up."),
+            ("📋", "Header row now shows 5 totals: Total Invested · Gross Revenue · Net Revenue · Overall P&L · Overall Turn %."),
+        ],
+    },
     "1.5.15": {
         "emoji": "🔍",
         "title": "Scan: Title Search — type a card name, get FMV + trend instantly",
@@ -5690,31 +5700,52 @@ create index if not exists idx_sr_sku on sales_records(sku);""", language="sql")
                     expected  = int(lot.get("card_count") or 0)
                     rev       = prefix_revenue.get(pfx, {})
                     net       = rev.get("net", 0.0)
+                    gross     = rev.get("gross", 0.0)
                     sold      = rev.get("count", 0)
-                    remaining = (expected - sold) if expected > 0 else "—"
+                    remaining = max(0, expected - sold) if expected > 0 else None
                     pl        = round(net - cost, 2)
+                    turn_pct  = round(sold / expected * 100, 1) if expected > 0 else None
+                    cost_per  = round(cost / expected, 2) if expected > 0 else None
+                    net_per   = round(net / sold, 2) if sold > 0 else None
+                    # Projected total revenue extrapolating from cards already sold
+                    proj_rev  = round(net_per * expected, 2) if (net_per and expected > 0) else None
+                    proj_pl   = round(proj_rev - cost, 2) if proj_rev is not None else None
+
                     pl_rows.append({
-                        "Lot Prefix":      lot["lot_prefix"],
+                        "Lot":             lot["lot_prefix"],
                         "Source":          lot.get("source") or "—",
-                        "Date":            lot.get("purchase_date") or "—",
-                        "Cost Paid ($)":   cost,
-                        "Expected Cards":  expected if expected > 0 else "—",
-                        "Cards Sold":      sold,
-                        "Remaining":       remaining,
-                        "Net Revenue ($)": round(net, 2),
+                        "Date":            (lot.get("purchase_date") or "—")[:10],
+                        "Cost ($)":        cost,
+                        "Cards":           expected if expected > 0 else "—",
+                        "Sold":            sold,
+                        "Left":            remaining if remaining is not None else "—",
+                        "Turn %":          turn_pct if turn_pct is not None else "—",
+                        "Gross Rev ($)":   round(gross, 2),
+                        "Net Rev ($)":     round(net, 2),
                         "P&L ($)":         pl,
-                        "Status":          "✅ Profit" if pl > 0 else ("🔴 Loss" if pl < 0 else "— Break even"),
+                        "$/Card Cost":     cost_per if cost_per else "—",
+                        "$/Card Net":      net_per if net_per else "—",
+                        "Proj Net Rev ($)":proj_rev if proj_rev else "—",
+                        "Proj P&L ($)":    proj_pl if proj_pl is not None else "—",
+                        "Status":          "✅ Profit" if pl > 0 else ("🔴 Loss" if pl < 0 else "— Even"),
                     })
 
                 pl_df = pd.DataFrame(pl_rows)
-                total_cost = sum(r["Cost Paid ($)"] for r in pl_rows)
-                total_rev  = sum(r["Net Revenue ($)"] for r in pl_rows)
-                total_pl   = round(total_rev - total_cost, 2)
+                total_cost  = sum(r["Cost ($)"] for r in pl_rows)
+                total_gross = sum(r["Gross Rev ($)"] for r in pl_rows)
+                total_net   = sum(r["Net Rev ($)"] for r in pl_rows)
+                total_pl    = round(total_net - total_cost, 2)
+                total_sold  = sum(r["Sold"] for r in pl_rows)
+                total_cards = sum(r["Cards"] if isinstance(r["Cards"], int) else 0 for r in pl_rows)
+                total_turn  = round(total_sold / total_cards * 100, 1) if total_cards > 0 else 0
 
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Total Invested", f"${total_cost:,.2f}")
-                m2.metric("Total Net Revenue", f"${total_rev:,.2f}")
-                m3.metric("Overall P&L", f"${total_pl:+,.2f}")
+                m1, m2, m3, m4, m5 = st.columns(5)
+                m1.metric("Total Invested",  f"${total_cost:,.2f}")
+                m2.metric("Gross Revenue",   f"${total_gross:,.2f}")
+                m3.metric("Net Revenue",     f"${total_net:,.2f}")
+                m4.metric("Overall P&L",     f"${total_pl:+,.2f}")
+                m5.metric("Inventory Turn",  f"{total_turn:.1f}%",
+                          help="% of all cards across all lots that have sold")
 
                 st.divider()
                 st.dataframe(
@@ -5722,9 +5753,15 @@ create index if not exists idx_sr_sku on sales_records(sku);""", language="sql")
                     use_container_width=True,
                     hide_index=True,
                     column_config={
-                        "Cost Paid ($)":    st.column_config.NumberColumn(format="$%.2f"),
-                        "Net Revenue ($)":  st.column_config.NumberColumn(format="$%.2f"),
+                        "Cost ($)":         st.column_config.NumberColumn(format="$%.2f"),
+                        "Gross Rev ($)":    st.column_config.NumberColumn(format="$%.2f"),
+                        "Net Rev ($)":      st.column_config.NumberColumn(format="$%.2f"),
                         "P&L ($)":          st.column_config.NumberColumn(format="$%.2f"),
+                        "$/Card Cost":      st.column_config.NumberColumn(format="$%.2f"),
+                        "$/Card Net":       st.column_config.NumberColumn(format="$%.2f"),
+                        "Proj Net Rev ($)": st.column_config.NumberColumn(format="$%.2f"),
+                        "Proj P&L ($)":     st.column_config.NumberColumn(format="$%.2f"),
+                        "Turn %":           st.column_config.NumberColumn(format="%.1f%%"),
                     },
                 )
 
