@@ -3631,14 +3631,17 @@ with tab8:
                                 c["back_url"]   = back_url
                                 c["back_path"]  = back_path
 
+                                # Send as base64 to avoid URL accessibility issues
+                                _front_b64 = base64.b64encode(ff.getvalue()).decode()
+
                                 # Try image-match first (AI-powered)
-                                match_res  = ch_image_match_raw(front_url, k=5)
+                                match_res  = _ch_post("/v1/cards/image-match", {"image_base64": _front_b64, "k": 5}) or {}
                                 best       = match_res.get("best_match") or {}
                                 candidates = match_res.get("candidates") or []
 
                                 # Fallback: image-search (broader KNN, no AI filter)
                                 if not best.get("card_id") and not candidates:
-                                    search_res = _ch_post("/v1/cards/image-search", {"image_url": front_url, "k": 5}) or {}
+                                    search_res = _ch_post("/v1/cards/image-search", {"image_base64": _front_b64, "k": 5}) or {}
                                     candidates = search_res.get("results") or search_res.get("candidates") or []
                                     match_res  = search_res
 
