@@ -3592,26 +3592,16 @@ with tab8:
 
                 st.success(f"✅ {n_pairs} card pair{'s' if n_pairs != 1 else ''} detected")
 
-                # Paired thumbnail preview (up to 8 pairs)
-                from PIL import Image as _PIL_b
-                preview_n  = min(n_pairs, 8)
-                thumb_cols = st.columns(preview_n) if preview_n > 0 else []
+                # Paired thumbnail preview — front and back as separate images
+                preview_n = min(n_pairs, 6)
                 for ci in range(preview_n):
-                    with thumb_cols[ci]:
-                        try:
-                            img_f = _PIL_b.open(io.BytesIO(front_files[ci].getvalue())).convert("RGB")
-                            img_b = _PIL_b.open(io.BytesIO(back_files[ci].getvalue())).convert("RGB")
-                            w  = 80
-                            tf = img_f.resize((w, int(img_f.height * w / max(img_f.width, 1))), _PIL_b.LANCZOS)
-                            tb = img_b.resize((w, int(img_b.height * w / max(img_b.width, 1))), _PIL_b.LANCZOS)
-                            combo = _PIL_b.new("RGB", (w * 2 + 2, max(tf.height, tb.height)), (200, 200, 200))
-                            combo.paste(tf, (0, 0))
-                            combo.paste(tb, (w + 2, 0))
-                            st.image(combo, caption=f"#{ci+1}", width=300)
-                        except Exception:
-                            st.caption(f"#{ci+1}")
-                if n_pairs > 8:
-                    st.caption(f"+ {n_pairs - 8} more pairs not shown")
+                    col_f, col_b = st.columns(2)
+                    with col_f:
+                        st.image(front_files[ci].getvalue(), caption=f"#{ci+1} Front", use_container_width=True)
+                    with col_b:
+                        st.image(back_files[ci].getvalue(), caption=f"#{ci+1} Back", use_container_width=True)
+                if n_pairs > 6:
+                    st.caption(f"+ {n_pairs - 6} more pairs not shown")
 
                 st.markdown("---")
                 if st.button(f"🔍 Identify & Price All ({n_pairs} cards)", type="primary", key="raw_batch_go", disabled=n_pairs == 0):
