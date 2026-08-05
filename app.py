@@ -1267,6 +1267,116 @@ def ch_prices_by_cert(cert, grader="PSA", days=180):
     return _ch_post("/v1/cards/prices-by-cert",
                     {"cert": str(cert), "grader": grader, "days": int(days)}) or {}
 
+# ── Batch Scanner helpers ────────────────────────────────────────────────────
+
+_RAW_CONDITIONS = {
+    "Near Mint (NM)":    "2750",
+    "Excellent (EX)":    "3000",
+    "Very Good (VG)":    "4000",
+    "Good (G)":          "5000",
+    "Poor":              "6000",
+}
+
+def ch_cert_ocr(image_url: str):
+    """details-by-cert-ocr: send a public image URL, get card identity + grade."""
+    return _ch_post("/v1/cards/details-by-cert-ocr", {"image_url": image_url}) or {}
+
+def ch_image_match_url(image_url: str):
+    """image-match via URL: visual KNN search — best for raw cards with no cert label."""
+    return _ch_post("/v1/cards/image-match", {"image_url": image_url, "k": 3}) or {}
+
+def ch_image_match_raw(image_url: str, k: int = 5):
+    """image-match with k candidates — primary identification for raw cards."""
+    return _ch_post("/v1/cards/image-match", {"image_url": image_url, "k": k}) or {}
+
+def ch_fmv_batch(items: list):
+    """card-fmv-batch: price up to 100 card/grade combos in one call."""
+    return _ch_post("/v1/cards/card-fmv-batch", {"items": items}) or {}
+
+def ch_comps_raw(card_id: str, count: int = 10):
+    """comps for a raw card — returns comp_price, high, low, raw_prices list."""
+    return _ch_post("/v1/cards/comps", {
+        "card_id": card_id,
+        "count": count,
+        "grade": "Raw",
+        "time_weighted": True,
+        "include_raw_prices": True,
+    }) or {}
+
+def _raw_title(player, set_name, number, variant=""):
+    """eBay title for an ungraded raw card (no grade appended)."""
+    player_up = (player or "").upper()
+    year_m = re.search(r"\b(19|20)\d{2}\b", set_name or "")
+    year = year_m.group() if year_m else ""
+    set_clean = re.sub(r"^\d{4}\s*", "", set_name or "").strip()
+    var = variant if variant and variant.lower() not in ("base", "base set", "") else ""
+    parts = [p for p in [player_up, year, set_clean,
+                          f"#{number}" if number else "", var] if p]
+    return " ".join(parts)[:80]
+
+def _scan_upload_to_supabase(image_bytes: bytes, filename: str):
+    """Upload a scan to Supabase company-files/scanner/ and return a 1-year signed URL."""
+    import time as _t
+    path = f"scanner/{int(_t.time())}_{filename}"
+    # Upload
+    up_url = f"{SUPABASE_URL}/storage/v1/object/company-files/{path}"
+    up_req = urllib.request.Request(up_url, data=image_bytes, method="POST")
+    up_req.add_header("Authorization", f"Bearer {SUPABASE_KEY}")
+    up_req.add_header("Content-Type", "image/jpeg")
+    try:
+        with urllib.request.urlopen(up_req, context=ssl_ctx(), timeout=30):
+            pass
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"Upload failed {e.code}: {e.read().decode()[:200]}")
+    # Signed URL (1 year = 31 536 000 s)
+    sign_url = f"{SUPABASE_URL}/storage/v1/object/sign/company-files/{path}"
+    sign_payload = json.dumps({"expiresIn": 31536000}).encode()
+    sign_req = urllib.request.Request(sign_url, data=sign_payload, method="POST")
+    sign_req.add_header("Authorization", f"Bearer {SUPABASE_KEY}")
+    sign_req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(sign_req, context=ssl_ctx(), timeout=15) as r:
+        data = json.loads(r.read().decode())
+    signed = data.get("signedURL") or data.get("signedUrl") or ""
+    if not signed:
+        raise RuntimeError("No signed URL returned from Supabase")
+    # Make absolute if relative
+    if signed.startswith("/"):
+        signed = SUPABASE_URL + signed
+    return signed, path
+
+def _scan_shipping(price: float) -> str:
+    SHIP_FREE   = "Calculated: US_eBayStandardEnvelope free, 2 bu (315021080021)"
+    SHIP_STD    = "Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)"
+    SHIP_GROUND = "$15 to $50 Ground"
+    if abs(price - 2.49) < 0.005:
+        return SHIP_FREE
+    if price < 20:
+        return SHIP_STD
+    return SHIP_GROUND
+
+def _scan_title(player, set_name, number, grade, variant=""):
+    player_up = (player or "").upper()
+    year_m = re.search(r"\b(19|20)\d{2}\b", set_name or "")
+    year = year_m.group() if year_m else ""
+    set_clean = re.sub(r"^\d{4}\s*", "", set_name or "").strip()
+    var = variant if variant and variant.lower() not in ("base", "base set", "") else ""
+    parts = [p for p in [player_up, year, set_clean,
+                          f"#{number}" if number else "", var, grade] if p]
+    return " ".join(parts)[:80]
+
+def _scan_description(title: str) -> str:
+    return (
+        '<div style="font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;">'
+        f'<h2 style="margin:0 0 12px;font-size:22px;text-transform:uppercase;">{title}</h2>'
+        '<ol style="margin:0 0 20px;padding-left:20px;">'
+        '<li style="margin-bottom:10px;">All cards are scanned. If you see any lines, if you want more pictures, just ask!</li>'
+        '<li style="margin-bottom:10px;">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.</li>'
+        '<li style="margin-bottom:10px;">All cards valued over $100 will have insurance added, which protects you as the buyer.</li>'
+        '</ol>'
+        '<p style="margin:0;">My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!</p>'
+        '</div>'
+    )
+
 # ── Cross-platform reconciliation (CollX ↔ eBay) ─────────────────────────────
 def _rec_num(x):
     try:
@@ -3103,7 +3213,7 @@ with tab8:
     if not CARDHEDGER_KEY:
         st.info("📊 Connect the CardHedger API to use scanning.")
     else:
-        scan_search, scan_raw, scan_cert = st.tabs(["🔍 Title Search", "🃏 Raw card photo", "🎫 Graded slab (cert #)"])
+        scan_search, scan_raw, scan_cert, scan_batch = st.tabs(["🔍 Title Search", "🃏 Raw card photo", "🎫 Graded slab (cert #)", "📦 Batch → eBay"])
 
         # ── TITLE SEARCH ──────────────────────────────────────────────────────
         with scan_search:
@@ -3451,6 +3561,315 @@ with tab8:
                         st.info("Cert matched, but no recent sold-price history for this exact card.")
                 else:
                     st.warning("No card found for that cert / grader. Double-check the number and grader.")
+
+        # ── BATCH → EBAY ──────────────────────────────────────────────────────
+        with scan_batch:
+            st.caption("Upload front and back scans — CardHedger visually identifies each card, pulls recent sold comps for pricing, and builds a ready-to-upload eBay CSV with both images.")
+
+            if "raw_batch" not in st.session_state:
+                st.session_state.raw_batch = []
+            if "raw_batch_comps" not in st.session_state:
+                st.session_state.raw_batch_comps = {}
+
+            # ── Step 1: Upload ─────────────────────────────────────────────
+            st.markdown("**Step 1 — Upload Scans**")
+            st.caption("Scan all fronts first, then all backs. Select them in the same card order in each box.")
+            up_c1, up_c2 = st.columns(2)
+            front_files = up_c1.file_uploader(
+                "📷 Front scans (in card order)",
+                type=["jpg", "jpeg", "png", "tif", "tiff"],
+                accept_multiple_files=True,
+                key="raw_fronts",
+            )
+            back_files = up_c2.file_uploader(
+                "📷 Back scans (same order as fronts)",
+                type=["jpg", "jpeg", "png", "tif", "tiff"],
+                accept_multiple_files=True,
+                key="raw_backs",
+            )
+
+            n_front = len(front_files) if front_files else 0
+            n_back  = len(back_files)  if back_files  else 0
+
+            if n_front > 0 or n_back > 0:
+                if n_front != n_back:
+                    st.warning(f"⚠️ {n_front} front scan(s) but {n_back} back scan(s) — counts must match before identifying.")
+                else:
+                    st.success(f"✅ {n_front} card pairs ready")
+
+                    # Paired thumbnail preview (up to 8 pairs)
+                    from PIL import Image as _PIL_b
+                    preview_n = min(n_front, 8)
+                    thumb_cols = st.columns(preview_n)
+                    for ci in range(preview_n):
+                        with thumb_cols[ci]:
+                            try:
+                                img_f = _PIL_b.open(io.BytesIO(front_files[ci].getvalue())).convert("RGB")
+                                img_b = _PIL_b.open(io.BytesIO(back_files[ci].getvalue())).convert("RGB")
+                                w = 80
+                                rf = w / max(img_f.width, 1)
+                                rb = w / max(img_b.width, 1)
+                                tf = img_f.resize((w, int(img_f.height * rf)), _PIL_b.LANCZOS)
+                                tb = img_b.resize((w, int(img_b.height * rb)), _PIL_b.LANCZOS)
+                                combo = _PIL_b.new("RGB", (w * 2 + 2, max(tf.height, tb.height)), (200, 200, 200))
+                                combo.paste(tf, (0, 0))
+                                combo.paste(tb, (w + 2, 0))
+                                st.image(combo, caption=f"#{ci+1}", use_container_width=True)
+                            except Exception:
+                                st.caption(f"#{ci+1}")
+                    if n_front > 8:
+                        st.caption(f"+ {n_front - 8} more pairs not shown")
+
+                    st.markdown("---")
+                    if st.button(f"🔍 Identify & Price All ({n_front} cards)", type="primary", key="raw_batch_go"):
+                        st.session_state.raw_batch = []
+                        st.session_state.raw_batch_comps = {}
+                        prog    = st.progress(0.0)
+                        status  = st.empty()
+                        cards   = []
+
+                        # Phase 1: upload + image-match (one card at a time)
+                        for i, (ff, bf) in enumerate(zip(front_files, back_files)):
+                            status.text(f"Identifying card {i+1}/{n_front}: {ff.name}…")
+                            c = {
+                                "idx":          i,
+                                "front_file":   ff.name,
+                                "back_file":    bf.name,
+                                "status":       "error",
+                                "error":        "",
+                                "include":      True,
+                                "condition_id": "2750",
+                            }
+                            try:
+                                front_url, front_path = _scan_upload_to_supabase(ff.getvalue(), f"f_{i}_{ff.name}")
+                                back_url,  back_path  = _scan_upload_to_supabase(bf.getvalue(), f"b_{i}_{bf.name}")
+                                c["front_url"]  = front_url
+                                c["front_path"] = front_path
+                                c["back_url"]   = back_url
+                                c["back_path"]  = back_path
+
+                                match_res  = ch_image_match_raw(front_url, k=5)
+                                best       = match_res.get("best_match") or {}
+                                candidates = match_res.get("candidates") or []
+
+                                if best and best.get("card_id"):
+                                    c.update({
+                                        "card_id":    best.get("card_id", ""),
+                                        "player":     best.get("player", ""),
+                                        "set_name":   best.get("set", ""),
+                                        "number":     best.get("number", ""),
+                                        "variant":    best.get("variant", ""),
+                                        "similarity": float(best.get("similarity") or 0),
+                                        "candidates": candidates,
+                                        "status":     "identified",
+                                        "low_conf":   float(best.get("similarity") or 0) < 80,
+                                    })
+                                elif candidates:
+                                    top = candidates[0]
+                                    c.update({
+                                        "card_id":    top.get("card_id", ""),
+                                        "player":     top.get("player", ""),
+                                        "set_name":   top.get("set", ""),
+                                        "number":     top.get("number", ""),
+                                        "variant":    top.get("variant", ""),
+                                        "similarity": float(top.get("similarity") or 0),
+                                        "candidates": candidates,
+                                        "status":     "identified",
+                                        "low_conf":   True,
+                                    })
+                                else:
+                                    c["error"] = "No visual match — try a higher-resolution scan"
+
+                                if c.get("status") == "identified":
+                                    c["title"] = _raw_title(
+                                        c["player"], c["set_name"], c["number"], c.get("variant", "")
+                                    )
+                            except Exception as exc:
+                                c["error"] = str(exc)
+
+                            cards.append(c)
+                            prog.progress((i + 1) / n_front * 0.7)
+
+                        # Phase 2: batch FMV for all identified cards (1 API call)
+                        identified_cards = [c for c in cards if c.get("card_id")]
+                        if identified_cards:
+                            status.text(f"Fetching FMV for {len(identified_cards)} cards (batch)…")
+                            fmv_items = [{"card_id": c["card_id"], "grade": "Raw"} for c in identified_cards]
+                            fmv_res   = ch_fmv_batch(fmv_items)
+                            fmv_by_id = {}
+                            for r in (fmv_res.get("results") or []):
+                                cid = r.get("card_id")
+                                if cid:
+                                    fmv_by_id[cid] = r
+                            for c in identified_cards:
+                                fmv = fmv_by_id.get(c["card_id"], {})
+                                raw_p = fmv.get("price")
+                                c["fmv"]      = round(float(raw_p), 2) if raw_p else None
+                                c["fmv_low"]  = fmv.get("price_low")
+                                c["fmv_high"] = fmv.get("price_high")
+                                c["fmv_conf"] = fmv.get("confidence_grade", "")
+                                c["price"]    = c["fmv"] if c["fmv"] else 2.49
+
+                        prog.progress(1.0)
+                        n_ok  = sum(1 for c in cards if c["status"] == "identified")
+                        n_err = len(cards) - n_ok
+                        status.text(f"Done — {n_ok} identified, {n_err} failed.")
+                        st.session_state.raw_batch = cards
+                        st.rerun()
+
+            # ── Step 2: Review & Price ─────────────────────────────────────
+            raw_batch = st.session_state.raw_batch
+            if raw_batch:
+                identified = [c for c in raw_batch if c.get("status") == "identified"]
+                failed     = [c for c in raw_batch if c.get("status") != "identified"]
+
+                if failed:
+                    with st.expander(f"⚠️ {len(failed)} card(s) could not be identified"):
+                        for c in failed:
+                            st.error(f"Card {c['idx']+1} ({c['front_file']}): {c.get('error', 'Unknown error')}")
+
+                if identified:
+                    n_low = sum(1 for c in identified if c.get("low_conf"))
+                    if n_low:
+                        st.warning(f"⚠️ {n_low} card(s) have low match confidence — review those rows carefully before exporting.")
+                    else:
+                        st.success(f"✅ {len(identified)} cards identified")
+
+                    st.markdown("**Step 2 — Review & Price**")
+
+                    # Build editable table
+                    edit_rows = []
+                    for c in identified:
+                        sim = c.get("similarity", 0)
+                        fmv_display = f"${c['fmv']:.2f}" if c.get("fmv") else "—"
+                        cond_label  = next((k for k, v in _RAW_CONDITIONS.items() if v == c.get("condition_id", "2750")), "Near Mint (NM)")
+                        edit_rows.append({
+                            "✓":          c.get("include", True),
+                            "#":          c["idx"] + 1,
+                            "Player":     c.get("player", ""),
+                            "eBay Title": c.get("title", ""),
+                            "Conf %":     f"{sim:.0f}" if sim else "?",
+                            "FMV":        fmv_display,
+                            "FMV Conf":   c.get("fmv_conf", ""),
+                            "Price ($)":  float(c.get("price") or 2.49),
+                            "Condition":  cond_label,
+                        })
+
+                    edited = st.data_editor(
+                        pd.DataFrame(edit_rows),
+                        use_container_width=True,
+                        hide_index=True,
+                        key="raw_batch_editor",
+                        column_config={
+                            "✓":          st.column_config.CheckboxColumn("Include", width="small"),
+                            "#":          st.column_config.NumberColumn("#", width="small", disabled=True),
+                            "Player":     st.column_config.TextColumn("Player", width="medium", disabled=True),
+                            "eBay Title": st.column_config.TextColumn("eBay Title (editable)", max_chars=80, width="large"),
+                            "Conf %":     st.column_config.TextColumn("Conf%", width="small", disabled=True,
+                                              help="Visual match confidence from CardHedger — below 80% means double-check"),
+                            "FMV":        st.column_config.TextColumn("FMV", width="small", disabled=True),
+                            "FMV Conf":   st.column_config.TextColumn("FMV Grade", width="small", disabled=True,
+                                              help="A=high data confidence, B=medium, C=low"),
+                            "Price ($)":  st.column_config.NumberColumn("Your Price", min_value=0.01, format="$%.2f"),
+                            "Condition":  st.column_config.SelectboxColumn(
+                                              "Condition", options=list(_RAW_CONDITIONS.keys()), width="medium"),
+                        },
+                    )
+
+                    # ── Comps viewer ──────────────────────────────────────────
+                    st.markdown("---")
+                    st.markdown("**Comparable Sales**")
+                    comp_options = {
+                        f"Card {c['idx']+1} — {c.get('player','')} {c.get('set_name','')}": c
+                        for c in identified if c.get("card_id")
+                    }
+                    if comp_options:
+                        sel_label = st.selectbox("View comps for:", list(comp_options.keys()), key="raw_comp_select")
+                        sel_card  = comp_options[sel_label]
+                        cid       = sel_card["card_id"]
+                        if cid not in st.session_state.raw_batch_comps:
+                            with st.spinner("Loading comparable sales…"):
+                                st.session_state.raw_batch_comps[cid] = ch_comps_raw(cid)
+                        comp = st.session_state.raw_batch_comps.get(cid, {})
+                        sales = comp.get("raw_prices") or []
+                        if sales:
+                            mc1, mc2, mc3, mc4 = st.columns(4)
+                            mc1.metric("Comp Price", f"${comp.get('comp_price', 0):.2f}")
+                            mc2.metric("High",       f"${comp.get('high', 0):.2f}")
+                            mc3.metric("Low",        f"${comp.get('low', 0):.2f}")
+                            mc4.metric("Sales used", comp.get("count_used", "—"))
+                            comp_df = pd.DataFrame([{
+                                "Date":   (s.get("sale_date") or "")[:10],
+                                "Price":  f"${s.get('price', 0):.2f}",
+                                "Source": s.get("price_source", ""),
+                            } for s in sales[:10]])
+                            st.dataframe(comp_df, use_container_width=True, hide_index=True)
+                        else:
+                            fmv_val = sel_card.get("fmv")
+                            if fmv_val:
+                                st.info(f"No raw comps found in CardHedger — FMV estimate: ${fmv_val:.2f} ({sel_card.get('fmv_conf','')})")
+                            else:
+                                st.info("No comparable raw sales found for this card.")
+
+                    # ── Export ────────────────────────────────────────────────
+                    st.markdown("---")
+                    st.markdown("**Step 3 — Export to eBay**")
+                    edited_records = edited.to_dict("records")
+                    n_included = sum(1 for r in edited_records if r.get("✓"))
+
+                    ex_c1, ex_c2 = st.columns([2, 1])
+                    if ex_c1.button(f"⬇️ Export eBay CSV ({n_included} cards)", type="primary", key="raw_export_btn"):
+                        ACTION_COL = "*Action(SiteID=US|Country=US|Currency=USD|Version=1193)"
+                        cols = [ACTION_COL, "*Title", "*Category", "*ConditionID",
+                                "Custom label (SKU)", "*StartPrice", "ShippingProfileName",
+                                "PostalCode", "PicURL", "Description", "ReturnsAcceptedOption"]
+                        buf = io.StringIO()
+                        writer = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+                        writer.writeheader()
+                        import datetime as _dt_exp
+                        date_str   = _dt_exp.date.today().strftime("%m%d%y")
+                        export_idx = 1
+                        for row, orig in zip(edited_records, identified):
+                            if not row.get("✓"):
+                                continue
+                            title    = (row.get("eBay Title") or orig.get("title", ""))[:80]
+                            price    = float(row.get("Price ($)") or 2.49)
+                            cond_id  = _RAW_CONDITIONS.get(row.get("Condition", "Near Mint (NM)"), "2750")
+                            sku      = f"DFS-{date_str}-{export_idx:04d}"
+                            front_u  = orig.get("front_url", "")
+                            back_u   = orig.get("back_url", "")
+                            pic_url  = f"{front_u}|{back_u}" if back_u else front_u
+                            writer.writerow({
+                                ACTION_COL:              "Add",
+                                "*Title":                title,
+                                "*Category":             "261328",
+                                "*ConditionID":          cond_id,
+                                "Custom label (SKU)":    sku,
+                                "*StartPrice":           f"{price:.2f}",
+                                "ShippingProfileName":   _scan_shipping(price),
+                                "PostalCode":            "85250-6312",
+                                "PicURL":                pic_url,
+                                "Description":           _scan_description(title),
+                                "ReturnsAcceptedOption": "ReturnsNotAccepted",
+                            })
+                            export_idx += 1
+                        csv_bytes = buf.getvalue().encode("utf-8")
+                        filename  = f"DFS_RawListings_{date_str}.csv"
+                        st.download_button(
+                            label=f"📥 Download {filename}",
+                            data=csv_bytes,
+                            file_name=filename,
+                            mime="text/csv",
+                            key="raw_dl_btn",
+                        )
+
+                    if ex_c2.button("🗑️ Clear Batch", key="raw_clear_btn"):
+                        st.session_state.raw_batch = []
+                        st.session_state.raw_batch_comps = {}
+                        st.rerun()
+
+            elif not front_files and not back_files and not st.session_state.raw_batch:
+                st.info("💡 **How it works:** Scan all card fronts → upload in left box. Scan all card backs → upload in right box (same order). Click Identify — CardHedger visually matches each card, shows recent sold comps, and exports an eBay Add CSV with front + back images on every listing.")
 
 with tab2:
     st.markdown("## 📦 Inventory Check")
