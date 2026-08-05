@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.22"
+APP_VERSION = "1.5.23"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,14 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.23": {
+        "emoji": "✅",
+        "title": "Lots: sold cards detail table inside each lot",
+        "items": [
+            ("✅", "Each lot expander now shows a Sold Cards table — SKU, title, date, gross, net for every card sold from that lot."),
+            ("📋", "Active listings section labeled separately so sold vs still-listed is easy to compare."),
+        ],
+    },
     "1.5.22": {
         "emoji": "🔑",
         "title": "Login: block browser autofill, keep access code",
@@ -5939,8 +5947,8 @@ with tab11:
 
                 lc_state = st.session_state.get("pur_lot_cards")
 
-                # Load live sales data for all lots
-                _lot_sales_raw = _pur_get("sales_records", "?select=sku,net_proceeds,gross_revenue&sku=not.is.null&limit=5000")
+                # Load live sales data for all lots (full detail for sold cards table)
+                _lot_sales_raw = _pur_get("sales_records", "?select=sku,title,sale_date,gross_revenue,net_proceeds,source&sku=not.is.null&order=sale_date.desc&limit=5000")
                 _lot_alias_map = {}
                 for _l in lots_data:
                     _lot_alias_map[_l["lot_prefix"].upper()] = _l["lot_prefix"].upper()
@@ -5949,15 +5957,18 @@ with tab11:
                         if _a:
                             _lot_alias_map[_a] = _l["lot_prefix"].upper()
                 _lot_rev = {}
+                _lot_sales_by_pfx = {}
                 for _s in _lot_sales_raw:
                     _p = _pur_prefix(_s.get("sku", ""))
                     if _p:
                         _canon = _lot_alias_map.get(_p.upper(), _p.upper())
                         if _canon not in _lot_rev:
                             _lot_rev[_canon] = {"net": 0.0, "gross": 0.0, "count": 0}
+                            _lot_sales_by_pfx[_canon] = []
                         _lot_rev[_canon]["net"]   += float(_s.get("net_proceeds") or 0)
                         _lot_rev[_canon]["gross"] += float(_s.get("gross_revenue") or 0)
                         _lot_rev[_canon]["count"] += 1
+                        _lot_sales_by_pfx[_canon].append(_s)
 
                 st.divider()
                 st.markdown("**Your Lots**")
@@ -6009,8 +6020,28 @@ with tab11:
                             st.caption(f"Cards in active listings CSV: {card_count_csv}")
                         if lot.get("notes"):
                             st.caption(lot["notes"])
+
+                        # Sold cards table
+                        sold_records = _lot_sales_by_pfx.get(pfx.upper(), [])
+                        if sold_records:
+                            st.divider()
+                            st.markdown(f"**✅ Sold Cards ({len(sold_records)})**")
+                            sold_df = pd.DataFrame([{
+                                "SKU":        s.get("sku", ""),
+                                "Title":      s.get("title", "") or "—",
+                                "Date":       (s.get("sale_date") or "")[:10] or "—",
+                                "Gross ($)":  float(s.get("gross_revenue") or 0),
+                                "Net ($)":    float(s.get("net_proceeds") or 0),
+                            } for s in sold_records])
+                            st.dataframe(sold_df, use_container_width=True, hide_index=True,
+                                column_config={
+                                    "Gross ($)": st.column_config.NumberColumn(format="$%.2f"),
+                                    "Net ($)":   st.column_config.NumberColumn(format="$%.2f"),
+                                })
+
                         if lc_state and lot_cards_df is not None and not lot_cards_df.empty:
                             st.divider()
+                            st.markdown(f"**📋 Active Listings ({card_count_csv})**")
                             row_data = {"SKU": lot_cards_df[lc_state["sku_col"]].values}
                             if lc_state["title_col"]: row_data["Title"] = lot_cards_df[lc_state["title_col"]].values
                             if lc_state["price_col"]: row_data["Price ($)"] = lot_cards_df[lc_state["price_col"]].values
@@ -6018,7 +6049,7 @@ with tab11:
                             if lc_state["price_col"]: cfg["Price ($)"] = st.column_config.NumberColumn(format="$%.2f")
                             st.dataframe(pd.DataFrame(row_data), use_container_width=True, hide_index=True, column_config=cfg)
                         elif lc_state:
-                            st.info("No cards in the CSV matched this lot prefix.")
+                            st.info("No cards in the active listings CSV matched this lot prefix.")
 
                 st.markdown("**Edit a lot**")
                 edit_opts = ["— select to edit —"] + [l["lot_prefix"] for l in lots_data]
