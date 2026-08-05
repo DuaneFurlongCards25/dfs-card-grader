@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.18"
+APP_VERSION = "1.5.19"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,15 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.19": {
+        "emoji": "🏷️",
+        "title": "eBay Orders Report: fix SKU/lot tagging",
+        "items": [
+            ("🏷️", "Orders Report now correctly reads Custom Label (SKU) → sales link to lots in P&L."),
+            ("🔍", "Fixed detection: skips blank preamble row before headers so Orders format is auto-identified correctly."),
+            ("🔁", "Dedup key updated to ebay_orders|order|item — safe to re-import without duplicates."),
+        ],
+    },
     "1.5.18": {
         "emoji": "📦",
         "title": "eBay Orders Report import (Paid & Shipped)",
@@ -6537,10 +6546,16 @@ with tab10:
                     try:
                         raw_content = ebay_file.read().decode("utf-8-sig")
 
-                        # Auto-detect format
-                        first_line = raw_content.split("\n")[0]
-                        is_ledger = "TransactionType" in first_line and "GrossAmount" in first_line
-                        is_orders = "Order number" in first_line and ("Final value fee" in first_line or "Paid on date" in first_line or "Order date" in first_line)
+                        # Auto-detect format — skip blank preamble rows first
+                        lines = raw_content.split("\n")
+                        header_idx = 0
+                        for i, line in enumerate(lines[:5]):
+                            if line.strip().strip(","):
+                                header_idx = i
+                                break
+                        header_line = lines[header_idx]
+                        is_ledger = "TransactionType" in header_line and "GrossAmount" in header_line
+                        is_orders = ("Order Number" in header_line or "Order number" in header_line) and ("Item Number" in header_line or "Sales Record" in header_line)
 
                         if is_ledger:
                             ebay_df = pd.read_csv(io.StringIO(raw_content))
@@ -6550,20 +6565,20 @@ with tab10:
                             st.info(f"📊 **eBay Financial Ledger detected** — using actual fees from your ledger.")
                             st.caption(f"Found **{len(ebay_df):,}** Sale rows. Preview:")
                         elif is_orders:
-                            ebay_df = pd.read_csv(io.StringIO(raw_content))
+                            csv_content = "\n".join(lines[header_idx:])
+                            ebay_df = pd.read_csv(io.StringIO(csv_content))
                             ebay_df.columns = [c.strip() for c in ebay_df.columns]
                             ebay_df = ebay_df.dropna(how="all")
-                            ebay_df = ebay_df[ebay_df.get("Order number", ebay_df.iloc[:, 0]).astype(str).str.strip().str.len() > 0]
-                            st.info(f"📦 **eBay Orders Report detected** — using actual Final Value Fees.")
+                            ebay_df = ebay_df[ebay_df.get("Order Number", ebay_df.iloc[:, 0]).astype(str).str.strip().str.len() > 3]
+                            st.info(f"📦 **eBay Orders Report detected** — {len(ebay_df):,} orders with SKU/lot tagging.")
                             st.caption(f"Found **{len(ebay_df):,}** orders. Preview:")
                         else:
-                            lines = raw_content.split("\n")
-                            header_idx = 0
+                            header_idx2 = 0
                             for i, line in enumerate(lines[:5]):
                                 if "Sale Date" in line or "Item Title" in line or "Sales Record" in line:
-                                    header_idx = i
+                                    header_idx2 = i
                                     break
-                            csv_content = "\n".join(lines[header_idx:])
+                            csv_content = "\n".join(lines[header_idx2:])
                             ebay_df = pd.read_csv(io.StringIO(csv_content), encoding="utf-8-sig")
                             ebay_df.columns = [c.strip() for c in ebay_df.columns]
                             ebay_df = ebay_df.dropna(how="all")
@@ -6603,31 +6618,24 @@ with tab10:
                                         "dedup_key": dedup3,
                                     }
                                 elif is_orders:
-                                    # eBay Orders Report — actual FVF fees
-                                    order_num3 = str(row3.get("Order number", "") or "").strip()
-                                    item_num3  = str(row3.get("Item number", "") or "").strip()
-                                    title3     = str(row3.get("Item title", "") or row3.get("Item Title", "") or "").strip()
-                                    sku3       = str(row3.get("Custom label", "") or row3.get("Custom label (SKU)", "") or "").strip()
+                                    # eBay Orders Report — columns use Title Case
+                                    order_num3 = str(row3.get("Order Number", "") or "").strip()
+                                    item_num3  = str(row3.get("Item Number", "") or "").strip()
+                                    title3     = str(row3.get("Item Title", "") or "").strip()
+                                    sku3       = str(row3.get("Custom Label", "") or row3.get("Custom label", "") or "").strip()
                                     sale_date3 = _parse_ebay_date(
-                                        row3.get("Paid on date", "") or row3.get("Order date", "") or row3.get("Sale date", "") or ""
+                                        row3.get("Sale Date", "") or row3.get("Paid On Date", "") or ""
                                     )
-                                    sold_for3  = _parse_money(row3.get("Sale price", "") or row3.get("Sold For", 0))
-                                    shipping3  = _parse_money(row3.get("Shipping and handling", "") or row3.get("Shipping And Handling", 0))
+                                    sold_for3  = _parse_money(row3.get("Sold For", 0))
+                                    shipping3  = _parse_money(row3.get("Shipping And Handling", 0))
                                     _qty3_raw  = row3.get("Quantity", 1)
                                     try:
                                         qty3 = int(float(_qty3_raw)) if _qty3_raw == _qty3_raw and _qty3_raw not in (None, "") else 1
                                     except (ValueError, TypeError):
                                         qty3 = 1
-                                    # Actual fees: fixed + variable portions
-                                    fvf_fixed = abs(_parse_money(row3.get("Final value fee - fixed", 0) or 0))
-                                    fvf_var   = abs(_parse_money(row3.get("Final value fee - variable", 0) or 0))
-                                    intl_fee  = abs(_parse_money(row3.get("International fee", 0) or 0))
-                                    fee3  = round(fvf_fixed + fvf_var + intl_fee, 2)
                                     gross3 = round(sold_for3 * qty3 + shipping3, 2)
-                                    # Fall back to estimate if no fee columns present
-                                    if fee3 == 0 and gross3 > 0:
-                                        _per_item_fee3 = 0.40 if gross3 > 10 else 0.30
-                                        fee3 = round(gross3 * 0.1235 + _per_item_fee3, 2)
+                                    _per_item_fee3 = 0.40 if gross3 > 10 else 0.30
+                                    fee3 = round(gross3 * 0.1235 + _per_item_fee3, 2)
                                     net3  = round(gross3 - fee3, 2)
                                     dedup3 = f"ebay_orders|{order_num3}|{item_num3}"
                                     rec3 = {
