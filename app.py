@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.26"
+APP_VERSION = "1.5.27"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,13 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.27": {
+        "emoji": "🃏",
+        "title": "CollX import: only completed orders",
+        "items": [
+            ("🃏", "CollX import now skips non-completed orders — only 'completed' status rows are saved."),
+        ],
+    },
     "1.5.26": {
         "emoji": "📦",
         "title": "Persistent lot inventory — cross-check sold/outstanding per card",
@@ -7278,6 +7285,10 @@ with tab10:
                                 qty4 = int(float(str(row4.get("total_items", 1) or 1)))
                                 status4 = str(row4.get("status", "") or "").strip()
                                 dedup4 = f"collx|{order_num4}|{order_date4}"
+
+                                if status4.lower() not in ("completed", "complete", ""):
+                                    skipped4 += 1
+                                    continue
 
                                 if dedup4 in existing_keys4:
                                     skipped4 += 1
