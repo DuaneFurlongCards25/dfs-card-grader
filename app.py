@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.21"
+APP_VERSION = "1.5.22"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,13 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.22": {
+        "emoji": "🔑",
+        "title": "Login: block browser autofill, keep access code",
+        "items": [
+            ("🔑", "JS injection blocks browser email autofill on the login screen — access code stays put."),
+        ],
+    },
     "1.5.21": {
         "emoji": "📊",
         "title": "Lots: live sold/left/revenue tally on every lot",
@@ -617,6 +624,28 @@ if not st.session_state.get("access_granted"):
     )
     # Pre-fill from query param ?k=CODE (set on successful login)
     _saved_code = st.query_params.get("k", "")
+    # JS: set autocomplete=new-password (browsers ignore "off") and re-apply saved code after autofill fires
+    st.components.v1.html(f"""
+    <script>
+    (function() {{
+        var code = {repr(_saved_code)};
+        function fix() {{
+            var inputs = window.parent.document.querySelectorAll('input[type="text"], input:not([type])');
+            inputs.forEach(function(inp) {{
+                inp.setAttribute('autocomplete', 'new-password');
+                if (code && inp.value !== code) {{
+                    inp.value = code;
+                    inp.dispatchEvent(new Event('input', {{bubbles: true}}));
+                    inp.dispatchEvent(new Event('change', {{bubbles: true}}));
+                }}
+            }});
+        }}
+        setTimeout(fix, 100);
+        setTimeout(fix, 500);
+        setTimeout(fix, 1200);
+    }})();
+    </script>
+    """, height=0)
     gc1, gc2, gc3 = st.columns([1, 2, 1])
     with gc2:
         entered_code = st.text_input("Access Code", value=_saved_code, placeholder="XXXX-XXXX", label_visibility="collapsed", autocomplete="off")
