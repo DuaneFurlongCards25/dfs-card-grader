@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.19"
+APP_VERSION = "1.5.20"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,14 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.20": {
+        "emoji": "🔑",
+        "title": "Login remembers your access code",
+        "items": [
+            ("🔑", "Access code is remembered in your browser — no more retyping it every session."),
+            ("🏷️", "eBay Orders Report SKU/lot tagging fix from v1.5.19 also included."),
+        ],
+    },
     "1.5.19": {
         "emoji": "🏷️",
         "title": "eBay Orders Report: fix SKU/lot tagging",
@@ -599,13 +607,16 @@ if not st.session_state.get("access_granted"):
         """,
         unsafe_allow_html=True,
     )
+    # Pre-fill from query param ?k=CODE (set on successful login)
+    _saved_code = st.query_params.get("k", "")
     gc1, gc2, gc3 = st.columns([1, 2, 1])
     with gc2:
-        entered_code = st.text_input("Access Code", placeholder="XXXX-XXXX", label_visibility="collapsed")
+        entered_code = st.text_input("Access Code", value=_saved_code, placeholder="XXXX-XXXX", label_visibility="collapsed", autocomplete="off")
         if st.button("Enter", use_container_width=True, type="primary"):
             clean_code = entered_code.strip().upper()
             # Owner bypass — never touches Supabase
             if clean_code == "DFS-MASTER":
+                st.query_params["k"] = clean_code
                 st.session_state.access_granted = True
                 st.session_state.access_name = "Duane"
                 st.session_state.access_code_id = 1
@@ -615,6 +626,7 @@ if not st.session_state.get("access_granted"):
             else:
                 name, code_id, err = validate_code(entered_code)
                 if name and code_id:
+                    st.query_params["k"] = clean_code
                     st.session_state.access_granted = True
                     st.session_state.access_name = name
                     st.session_state.access_code_id = code_id
