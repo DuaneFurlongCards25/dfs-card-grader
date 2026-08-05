@@ -3564,7 +3564,7 @@ with tab8:
 
         # ── BATCH → EBAY ──────────────────────────────────────────────────────
         with scan_batch:
-            st.caption("Upload front and back scans — CardHedger visually identifies each card, pulls recent sold comps for pricing, and builds a ready-to-upload eBay CSV with both images.")
+            st.caption("Upload all your card scans at once — front and back interleaved (front1, back1, front2, back2…). CardHedger identifies each card, pulls recent sold comps, and exports an eBay-ready CSV with both images on every listing.")
 
             if "raw_batch" not in st.session_state:
                 st.session_state.raw_batch = []
@@ -3572,56 +3572,49 @@ with tab8:
                 st.session_state.raw_batch_comps = {}
 
             # ── Step 1: Upload ─────────────────────────────────────────────
-            st.markdown("**Step 1 — Upload Scans**")
-            st.caption("Scan all fronts first, then all backs. Select them in the same card order in each box.")
-            up_c1, up_c2 = st.columns(2)
-            front_files = up_c1.file_uploader(
-                "📷 Front scans (in card order)",
+            all_files = st.file_uploader(
+                "📷 Drop all card scans here (front + back interleaved: front1, back1, front2, back2…)",
                 type=["jpg", "jpeg", "png", "tif", "tiff"],
                 accept_multiple_files=True,
-                key="raw_fronts",
-            )
-            back_files = up_c2.file_uploader(
-                "📷 Back scans (same order as fronts)",
-                type=["jpg", "jpeg", "png", "tif", "tiff"],
-                accept_multiple_files=True,
-                key="raw_backs",
+                key="raw_all_files",
+                help="Select all images at once — Cmd+A in Finder or drag the whole folder. Odd files = fronts, even files = backs.",
             )
 
-            n_front = len(front_files) if front_files else 0
-            n_back  = len(back_files)  if back_files  else 0
+            n_files = len(all_files) if all_files else 0
 
-            if n_front > 0 or n_back > 0:
-                if n_front != n_back:
-                    st.warning(f"⚠️ {n_front} front scan(s) but {n_back} back scan(s) — counts must match before identifying.")
-                else:
-                    st.success(f"✅ {n_front} card pairs ready")
+            if n_files > 0:
+                if n_files % 2 != 0:
+                    st.warning(f"⚠️ {n_files} images selected — need an even number (one front + one back per card). Got {n_files // 2} pairs + 1 leftover.")
 
-                    # Paired thumbnail preview (up to 8 pairs)
-                    from PIL import Image as _PIL_b
-                    preview_n = min(n_front, 8)
-                    thumb_cols = st.columns(preview_n)
-                    for ci in range(preview_n):
-                        with thumb_cols[ci]:
-                            try:
-                                img_f = _PIL_b.open(io.BytesIO(front_files[ci].getvalue())).convert("RGB")
-                                img_b = _PIL_b.open(io.BytesIO(back_files[ci].getvalue())).convert("RGB")
-                                w = 80
-                                rf = w / max(img_f.width, 1)
-                                rb = w / max(img_b.width, 1)
-                                tf = img_f.resize((w, int(img_f.height * rf)), _PIL_b.LANCZOS)
-                                tb = img_b.resize((w, int(img_b.height * rb)), _PIL_b.LANCZOS)
-                                combo = _PIL_b.new("RGB", (w * 2 + 2, max(tf.height, tb.height)), (200, 200, 200))
-                                combo.paste(tf, (0, 0))
-                                combo.paste(tb, (w + 2, 0))
-                                st.image(combo, caption=f"#{ci+1}", use_container_width=True)
-                            except Exception:
-                                st.caption(f"#{ci+1}")
-                    if n_front > 8:
-                        st.caption(f"+ {n_front - 8} more pairs not shown")
+                n_pairs = n_files // 2
+                front_files = all_files[0::2]   # indices 0, 2, 4 …
+                back_files  = all_files[1::2]   # indices 1, 3, 5 …
 
-                    st.markdown("---")
-                    if st.button(f"🔍 Identify & Price All ({n_front} cards)", type="primary", key="raw_batch_go"):
+                st.success(f"✅ {n_pairs} card pair{'s' if n_pairs != 1 else ''} detected")
+
+                # Paired thumbnail preview (up to 8 pairs)
+                from PIL import Image as _PIL_b
+                preview_n  = min(n_pairs, 8)
+                thumb_cols = st.columns(preview_n) if preview_n > 0 else []
+                for ci in range(preview_n):
+                    with thumb_cols[ci]:
+                        try:
+                            img_f = _PIL_b.open(io.BytesIO(front_files[ci].getvalue())).convert("RGB")
+                            img_b = _PIL_b.open(io.BytesIO(back_files[ci].getvalue())).convert("RGB")
+                            w  = 80
+                            tf = img_f.resize((w, int(img_f.height * w / max(img_f.width, 1))), _PIL_b.LANCZOS)
+                            tb = img_b.resize((w, int(img_b.height * w / max(img_b.width, 1))), _PIL_b.LANCZOS)
+                            combo = _PIL_b.new("RGB", (w * 2 + 2, max(tf.height, tb.height)), (200, 200, 200))
+                            combo.paste(tf, (0, 0))
+                            combo.paste(tb, (w + 2, 0))
+                            st.image(combo, caption=f"#{ci+1}", use_container_width=True)
+                        except Exception:
+                            st.caption(f"#{ci+1}")
+                if n_pairs > 8:
+                    st.caption(f"+ {n_pairs - 8} more pairs not shown")
+
+                st.markdown("---")
+                if st.button(f"🔍 Identify & Price All ({n_pairs} cards)", type="primary", key="raw_batch_go", disabled=n_pairs == 0):
                         st.session_state.raw_batch = []
                         st.session_state.raw_batch_comps = {}
                         prog    = st.progress(0.0)
@@ -3630,7 +3623,7 @@ with tab8:
 
                         # Phase 1: upload + image-match (one card at a time)
                         for i, (ff, bf) in enumerate(zip(front_files, back_files)):
-                            status.text(f"Identifying card {i+1}/{n_front}: {ff.name}…")
+                            status.text(f"Identifying card {i+1}/{n_pairs}: {ff.name}…")
                             c = {
                                 "idx":          i,
                                 "front_file":   ff.name,
