@@ -3861,8 +3861,8 @@ with tab8:
                         st.session_state.raw_batch_comps = {}
                         st.rerun()
 
-            elif not front_files and not back_files and not st.session_state.raw_batch:
-                st.info("💡 **How it works:** Scan all card fronts → upload in left box. Scan all card backs → upload in right box (same order). Click Identify — CardHedger visually matches each card, shows recent sold comps, and exports an eBay Add CSV with front + back images on every listing.")
+            elif not all_files and not st.session_state.raw_batch:
+                st.info("💡 **How it works:** Select all scans at once — front and back interleaved (front1, back1, front2, back2…). CardHedger visually matches each card, shows recent sold comps, and exports an eBay Add CSV with both images on every listing.")
 
 with tab2:
     st.markdown("## 📦 Inventory Check")
