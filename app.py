@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.24"
+APP_VERSION = "1.5.25"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,17 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.25": {
+        "emoji": "🃏",
+        "title": "Individual Card Purchases — Whatnot, FB, small buys",
+        "items": [
+            ("🃏", "New 🃏 Individual Cards tab under Purchases — track small buys without creating a lot."),
+            ("🔗", "SKU auto-links to sales_records when card sells — see cost vs net vs P&L per card."),
+            ("📊", "Summary: Total Invested, Net Recovered, Overall P&L, Cards Sold, Win Rate."),
+            ("🔍", "Filter by source (Whatnot, Facebook, etc.), status (Sold/Unsold), and result (Profit/Loss)."),
+            ("⏱️", "Days Held and Sold Via channel tracked per card."),
+        ],
+    },
     "1.5.24": {
         "emoji": "📈",
         "title": "Lots: full ROI, turn rate, avg days to sell",
@@ -5871,7 +5882,7 @@ with tab11:
 
         lots_data = st.session_state["pur_lots"]
 
-        pur_t1, pur_t2, pur_t3 = st.tabs(["📋 Lots", "⬆️ Import Cards", "📊 P&L by Lot"])
+        pur_t1, pur_t2, pur_t3, pur_t4 = st.tabs(["📋 Lots", "⬆️ Import Cards", "📊 P&L by Lot", "🃏 Individual Cards"])
 
         # ── LOTS ──────────────────────────────────────────────────────────────
         with pur_t1:
@@ -6411,6 +6422,193 @@ create index if not exists idx_sr_sku on sales_records(sku);""", language="sql")
                             hide_index=True,
                             column_config={"Net ($)": st.column_config.NumberColumn(format="$%.2f")},
                         )
+
+        # ── INDIVIDUAL CARDS ──────────────────────────────────────────────────
+        with pur_t4:
+            st.markdown("### 🃏 Individual Card Purchases")
+            st.caption("Track small buys (Whatnot, Facebook, local) that don't need a full lot. Enter a SKU matching your eBay listing — the app auto-links to the sale when it happens.")
+
+            if "cp_data" not in st.session_state:
+                st.session_state["cp_data"] = _pur_get("card_purchases", "?order=purchase_date.desc&limit=1000")
+            cp_data = st.session_state["cp_data"]
+
+            # ── Add new purchase ──────────────────────────────────────────────
+            with st.expander("➕ Add Purchase", expanded=not cp_data):
+                with st.form("cp_add_form"):
+                    ca1, ca2, ca3 = st.columns(3)
+                    cp_sku    = ca1.text_input("SKU", placeholder="WN-073026-00001",
+                                    help="Must match the SKU on your eBay listing exactly")
+                    cp_title  = ca1.text_input("Description", placeholder="2023 Bowman Chrome Corbin Carroll")
+                    cp_source = ca2.selectbox("Source", ["Whatnot", "Facebook", "Local", "eBay", "Other"])
+                    cp_date   = ca2.date_input("Purchase Date", value=date.today())
+                    cp_cost   = ca2.number_input("Cost Paid ($)", min_value=0.0, step=0.01, format="%.2f")
+                    cp_qty    = ca2.number_input("Qty", min_value=1, step=1, value=1,
+                                    help="Number of cards in this purchase")
+                    cp_notes  = ca3.text_area("Notes", height=80, placeholder="e.g. Auto /25, BGS 9.5")
+                    cp_sub    = st.form_submit_button("💾 Add Purchase", type="primary")
+                if cp_sub:
+                    if not cp_sku.strip():
+                        st.error("SKU is required.")
+                    elif cp_cost <= 0:
+                        st.error("Cost must be greater than $0.")
+                    else:
+                        res = _pur_post("card_purchases", {
+                            "sku":           cp_sku.strip(),
+                            "title":         cp_title.strip() or None,
+                            "source":        cp_source,
+                            "purchase_date": str(cp_date),
+                            "cost_paid":     float(cp_cost),
+                            "quantity":      int(cp_qty),
+                            "notes":         cp_notes.strip() or None,
+                        })
+                        if res is not None:
+                            st.success(f"Added: {cp_sku.strip()}")
+                            st.session_state.pop("cp_data", None)
+                            st.rerun()
+                        else:
+                            st.error(f"Save failed: {_pur_last_error.get('msg') or 'Unknown error'}")
+
+            if not cp_data:
+                st.info("No individual purchases yet — add one above.")
+            else:
+                # Load all sales to cross-reference by SKU
+                cp_sales_raw = _pur_get("sales_records", "?select=sku,title,sale_date,gross_revenue,net_proceeds,source&sku=not.is.null&limit=5000")
+                cp_sales_by_sku = {}
+                for _cs in cp_sales_raw:
+                    _csk = (_cs.get("sku") or "").strip()
+                    if _csk:
+                        if _csk not in cp_sales_by_sku:
+                            cp_sales_by_sku[_csk] = []
+                        cp_sales_by_sku[_csk].append(_cs)
+
+                # Summary metrics
+                total_cp_cost = sum(float(c.get("cost_paid") or 0) for c in cp_data)
+                total_cp_net  = 0.0
+                total_cp_sold = 0
+                for c in cp_data:
+                    for _s in cp_sales_by_sku.get((c.get("sku") or "").strip(), []):
+                        total_cp_net  += float(_s.get("net_proceeds") or 0)
+                        total_cp_sold += 1
+                total_cp_pl   = round(total_cp_net - total_cp_cost, 2)
+                win_count = 0
+                for c in cp_data:
+                    sks = cp_sales_by_sku.get((c.get("sku") or "").strip(), [])
+                    if sks:
+                        net = sum(float(_s.get("net_proceeds") or 0) for _s in sks)
+                        if net > float(c.get("cost_paid") or 0):
+                            win_count += 1
+                win_rate = round(win_count / max(1, sum(1 for c in cp_data if cp_sales_by_sku.get((c.get("sku") or "").strip()))) * 100) if total_cp_sold > 0 else None
+
+                sm1, sm2, sm3, sm4, sm5 = st.columns(5)
+                sm1.metric("Total Invested", f"${total_cp_cost:,.2f}")
+                sm2.metric("Net Recovered",  f"${total_cp_net:,.2f}")
+                sm3.metric("Overall P&L",    f"${total_cp_pl:+,.2f}")
+                sm4.metric("Cards Sold",     f"{total_cp_sold} / {len(cp_data)}")
+                sm5.metric("Win Rate",       f"{win_rate}%" if win_rate is not None else "—",
+                           help="% of sold cards where net > cost")
+
+                st.divider()
+
+                # Filter controls
+                cf1, cf2, cf3 = st.columns(3)
+                _cp_src_opts = ["All Sources"] + sorted(set(c.get("source","") for c in cp_data if c.get("source")))
+                _cp_src = cf1.selectbox("Source", _cp_src_opts, key="cp_src_filter")
+                _cp_status = cf2.selectbox("Status", ["All", "✅ Sold", "🟡 Unsold"], key="cp_status_filter")
+                _cp_result = cf3.selectbox("Result", ["All", "🟢 Profit", "🔴 Loss", "⏳ Pending"], key="cp_result_filter")
+
+                # Build display rows
+                cp_rows = []
+                for c in cp_data:
+                    sku       = (c.get("sku") or "").strip()
+                    cost      = float(c.get("cost_paid") or 0)
+                    qty       = int(c.get("quantity") or 1)
+                    sales     = cp_sales_by_sku.get(sku, [])
+                    net_total = sum(float(_s.get("net_proceeds") or 0) for _s in sales)
+                    gross_total = sum(float(_s.get("gross_revenue") or 0) for _s in sales)
+                    pl        = round(net_total - cost, 2)
+                    is_sold   = len(sales) > 0
+                    roi       = round(pl / cost * 100, 1) if cost > 0 and is_sold else None
+                    status    = "✅ Sold" if is_sold else "🟡 Unsold"
+                    result    = ("🟢 Profit" if pl > 0 else "🔴 Loss") if is_sold else "⏳ Pending"
+                    sale_date = max((s.get("sale_date","")[:10] for s in sales), default="—") if sales else "—"
+                    sale_chan  = ", ".join(sorted(set(s.get("source","") for s in sales))) if sales else "—"
+                    days_held = None
+                    if c.get("purchase_date") and sale_date != "—":
+                        try:
+                            from datetime import datetime as _dtt
+                            days_held = (_dtt.strptime(sale_date, "%Y-%m-%d") - _dtt.strptime(c["purchase_date"][:10], "%Y-%m-%d")).days
+                        except Exception:
+                            pass
+
+                    # Apply filters
+                    if _cp_src != "All Sources" and c.get("source") != _cp_src:
+                        continue
+                    if _cp_status == "✅ Sold" and not is_sold:
+                        continue
+                    if _cp_status == "🟡 Unsold" and is_sold:
+                        continue
+                    if _cp_result == "🟢 Profit" and result != "🟢 Profit":
+                        continue
+                    if _cp_result == "🔴 Loss" and result != "🔴 Loss":
+                        continue
+                    if _cp_result == "⏳ Pending" and result != "⏳ Pending":
+                        continue
+
+                    cp_rows.append({
+                        "_id":       c["id"],
+                        "SKU":       sku,
+                        "Description": c.get("title") or "—",
+                        "Source":    c.get("source") or "—",
+                        "Bought":    (c.get("purchase_date") or "—")[:10],
+                        "Cost ($)":  cost,
+                        "Qty":       qty,
+                        "Gross ($)": round(gross_total, 2) if is_sold else None,
+                        "Net ($)":   round(net_total, 2) if is_sold else None,
+                        "P&L ($)":   pl if is_sold else None,
+                        "ROI %":     roi,
+                        "Days Held": days_held,
+                        "Sold Via":  sale_chan,
+                        "Status":    status,
+                    })
+
+                if not cp_rows:
+                    st.info("No purchases match the current filters.")
+                else:
+                    cp_df = pd.DataFrame(cp_rows).drop(columns=["_id"])
+                    st.dataframe(cp_df, use_container_width=True, hide_index=True,
+                        column_config={
+                            "Cost ($)":  st.column_config.NumberColumn(format="$%.2f"),
+                            "Gross ($)": st.column_config.NumberColumn(format="$%.2f"),
+                            "Net ($)":   st.column_config.NumberColumn(format="$%.2f"),
+                            "P&L ($)":   st.column_config.NumberColumn(format="$%.2f"),
+                            "ROI %":     st.column_config.NumberColumn(format="%.1f%%"),
+                            "Days Held": st.column_config.NumberColumn(format="%d days"),
+                        })
+
+                    # Delete
+                    st.divider()
+                    del_sku = st.selectbox("Delete a purchase", ["— select —"] + [r["SKU"] for r in cp_rows], key="cp_del_sel")
+                    if del_sku != "— select —":
+                        match = next((c for c in cp_data if (c.get("sku") or "").strip() == del_sku), None)
+                        if match and st.button(f"🗑️ Delete {del_sku}", key="cp_del_btn"):
+                            _pur_delete("card_purchases", f"id=eq.{match['id']}")
+                            st.session_state.pop("cp_data", None)
+                            st.rerun()
+
+            st.divider()
+            st.markdown("**SQL — Run once in Supabase SQL Editor**")
+            st.code("""create table if not exists card_purchases (
+  id            bigint primary key generated always as identity,
+  sku           text not null,
+  title         text,
+  source        text,
+  purchase_date date,
+  cost_paid     numeric not null default 0,
+  quantity      integer not null default 1,
+  notes         text,
+  created_at    timestamptz default now()
+);
+create index if not exists idx_cp_sku on card_purchases(sku);""", language="sql")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 10 — Sales & P&L
