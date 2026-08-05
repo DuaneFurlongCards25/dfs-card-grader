@@ -3607,7 +3607,7 @@ with tab8:
                             combo = _PIL_b.new("RGB", (w * 2 + 2, max(tf.height, tb.height)), (200, 200, 200))
                             combo.paste(tf, (0, 0))
                             combo.paste(tb, (w + 2, 0))
-                            st.image(combo, caption=f"#{ci+1}", width=200)
+                            st.image(combo, caption=f"#{ci+1}", width=300)
                         except Exception:
                             st.caption(f"#{ci+1}")
                 if n_pairs > 8:
@@ -3681,7 +3681,7 @@ with tab8:
                                 c["error"] = str(exc)
 
                             cards.append(c)
-                            prog.progress((i + 1) / n_front * 0.7)
+                            prog.progress((i + 1) / n_pairs * 0.7)
 
                         # Phase 2: batch FMV for all identified cards (1 API call)
                         identified_cards = [c for c in cards if c.get("card_id")]
