@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.17"
+APP_VERSION = "1.5.18"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,15 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.18": {
+        "emoji": "📦",
+        "title": "eBay Orders Report import (Paid & Shipped)",
+        "items": [
+            ("📦", "Sales & P&L now accepts eBay Orders Report CSV — Seller Hub → Orders → Sold → Download. Real fees, no estimates."),
+            ("💰", "Actual Final Value Fee (fixed + variable) pulled directly from the report — more accurate than the 12.35% estimate."),
+            ("🔁", "Auto-detected alongside existing Transactions and Financial Ledger formats — just drop it in."),
+        ],
+    },
     "1.5.17": {
         "emoji": "💎",
         "title": "Gem rate slider feeds GO/NO-GO + Grade vs Flip",
@@ -6515,20 +6524,23 @@ with tab10:
             with imp_ebay:
                 st.markdown("### Import eBay Sales")
                 st.caption(
-                    "Accepts **two formats** — auto-detected on upload:\n\n"
+                    "Accepts **three formats** — auto-detected on upload:\n\n"
+                    "• **Orders Report** *(recommended)* — Seller Hub → Orders → Sold → Download → Orders report. "
+                    "Uses actual Final Value Fees — most accurate.\n\n"
                     "• **Seller Hub Transactions Report** — Seller Hub → Reports → Downloads → Transactions report. "
                     "Fees are estimated at 12.35% + $0.40 (sales over $10) or $0.30 (under $10).\n\n"
                     "• **eBay Financial Ledger** — Payments → Transactions → Download (TransactionType / GrossAmount / Fees / NetAmount columns). "
                     "Uses your actual eBay fees — more accurate."
                 )
-                ebay_file = st.file_uploader("eBay Transactions / Sold Report / Ledger CSV", type=["csv"], key="sal_ebay_file")
+                ebay_file = st.file_uploader("eBay Orders / Transactions / Ledger CSV", type=["csv"], key="sal_ebay_file")
                 if ebay_file:
                     try:
                         raw_content = ebay_file.read().decode("utf-8-sig")
 
-                        # Auto-detect format: ledger has TransactionType + GrossAmount headers
+                        # Auto-detect format
                         first_line = raw_content.split("\n")[0]
                         is_ledger = "TransactionType" in first_line and "GrossAmount" in first_line
+                        is_orders = "Order number" in first_line and ("Final value fee" in first_line or "Paid on date" in first_line or "Order date" in first_line)
 
                         if is_ledger:
                             ebay_df = pd.read_csv(io.StringIO(raw_content))
@@ -6537,6 +6549,13 @@ with tab10:
                             ebay_df = ebay_df[ebay_df["TransactionType"].astype(str).str.strip() == "Sale"].copy()
                             st.info(f"📊 **eBay Financial Ledger detected** — using actual fees from your ledger.")
                             st.caption(f"Found **{len(ebay_df):,}** Sale rows. Preview:")
+                        elif is_orders:
+                            ebay_df = pd.read_csv(io.StringIO(raw_content))
+                            ebay_df.columns = [c.strip() for c in ebay_df.columns]
+                            ebay_df = ebay_df.dropna(how="all")
+                            ebay_df = ebay_df[ebay_df.get("Order number", ebay_df.iloc[:, 0]).astype(str).str.strip().str.len() > 0]
+                            st.info(f"📦 **eBay Orders Report detected** — using actual Final Value Fees.")
+                            st.caption(f"Found **{len(ebay_df):,}** orders. Preview:")
                         else:
                             lines = raw_content.split("\n")
                             header_idx = 0
@@ -6580,6 +6599,50 @@ with tab10:
                                         "quantity": 1,
                                         "sale_price": gross3,
                                         "shipping_collected": 0,
+                                        "status": "sold",
+                                        "dedup_key": dedup3,
+                                    }
+                                elif is_orders:
+                                    # eBay Orders Report — actual FVF fees
+                                    order_num3 = str(row3.get("Order number", "") or "").strip()
+                                    item_num3  = str(row3.get("Item number", "") or "").strip()
+                                    title3     = str(row3.get("Item title", "") or row3.get("Item Title", "") or "").strip()
+                                    sku3       = str(row3.get("Custom label", "") or row3.get("Custom label (SKU)", "") or "").strip()
+                                    sale_date3 = _parse_ebay_date(
+                                        row3.get("Paid on date", "") or row3.get("Order date", "") or row3.get("Sale date", "") or ""
+                                    )
+                                    sold_for3  = _parse_money(row3.get("Sale price", "") or row3.get("Sold For", 0))
+                                    shipping3  = _parse_money(row3.get("Shipping and handling", "") or row3.get("Shipping And Handling", 0))
+                                    _qty3_raw  = row3.get("Quantity", 1)
+                                    try:
+                                        qty3 = int(float(_qty3_raw)) if _qty3_raw == _qty3_raw and _qty3_raw not in (None, "") else 1
+                                    except (ValueError, TypeError):
+                                        qty3 = 1
+                                    # Actual fees: fixed + variable portions
+                                    fvf_fixed = abs(_parse_money(row3.get("Final value fee - fixed", 0) or 0))
+                                    fvf_var   = abs(_parse_money(row3.get("Final value fee - variable", 0) or 0))
+                                    intl_fee  = abs(_parse_money(row3.get("International fee", 0) or 0))
+                                    fee3  = round(fvf_fixed + fvf_var + intl_fee, 2)
+                                    gross3 = round(sold_for3 * qty3 + shipping3, 2)
+                                    # Fall back to estimate if no fee columns present
+                                    if fee3 == 0 and gross3 > 0:
+                                        _per_item_fee3 = 0.40 if gross3 > 10 else 0.30
+                                        fee3 = round(gross3 * 0.1235 + _per_item_fee3, 2)
+                                    net3  = round(gross3 - fee3, 2)
+                                    dedup3 = f"ebay_orders|{order_num3}|{item_num3}"
+                                    rec3 = {
+                                        "source": "ebay",
+                                        "order_id": order_num3 or None,
+                                        "sale_date": sale_date3 or None,
+                                        "title": title3 or None,
+                                        "item_number": item_num3 or None,
+                                        "sku": sku3 or None,
+                                        "quantity": qty3,
+                                        "sale_price": sold_for3,
+                                        "shipping_collected": shipping3,
+                                        "gross_revenue": gross3,
+                                        "platform_fee": fee3,
+                                        "net_proceeds": net3,
                                         "status": "sold",
                                         "dedup_key": dedup3,
                                     }
