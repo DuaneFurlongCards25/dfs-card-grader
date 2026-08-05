@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.27"
+APP_VERSION = "1.5.28"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,15 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.28": {
+        "emoji": "📝",
+        "title": "Manual sale logger on outstanding cards",
+        "items": [
+            ("📝", "Each lot with outstanding cards now has a '📝 Log a Sale' expander — pick the card, enter channel/date/net, save."),
+            ("✅", "Card flips from 🟡 Outstanding to ✅ Sold instantly after logging."),
+            ("🃏", "Works for CollX, eBay, DC Sports, Whatnot, Facebook, or any other channel."),
+        ],
+    },
     "1.5.27": {
         "emoji": "🃏",
         "title": "CollX import: only completed orders",
@@ -6207,6 +6216,45 @@ with tab11:
                             cross_df = pd.DataFrame(cross_rows)
                             st.dataframe(cross_df, use_container_width=True, hide_index=True,
                                 column_config={"Net ($)": st.column_config.NumberColumn(format="$%.2f")})
+
+                            # ── Manual Sale Logger ────────────────────────────
+                            _outstanding_cards = [c for c in _inv_cards if str(c.get("sku","")).upper() not in _sold_by_sku]
+                            if _outstanding_cards:
+                                with st.expander(f"📝 Log a Sale ({len(_outstanding_cards)} outstanding)", expanded=False):
+                                    _ls_key = f"ls_{pfx}"
+                                    _sku_opts = [f"{c['sku']} — {c.get('title','')}" for c in _outstanding_cards]
+                                    _ls_sku_sel = st.selectbox("Card (SKU)", _sku_opts, key=f"{_ls_key}_sku")
+                                    _ls_sku = _ls_sku_sel.split(" — ")[0] if _ls_sku_sel else ""
+                                    _ls_title = next((c.get("title","") for c in _outstanding_cards if c["sku"] == _ls_sku), "")
+                                    ls_c1, ls_c2, ls_c3 = st.columns(3)
+                                    _ls_channel = ls_c1.selectbox("Channel", ["collx", "ebay", "dc_sports", "whatnot", "facebook", "other"], key=f"{_ls_key}_ch",
+                                                    format_func=lambda x: {"collx":"CollX","ebay":"eBay","dc_sports":"DC Sports","whatnot":"Whatnot","facebook":"Facebook","other":"Other"}.get(x,x))
+                                    _ls_date = ls_c2.date_input("Sale Date", value=date.today(), key=f"{_ls_key}_date")
+                                    _ls_net  = ls_c3.number_input("Net Proceeds ($)", min_value=0.0, step=0.01, format="%.2f", key=f"{_ls_key}_net")
+                                    _ls_gross = st.number_input("Gross Revenue ($) — leave 0 to match net", min_value=0.0, step=0.01, format="%.2f", key=f"{_ls_key}_gross")
+                                    if st.button("✅ Save Sale", type="primary", key=f"{_ls_key}_save"):
+                                        _gross_final = _ls_gross if _ls_gross > 0 else _ls_net
+                                        _fee_final   = round(_gross_final - _ls_net, 2)
+                                        _dedup_ls    = f"manual|{_ls_sku}|{_ls_date}"
+                                        _rec_ls = {
+                                            "source":       _ls_channel,
+                                            "sku":          _ls_sku,
+                                            "title":        _ls_title or _ls_sku,
+                                            "sale_date":    str(_ls_date),
+                                            "gross_revenue": _gross_final,
+                                            "platform_fee": _fee_final,
+                                            "net_proceeds": _ls_net,
+                                            "quantity":     1,
+                                            "sale_price":   _ls_net,
+                                            "status":       "completed",
+                                            "dedup_key":    _dedup_ls,
+                                        }
+                                        _res_ls = _pur_post("sales_records", _rec_ls)
+                                        if _res_ls is not None:
+                                            st.success(f"✅ Sale logged for {_ls_sku} — ${_ls_net:.2f} net via {_ls_channel}")
+                                            st.rerun()
+                                        else:
+                                            st.error(f"Save failed: {_pur_last_error.get('msg','Unknown error')}")
                         elif lc_state and lot_cards_df is not None and not lot_cards_df.empty:
                             st.divider()
                             st.markdown(f"**📋 Active Listings CSV ({card_count_csv}) — not yet saved to Supabase**")
