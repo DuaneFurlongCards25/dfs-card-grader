@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.25"
+APP_VERSION = "1.5.26"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,16 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.26": {
+        "emoji": "📦",
+        "title": "Persistent lot inventory — cross-check sold/outstanding per card",
+        "items": [
+            ("📦", "Import Cards tab now saves cards to Supabase — inventory persists across sessions."),
+            ("✅", "Each lot expander shows a full cross-check table: every card with Sold / Outstanding status, channel, sale date, and net."),
+            ("🔄", "Re-uploading a CSV updates existing cards and adds new ones (safe re-import, no duplicates)."),
+            ("🟡", "Outstanding cards show which channel they may still be listed on."),
+        ],
+    },
     "1.5.25": {
         "emoji": "🃏",
         "title": "Individual Card Purchases — Whatnot, FB, small buys",
@@ -5872,6 +5882,31 @@ with tab11:
                 _pur_last_error["msg"] = str(ex)
                 return None
 
+        def _pur_upsert_lot_cards(rows):
+            """Bulk upsert rows into lot_cards (on_conflict: lot_prefix,sku → update title)."""
+            if not rows:
+                return 0, None
+            data = json.dumps(rows).encode()
+            hdrs = {
+                **sb_headers(),
+                "Content-Type": "application/json",
+                "Prefer": "resolution=merge-duplicates,return=representation",
+            }
+            req = urllib.request.Request(
+                f"{SUPABASE_URL}/rest/v1/lot_cards?on_conflict=lot_prefix,sku",
+                data=data, headers=hdrs, method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=30) as r:
+                    body = r.read()
+                    result = json.loads(body.decode()) if body else []
+                    return len(result), None
+            except urllib.error.HTTPError as e:
+                err = e.read().decode("utf-8", errors="replace")
+                return 0, f"HTTP {e.code}: {err[:400]}"
+            except Exception as ex:
+                return 0, str(ex)
+
         def _pur_prefix(sku):
             """Extract lot prefix: first 2 dash-separated segments of SKU."""
             parts = str(sku or "").strip().split("-")
@@ -5969,6 +6004,16 @@ with tab11:
 
                 # Load live sales data for all lots (full detail for sold cards table)
                 _lot_sales_raw = _pur_get("sales_records", "?select=sku,title,sale_date,gross_revenue,net_proceeds,source&sku=not.is.null&order=sale_date.desc&limit=5000")
+
+                # Load persistent lot inventory from Supabase lot_cards table
+                _lot_cards_all = _pur_get("lot_cards", "?select=lot_prefix,sku,title&order=lot_prefix.asc,sku.asc&limit=10000")
+                # Group by canonical lot prefix (upper)
+                _lot_cards_by_pfx = {}
+                for _lc in (_lot_cards_all or []):
+                    _lcp = str(_lc.get("lot_prefix") or "").upper()
+                    if _lcp not in _lot_cards_by_pfx:
+                        _lot_cards_by_pfx[_lcp] = []
+                    _lot_cards_by_pfx[_lcp].append(_lc)
                 _lot_alias_map = {}
                 for _l in lots_data:
                     _lot_alias_map[_l["lot_prefix"].upper()] = _l["lot_prefix"].upper()
@@ -6113,17 +6158,60 @@ with tab11:
                                     "Net ($)":   st.column_config.NumberColumn(format="$%.2f"),
                                 })
 
-                        if lc_state and lot_cards_df is not None and not lot_cards_df.empty:
+                        # Cross-check: Supabase lot_cards inventory vs sales_records
+                        _inv_cards = _lot_cards_by_pfx.get(pfx.upper(), [])
+                        if _inv_cards:
                             st.divider()
-                            st.markdown(f"**📋 Active Listings ({card_count_csv})**")
+                            # Build sold SKU lookup: sku.upper() → list of sale records
+                            _sold_by_sku = {}
+                            for _s in sold_records:
+                                _sk = str(_s.get("sku") or "").upper()
+                                if _sk:
+                                    if _sk not in _sold_by_sku:
+                                        _sold_by_sku[_sk] = []
+                                    _sold_by_sku[_sk].append(_s)
+                            _inv_sold   = sum(1 for c in _inv_cards if str(c.get("sku","")).upper() in _sold_by_sku)
+                            _inv_unsold = len(_inv_cards) - _inv_sold
+                            st.markdown(f"**📦 Lot Inventory ({len(_inv_cards)} cards · ✅ {_inv_sold} sold · 🟡 {_inv_unsold} outstanding)**")
+                            cross_rows = []
+                            for _c in _inv_cards:
+                                _csku  = str(_c.get("sku") or "")
+                                _ctitle = str(_c.get("title") or "—")
+                                _sales_for_card = _sold_by_sku.get(_csku.upper(), [])
+                                if _sales_for_card:
+                                    for _sale in _sales_for_card:
+                                        cross_rows.append({
+                                            "SKU":      _csku,
+                                            "Title":    _ctitle,
+                                            "Status":   "✅ Sold",
+                                            "Channel":  (_sale.get("source") or "—").replace("ebay","eBay").replace("collx","CollX").replace("dc_sports","DC Sports"),
+                                            "Sale Date": (_sale.get("sale_date") or "")[:10] or "—",
+                                            "Net ($)":  float(_sale.get("net_proceeds") or 0),
+                                        })
+                                else:
+                                    cross_rows.append({
+                                        "SKU":      _csku,
+                                        "Title":    _ctitle,
+                                        "Status":   "🟡 Outstanding",
+                                        "Channel":  "—",
+                                        "Sale Date": "—",
+                                        "Net ($)":  0.0,
+                                    })
+                            cross_df = pd.DataFrame(cross_rows)
+                            st.dataframe(cross_df, use_container_width=True, hide_index=True,
+                                column_config={"Net ($)": st.column_config.NumberColumn(format="$%.2f")})
+                        elif lc_state and lot_cards_df is not None and not lot_cards_df.empty:
+                            st.divider()
+                            st.markdown(f"**📋 Active Listings CSV ({card_count_csv}) — not yet saved to Supabase**")
+                            st.caption("Go to Import Cards tab → Save to Supabase to make this persistent.")
                             row_data = {"SKU": lot_cards_df[lc_state["sku_col"]].values}
                             if lc_state["title_col"]: row_data["Title"] = lot_cards_df[lc_state["title_col"]].values
                             if lc_state["price_col"]: row_data["Price ($)"] = lot_cards_df[lc_state["price_col"]].values
                             cfg = {}
                             if lc_state["price_col"]: cfg["Price ($)"] = st.column_config.NumberColumn(format="$%.2f")
                             st.dataframe(pd.DataFrame(row_data), use_container_width=True, hide_index=True, column_config=cfg)
-                        elif lc_state:
-                            st.info("No cards in the active listings CSV matched this lot prefix.")
+                        elif not _inv_cards:
+                            st.info("No inventory saved for this lot yet — use the **Import Cards** tab to upload and save cards.")
 
                 st.markdown("**Edit a lot**")
                 edit_opts = ["— select to edit —"] + [l["lot_prefix"] for l in lots_data]
@@ -6190,12 +6278,38 @@ alter table purchase_lots add column if not exists alias_prefixes text;
 
 -- Add SKU column to sales_records so sold cards link back to lots
 alter table sales_records add column if not exists sku text;
-create index if not exists idx_sr_sku on sales_records(sku);""", language="sql")
+create index if not exists idx_sr_sku on sales_records(sku);
+
+-- lot_cards: persistent inventory per lot (run once)
+create table if not exists lot_cards (
+  id            bigint primary key generated always as identity,
+  lot_prefix    text not null,
+  sku           text not null,
+  title         text,
+  notes         text,
+  created_at    timestamptz default now(),
+  constraint lot_cards_prefix_sku_unique unique (lot_prefix, sku)
+);
+create index if not exists idx_lot_cards_prefix on lot_cards(lot_prefix);
+create index if not exists idx_lot_cards_sku    on lot_cards(sku);
+
+-- If you ran the old lot_cards SQL without the unique constraint, add it:
+alter table lot_cards add constraint if not exists lot_cards_prefix_sku_unique unique (lot_prefix, sku);""", language="sql")
 
         # ── IMPORT CARDS ──────────────────────────────────────────────────────
         with pur_t2:
-            st.markdown("### Verify Card → Lot Assignments")
-            st.info("💡 Cards are now viewable directly on the **Lots** tab — upload your CSV there and click any lot to expand it. This tab shows the same data as a flat cross-lot view if you prefer it.")
+            st.markdown("### Import Cards to Lot")
+            st.caption("Upload a Haystack or eBay active listings CSV — cards are saved to Supabase by lot prefix so the Lots tab can cross-check sold/outstanding against all channels.")
+
+            # Show current Supabase inventory counts
+            _existing_lc = _pur_get("lot_cards", "?select=lot_prefix&limit=10000")
+            if _existing_lc:
+                from collections import Counter as _Counter
+                _lc_counts = _Counter(r.get("lot_prefix","") for r in _existing_lc)
+                _lc_info = " · ".join(f"{p}: {n}" for p, n in sorted(_lc_counts.items()))
+                st.info(f"📦 **Currently saved in Supabase:** {len(_existing_lc):,} cards across {len(_lc_counts)} lots — {_lc_info}")
+            else:
+                st.info("📦 No cards saved yet — upload a CSV below to get started.")
 
             pur_file = st.file_uploader("Haystack or eBay Active Listings CSV", type=["csv"], key="pur_import_file")
             if pur_file:
@@ -6290,6 +6404,38 @@ create index if not exists idx_sr_sku on sales_records(sku);""", language="sql")
                                 if title_col: row_data["Title"] = grp[title_col].values
                                 if price_col: row_data["Price ($)"] = grp[price_col].values
                                 st.dataframe(pd.DataFrame(row_data), use_container_width=True, hide_index=True)
+
+                        # ── Save to Supabase ──────────────────────────────────────
+                        st.divider()
+                        st.markdown("**💾 Save Inventory to Supabase**")
+                        st.caption(f"{matched:,} matched cards will be saved. Re-uploading is safe — existing cards update, new cards add.")
+                        if known_groups:
+                            if st.button("💾 Save matched cards to Supabase", type="primary", key="pur_save_lc_btn"):
+                                rows_to_save = []
+                                for pfx2, grp2 in known_groups:
+                                    for _, row2 in grp2.iterrows():
+                                        rows_to_save.append({
+                                            "lot_prefix": pfx2,
+                                            "sku":        str(row2[sku_col]).strip(),
+                                            "title":      str(row2[title_col]).strip() if title_col else "",
+                                        })
+                                # Upsert in batches of 500
+                                total_saved = 0
+                                save_err = None
+                                for i in range(0, len(rows_to_save), 500):
+                                    batch = rows_to_save[i:i+500]
+                                    n, err = _pur_upsert_lot_cards(batch)
+                                    if err:
+                                        save_err = err
+                                        break
+                                    total_saved += n
+                                if save_err:
+                                    st.error(f"Save failed: {save_err}")
+                                else:
+                                    st.success(f"✅ Saved {total_saved:,} cards to Supabase. Reload the Lots tab to see the cross-check view.")
+                                    st.rerun()
+                        else:
+                            st.warning("No cards matched a lot — fix the lot prefixes first.")
 
                 except Exception as e:
                     st.error(f"Error reading file: {e}")
