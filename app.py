@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.23"
+APP_VERSION = "1.5.24"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,15 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.24": {
+        "emoji": "📈",
+        "title": "Lots: full ROI, turn rate, avg days to sell",
+        "items": [
+            ("📈", "Each lot now shows ROI %, Projected ROI, $/Card Cost, $/Card Net — see if the purchase was worth it."),
+            ("⏱️", "Turn Rate (cards/week) and Avg Days to Sell — how fast the lot is moving."),
+            ("📅", "Projected days to clear remaining cards at current pace."),
+        ],
+    },
     "1.5.23": {
         "emoji": "✅",
         "title": "Lots: sold cards detail table inside each lot",
@@ -6008,14 +6017,68 @@ with tab11:
                     else:
                         sales_label = " · no sales yet"
 
+                    # Compute turn/timing metrics
+                    sold_records_pre = _lot_sales_by_pfx.get(pfx.upper(), [])
+                    cost_per_card   = round(cost / expected, 2) if expected > 0 else None
+                    net_per_card    = round(net_rev / sold, 2) if sold > 0 else None
+                    roi_pct         = round((net_rev - cost) / cost * 100, 1) if cost > 0 else None
+                    proj_net        = round(net_per_card * expected, 2) if (net_per_card and expected > 0) else None
+                    proj_roi        = round((proj_net - cost) / cost * 100, 1) if (proj_net and cost > 0) else None
+
+                    # Turn rate and avg days to sell
+                    _turn_rate = None   # cards/week
+                    _avg_days  = None   # avg days from purchase to sale
+                    _days_left = None   # projected weeks to clear remaining
+                    if sold_records_pre and pdate and pdate != "—":
+                        try:
+                            from datetime import datetime as _dt, date as _date
+                            _pdate = _dt.strptime(pdate[:10], "%Y-%m-%d").date()
+                            _today = _date.today()
+                            _weeks_since = max(1, (_today - _pdate).days / 7)
+                            _turn_rate = round(sold / _weeks_since, 1)
+                            # Avg days from purchase date to each sale
+                            _sale_days = []
+                            for _s in sold_records_pre:
+                                _sd = _s.get("sale_date", "")
+                                if _sd:
+                                    try:
+                                        _sale_days.append((_dt.strptime(_sd[:10], "%Y-%m-%d").date() - _pdate).days)
+                                    except Exception:
+                                        pass
+                            if _sale_days:
+                                _avg_days = round(sum(_sale_days) / len(_sale_days), 0)
+                            if remaining and _turn_rate and _turn_rate > 0:
+                                _days_left = round(remaining / _turn_rate * 7)
+                        except Exception:
+                            pass
+
                     header = f"**{pfx}** — {source} · {pdate} · ${cost:,.2f}{sales_label}{count_label}"
                     with st.expander(header, expanded=False):
-                        ec1, ec2, ec3, ec4, ec5 = st.columns(5)
-                        ec1.metric("Cost Paid", f"${cost:,.2f}")
-                        ec2.metric("Cards", f"{expected}" if expected > 0 else "—")
-                        ec3.metric("Sold", sold)
-                        ec4.metric("Left", remaining if remaining is not None else "—")
-                        ec5.metric("Net Rev", f"${net_rev:,.2f}", delta=f"P&L ${pl:+,.2f}")
+                        # Row 1: core financials
+                        ec1, ec2, ec3, ec4, ec5, ec6 = st.columns(6)
+                        ec1.metric("Cost Paid",    f"${cost:,.2f}")
+                        ec2.metric("Net Revenue",  f"${net_rev:,.2f}")
+                        ec3.metric("P&L",          f"${pl:+,.2f}")
+                        ec4.metric("ROI",          f"{roi_pct:+.1f}%" if roi_pct is not None else "—",
+                                   help="Based on net revenue received so far vs total cost paid")
+                        ec5.metric("Proj ROI",     f"{proj_roi:+.1f}%" if proj_roi is not None else "—",
+                                   help="If remaining cards sell at same avg net/card")
+                        ec6.metric("$/Card Cost",  f"${cost_per_card:.2f}" if cost_per_card else "—")
+
+                        # Row 2: inventory & pace
+                        ep1, ep2, ep3, ep4, ep5, ep6 = st.columns(6)
+                        ep1.metric("Cards in Lot", f"{expected}" if expected > 0 else "—")
+                        ep2.metric("Sold",         sold)
+                        ep3.metric("Left",         remaining if remaining is not None else "—")
+                        ep4.metric("$/Card Net",   f"${net_per_card:.2f}" if net_per_card else "—",
+                                   help="Average net proceeds per card sold so far")
+                        ep5.metric("Turn Rate",    f"{_turn_rate}/wk" if _turn_rate else "—",
+                                   help="Cards sold per week since purchase date")
+                        ep6.metric("Avg Days to Sell", f"{int(_avg_days)}d" if _avg_days else "—",
+                                   help="Average days from lot purchase date to each card's sale date")
+
+                        if _days_left is not None:
+                            st.caption(f"📅 At current pace ({_turn_rate}/wk), ~{_days_left} days to clear remaining {remaining} cards.")
                         if lc_state:
                             st.caption(f"Cards in active listings CSV: {card_count_csv}")
                         if lot.get("notes"):
