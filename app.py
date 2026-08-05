@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.16"
+APP_VERSION = "1.5.17"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,17 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.17": {
+        "emoji": "💎",
+        "title": "Gem rate slider feeds GO/NO-GO + Grade vs Flip",
+        "items": [
+            ("💎", "Card Research now shows a gem rate slider right on the card stats row — set your estimate, it feeds the GO/NO-GO verdict immediately."),
+            ("✅", "GO/NO-GO now checks gem rate against your min threshold (sidebar) — not just price target alone."),
+            ("🔗", "PSA Pop Report link next to the slider so you can look up the real gem rate in one click."),
+            ("⚖️", "Grade vs Flip uses the same gem rate estimate — no more duplicate slider."),
+            ("⚡", "Search now goes to CardHedger first (fast) — no more waiting for GemRate timeout on every search."),
+        ],
+    },
     "1.5.16": {
         "emoji": "📊",
         "title": "Lot P&L: inventory turn, gross revenue, per-card stats, projected P&L",
@@ -2164,13 +2175,14 @@ with tab1:
 
     if query and (do_search or st.session_state.get("last_q") != query):
         st.session_state.last_q = query
-        with st.spinner("Searching GemRate..."):
-            st.session_state.gr_results = search_gemrate(query)
-        # If GemRate returned nothing, fall back to CardHedger AI match
-        if not st.session_state.gr_results and CARDHEDGER_KEY:
-            with st.spinner("GemRate unavailable — fetching prices from CardHedger..."):
+        with st.spinner("Searching card database..."):
+            # CardHedger first — fast and reliable for prices
+            if CARDHEDGER_KEY:
                 st.session_state.ch_match_result = ch_card_match(query)
-        else:
+            # Also try GemRate for population/gem-rate data (fails silently if offline)
+            st.session_state.gr_results = search_gemrate(query)
+        # Only use GemRate-primary path if CardHedger is not configured
+        if st.session_state.gr_results and not CARDHEDGER_KEY:
             st.session_state.pop("ch_match_result", None)
 
     results = st.session_state.get("gr_results", [])
@@ -2594,7 +2606,11 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
         fb1, fb2, fb3 = st.columns(3)
         with fb1:
             st.markdown("**Gem Rate (PSA 10)**")
-            st.markdown('<span style="color:#94a3b8;font-size:14px">N/A — GemRate offline</span>', unsafe_allow_html=True)
+            gem_fb = st.slider(
+                "Your gem rate estimate (%)", 0, 100, 50, 5, key="fb_gem_top",
+                help="How often this card grades PSA 10. Check the PSA Pop Report link below for historical rates. 50% is a neutral starting point.",
+            )
+            st.caption(f"[Look up PSA pop →]({psa_pop_url(desc)})")
         if psa10_val:
             fb2.metric("PSA 10", f"${psa10_val:,.2f}")
             _c10 = fmv_band_conf(fb_psa10_fmv)
@@ -2652,36 +2668,34 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
             )
 
             if graded_price > 0:
+                v_fb, color_fb, msg_fb = verdict(raw_cost, tier, gem_fb, graded_price, min_gem, roi_target, opp_rate, ship_cost)
                 net, roi = calc_net_roi(raw_cost, tier, graded_price, opp_rate, ship_cost)
-                if graded_price >= tgt:
-                    st.success(f"✅ GO — PSA 10 avg ${graded_price:,.0f} clears ${tgt:,.0f} target | Net ~${net:,.0f} | ROI ~{roi:.0f}% *(verify gem rate on PSA pop before submitting)*")
+                if color_fb == "green":
+                    st.success(f"{v_fb} — {msg_fb}")
                 else:
-                    st.error(f"❌ NO-GO — PSA 10 avg ${graded_price:,.0f} needs ${tgt:,.0f} for {roi_target:.0f}× | ROI only ~{roi:.0f}%")
-                r1, r2 = st.columns(2)
+                    st.error(f"{v_fb} — {msg_fb}")
+                r1, r2, r3 = st.columns(3)
                 r1.metric("Est. Net Profit", f"${net:,.0f}", help="After ALL costs: raw, grading, shipping, time cost, and eBay fees")
                 r2.metric("Est. ROI",        f"{roi:.0f}%")
+                r3.metric("Gem Rate Est.",   f"{gem_fb}%", help="Your estimate set above. Check PSA pop report to calibrate.")
 
                 summary_fb = f"""{desc}
-Source: CardHedger | Gem Rate: N/A (GemRate offline)
-Raw: ${raw_cost:,.2f} | PSA 10 Avg: ${graded_price:,.2f}
+Source: CardHedger | Gem Rate estimate: {gem_fb}% (set manually — verify on PSA pop)
+Raw: ${raw_cost:,.2f} | PSA 10 FMV: ${graded_price:,.2f}
 Grading fee: ${fee:.2f} | Shipping: ${ship_cost:.2f} | Time cost ({cal_days} days @ {opp_rate:.0f}%/yr): ${opp:,.2f}
-True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI: {roi:.0f}%"""
+True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI: {roi:.0f}%
+Verdict: {v_fb} — {msg_fb}"""
                 with st.expander("📋 Copy Analysis"):
                     st.code(summary_fb, language=None)
             else:
                 st.info("Enter a PSA 10 price above to get a GO/NO-GO decision")
 
-        # ── ⚖️ Grade vs Flip (works even with GemRate offline) ────────────────
+        # ── ⚖️ Grade vs Flip ──────────────────────────────────────────────────
         if raw_cost > 0 and (raw_val or psa10_val or psa9_val):
             st.markdown("#### ⚖️ Grade vs Flip — the real decision")
             st.caption(
-                "Grading locks up your cash for months. Here's what each path nets. "
-                "GemRate is offline, so set your own gem-rate estimate below to weight the PSA 10 vs PSA 9 outcome."
-            )
-            gem_fb = st.slider(
-                "Estimated gem rate % (your best guess — PSA pop is offline)",
-                0, 100, 50, 5, key="fb_gem",
-                help="How often you think this card grades a PSA 10. 50% is a neutral default.",
+                f"Grading locks up your cash for months. Using your {gem_fb}% gem rate estimate "
+                f"(set above) to weight the PSA 10 vs PSA 9 outcome."
             )
             gvf = grade_vs_flip(raw_cost, raw_val, psa10_val, psa9_val, gem_fb, tier, ship_cost, opp_rate)
             d1, d2, d3 = st.columns(3)
@@ -2771,7 +2785,7 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
                     "psa_fee":          fee,
                     "psa10_avg_price":  graded_price or None,
                     "target_price":     round(tgt, 2),
-                    "gem_rate":         None,
+                    "gem_rate":         gem_fb,
                     "go_no_go":         v_fb,
                     "est_net":          net,
                     "est_roi":          f"{roi_val:.0f}%" if roi_val is not None else None,
