@@ -3607,7 +3607,7 @@ with tab8:
                             combo = _PIL_b.new("RGB", (w * 2 + 2, max(tf.height, tb.height)), (200, 200, 200))
                             combo.paste(tf, (0, 0))
                             combo.paste(tb, (w + 2, 0))
-                            st.image(combo, caption=f"#{ci+1}", use_container_width=True)
+                            st.image(combo, caption=f"#{ci+1}", width=200)
                         except Exception:
                             st.caption(f"#{ci+1}")
                 if n_pairs > 8:
