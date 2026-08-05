@@ -3597,9 +3597,9 @@ with tab8:
                 for ci in range(preview_n):
                     col_f, col_b = st.columns(2)
                     with col_f:
-                        st.image(front_files[ci].getvalue(), caption=f"#{ci+1} Front", use_container_width=True)
+                        st.image(front_files[ci].getvalue(), caption=f"#{ci+1} Front", width=180)
                     with col_b:
-                        st.image(back_files[ci].getvalue(), caption=f"#{ci+1} Back", use_container_width=True)
+                        st.image(back_files[ci].getvalue(), caption=f"#{ci+1} Back", width=180)
                 if n_pairs > 6:
                     st.caption(f"+ {n_pairs - 6} more pairs not shown")
 
@@ -3631,9 +3631,16 @@ with tab8:
                                 c["back_url"]   = back_url
                                 c["back_path"]  = back_path
 
+                                # Try image-match first (AI-powered)
                                 match_res  = ch_image_match_raw(front_url, k=5)
                                 best       = match_res.get("best_match") or {}
                                 candidates = match_res.get("candidates") or []
+
+                                # Fallback: image-search (broader KNN, no AI filter)
+                                if not best.get("card_id") and not candidates:
+                                    search_res = _ch_post("/v1/cards/image-search", {"image_url": front_url, "k": 5}) or {}
+                                    candidates = search_res.get("results") or search_res.get("candidates") or []
+                                    match_res  = search_res
 
                                 if best and best.get("card_id"):
                                     c.update({
@@ -3661,7 +3668,8 @@ with tab8:
                                         "low_conf":   True,
                                     })
                                 else:
-                                    c["error"] = "No visual match — try a higher-resolution scan"
+                                    api_msg = match_res.get("message") or match_res.get("error") or "No candidates returned"
+                                    c["error"] = f"No visual match — {api_msg}"
 
                                 if c.get("status") == "identified":
                                     c["title"] = _raw_title(
