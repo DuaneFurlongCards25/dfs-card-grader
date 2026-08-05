@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.20"
+APP_VERSION = "1.5.21"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,14 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.21": {
+        "emoji": "📊",
+        "title": "Lots: live sold/left/revenue tally on every lot",
+        "items": [
+            ("📊", "Each lot now shows sold count, cards left, net revenue, and P&L right in the header — no need to go to P&L sub-tab."),
+            ("🟢", "Metrics row inside each lot: Cost · Cards · Sold · Left · Net Rev with P&L delta."),
+        ],
+    },
     "1.5.20": {
         "emoji": "🔑",
         "title": "Login remembers your access code",
@@ -5902,6 +5910,26 @@ with tab11:
 
                 lc_state = st.session_state.get("pur_lot_cards")
 
+                # Load live sales data for all lots
+                _lot_sales_raw = _pur_get("sales_records", "?select=sku,net_proceeds,gross_revenue&sku=not.is.null&limit=5000")
+                _lot_alias_map = {}
+                for _l in lots_data:
+                    _lot_alias_map[_l["lot_prefix"].upper()] = _l["lot_prefix"].upper()
+                    for _a in (_l.get("alias_prefixes") or "").split(","):
+                        _a = _a.strip().upper()
+                        if _a:
+                            _lot_alias_map[_a] = _l["lot_prefix"].upper()
+                _lot_rev = {}
+                for _s in _lot_sales_raw:
+                    _p = _pur_prefix(_s.get("sku", ""))
+                    if _p:
+                        _canon = _lot_alias_map.get(_p.upper(), _p.upper())
+                        if _canon not in _lot_rev:
+                            _lot_rev[_canon] = {"net": 0.0, "gross": 0.0, "count": 0}
+                        _lot_rev[_canon]["net"]   += float(_s.get("net_proceeds") or 0)
+                        _lot_rev[_canon]["gross"] += float(_s.get("gross_revenue") or 0)
+                        _lot_rev[_canon]["count"] += 1
+
                 st.divider()
                 st.markdown("**Your Lots**")
                 for lot in lots_data:
@@ -5910,6 +5938,11 @@ with tab11:
                     cost     = float(lot.get("total_cost") or 0)
                     source   = lot.get("source") or "—"
                     pdate    = lot.get("purchase_date") or "—"
+                    _rev     = _lot_rev.get(pfx.upper(), {})
+                    sold     = _rev.get("count", 0)
+                    net_rev  = _rev.get("net", 0.0)
+                    remaining = max(0, expected - sold) if expected > 0 else None
+                    pl       = round(net_rev - cost, 2)
 
                     # Count cards from CSV for this lot
                     lot_cards_df = None
@@ -5923,18 +5956,28 @@ with tab11:
                     if lc_state:
                         if expected > 0:
                             diff = card_count_csv - expected
-                            count_label = f" · {card_count_csv}/{expected} cards" + (" ✅" if diff == 0 else f" ({'+'if diff>0 else ''}{diff})")
+                            count_label = f" · {card_count_csv}/{expected} in CSV" + (" ✅" if diff == 0 else f" ({'+'if diff>0 else ''}{diff})")
                         else:
-                            count_label = f" · {card_count_csv} cards"
+                            count_label = f" · {card_count_csv} in CSV"
 
-                    header = f"**{pfx}** — {source} · {pdate} · ${cost:,.2f}{count_label}"
+                    # Sales tally in header
+                    if sold > 0:
+                        left_label = f"{remaining} left" if remaining is not None else f"{sold} sold"
+                        pl_label = f"{'+'if pl>=0 else ''}{pl:,.0f}"
+                        sales_label = f" · {sold} sold / {left_label} · Net ${net_rev:,.0f} · P&L ${pl_label}"
+                    else:
+                        sales_label = " · no sales yet"
+
+                    header = f"**{pfx}** — {source} · {pdate} · ${cost:,.2f}{sales_label}{count_label}"
                     with st.expander(header, expanded=False):
-                        ec1, ec2, ec3 = st.columns(3)
+                        ec1, ec2, ec3, ec4, ec5 = st.columns(5)
                         ec1.metric("Cost Paid", f"${cost:,.2f}")
-                        if expected > 0:
-                            ec2.metric("Expected Cards", expected)
+                        ec2.metric("Cards", f"{expected}" if expected > 0 else "—")
+                        ec3.metric("Sold", sold)
+                        ec4.metric("Left", remaining if remaining is not None else "—")
+                        ec5.metric("Net Rev", f"${net_rev:,.2f}", delta=f"P&L ${pl:+,.2f}")
                         if lc_state:
-                            ec3.metric("Cards in CSV", card_count_csv)
+                            st.caption(f"Cards in active listings CSV: {card_count_csv}")
                         if lot.get("notes"):
                             st.caption(lot["notes"])
                         if lc_state and lot_cards_df is not None and not lot_cards_df.empty:
