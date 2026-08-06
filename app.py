@@ -3938,11 +3938,14 @@ with tab8:
                     st.markdown("**Step 2 — Review & Price**")
 
                     # Build editable table
+                    import urllib.parse as _uparse
                     edit_rows = []
                     for c in identified:
                         sim = c.get("similarity", 0)
                         fmv_display = f"${c['fmv']:.2f}" if c.get("fmv") else "—"
                         cond_label  = next((k for k, v in _RAW_CONDITIONS.items() if v == c.get("condition_id", "2750")), "Near Mint (NM)")
+                        ebay_q      = _uparse.quote_plus(c.get("title", c.get("player", "")))
+                        ebay_url    = f"https://www.ebay.com/sch/i.html?_nkw={ebay_q}&_sacat=261328&LH_Sold=1&LH_Complete=1"
                         edit_rows.append({
                             "✓":          c.get("include", True),
                             "#":          c["idx"] + 1,
@@ -3953,6 +3956,7 @@ with tab8:
                             "FMV Conf":   c.get("fmv_conf", ""),
                             "Price ($)":  float(c.get("price") or 2.49),
                             "Condition":  cond_label,
+                            "🔍 eBay":    ebay_url,
                         })
 
                     edited = st.data_editor(
@@ -3973,6 +3977,7 @@ with tab8:
                             "Price ($)":  st.column_config.NumberColumn("Your Price", min_value=0.01, format="$%.2f"),
                             "Condition":  st.column_config.SelectboxColumn(
                                               "Condition", options=list(_RAW_CONDITIONS.keys()), width="medium"),
+                            "🔍 eBay":    st.column_config.LinkColumn("🔍 eBay", display_text="View Sold", width="small"),
                         },
                     )
 
@@ -3990,8 +3995,12 @@ with tab8:
                                 placeholder="e.g. Ceddanne Rafaela 2024 Topps Chrome")
                             if st.button("🔍 Search", key="reid_go") and reid_q:
                                 with st.spinner("Searching catalog…"):
-                                    sr = _ch_post("/v1/cards/search", {"query": reid_q, "k": 8}) or {}
-                                    reid_results = sr.get("results") or sr.get("candidates") or []
+                                    sr = _ch_post("/v1/cards/card-search", {"search": reid_q, "page": 1, "page_size": 10}) or {}
+                                    for _rk in ("cards", "data", "results", "items"):
+                                        if _rk in sr and isinstance(sr[_rk], list):
+                                            reid_results = sr[_rk]; break
+                                    else:
+                                        reid_results = sr if isinstance(sr, list) else []
                                     st.session_state["reid_results"] = reid_results
                                     st.session_state["reid_card_idx"] = reid_card["idx"]
 
@@ -3999,24 +4008,24 @@ with tab8:
                             if reid_results and st.session_state.get("reid_card_idx") == reid_card["idx"]:
                                 st.caption(f"{len(reid_results)} results — pick the correct card:")
                                 for ri, r in enumerate(reid_results):
-                                    rc_title = f"{r.get('year','')} {r.get('set','')} {r.get('player','').upper()} #{r.get('number','')}".strip()
-                                    rc_sub   = r.get('variant','') or 'Base'
-                                    if st.button(f"✓ {rc_title} — {rc_sub}", key=f"reid_pick_{ri}"):
+                                    # card-search returns card_name or player; set_name; card_number; year; parallel
+                                    player = r.get("card_name") or r.get("player","")
+                                    year   = str(r.get("year",""))
+                                    set_n  = r.get("set_name") or r.get("set","")
+                                    num    = r.get("card_number") or r.get("number","")
+                                    par    = r.get("parallel") or r.get("variant","")
+                                    par    = par if par and par.lower() not in ("base","") else ""
+                                    rc_title = f"{year} {set_n} {player.upper()} #{num}".strip()
+                                    if st.button(f"✓  {rc_title}{' — '+par if par else ''}", key=f"reid_pick_{ri}"):
                                         # Update the card in raw_batch with the new match
                                         for bc in st.session_state.raw_batch:
                                             if bc["idx"] == reid_card["idx"]:
-                                                player = r.get("player","")
-                                                year   = r.get("year","")
-                                                set_n  = r.get("set","")
-                                                num    = r.get("number","")
-                                                var    = r.get("variant","")
-                                                par    = var if var and var.lower() != "base" else ""
                                                 parts  = [year, set_n, player.upper(), f"#{num}" if num else "", par]
                                                 bc["title"]      = " ".join(p for p in parts if p)
                                                 bc["player"]     = player
                                                 bc["set_name"]   = set_n
-                                                bc["card_id"]    = r.get("card_id","")
-                                                bc["similarity"] = r.get("similarity", 85)
+                                                bc["card_id"]    = r.get("card_id") or r.get("id","")
+                                                bc["similarity"] = 90
                                                 bc["low_conf"]   = False
                                                 st.session_state["reid_results"] = []
                                                 st.rerun()
