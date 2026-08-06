@@ -1496,16 +1496,22 @@ def _scan_title(player, set_name, number, grade, variant=""):
                           f"#{number}" if number else "", var, grade] if p]
     return " ".join(parts)[:80]
 
-def _scan_description(title: str) -> str:
+def _scan_description(title: str, front_url: str = "") -> str:
+    img_block = (
+        f'<div style="text-align:center;margin:20px 0;">'
+        f'<img src="{front_url}" alt="{title}" style="max-width:400px;width:100%;border:1px solid #ddd;border-radius:4px;">'
+        f'</div>'
+    ) if front_url else ""
     return (
-        '<div style="font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;">'
-        f'<h2 style="margin:0 0 12px;font-size:22px;text-transform:uppercase;">{title}</h2>'
+        '<div style="font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;max-width:600px;margin:0 auto;">'
+        f'<h2 style="margin:0 0 12px;font-size:22px;text-transform:uppercase;text-align:center;">{title}</h2>'
+        f'{img_block}'
         '<ol style="margin:0 0 20px;padding-left:20px;">'
-        '<li style="margin-bottom:10px;">All cards are scanned. If you see any lines, if you want more pictures, just ask!</li>'
-        '<li style="margin-bottom:10px;">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.</li>'
-        '<li style="margin-bottom:10px;">All cards valued over $100 will have insurance added, which protects you as the buyer.</li>'
+        '<li style="margin-bottom:10px;">All cards are scanned. If you see any lines or want more pictures, just ask!</li>'
+        '<li style="margin-bottom:10px;">Cards over $20 ship with tracking. Memorabilia/patch cards ship Ground Advantage to prevent damage.</li>'
+        '<li style="margin-bottom:10px;">Cards over $100 include shipping insurance — you\'re protected as the buyer.</li>'
         '</ol>'
-        '<p style="margin:0;">My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!</p>'
+        '<p style="margin:0;">My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions? Please ask!!!</p>'
         '</div>'
     )
 
@@ -4017,13 +4023,14 @@ with tab8:
                                     par    = par if par and par.lower() not in ("base","") else ""
                                     rc_title = f"{year} {set_n} {player.upper()} #{num}".strip()
                                     if st.button(f"✓  {rc_title}{' — '+par if par else ''}", key=f"reid_pick_{ri}"):
-                                        # Update the card in raw_batch with the new match
                                         for bc in st.session_state.raw_batch:
                                             if bc["idx"] == reid_card["idx"]:
                                                 parts  = [year, set_n, player.upper(), f"#{num}" if num else "", par]
-                                                bc["title"]      = " ".join(p for p in parts if p)
+                                                bc["title"]      = " ".join(p for p in parts if p)[:80]
                                                 bc["player"]     = player
                                                 bc["set_name"]   = set_n
+                                                bc["number"]     = num
+                                                bc["variant"]    = par
                                                 bc["card_id"]    = r.get("card_id") or r.get("id","")
                                                 bc["similarity"] = 90
                                                 bc["low_conf"]   = False
@@ -4068,43 +4075,154 @@ with tab8:
                     # ── Export ────────────────────────────────────────────────
                     st.markdown("---")
                     st.markdown("**Step 3 — Export to eBay**")
+                    st.caption("✏️ Edit the **Your Price** column above to set your sell price per card before exporting.")
                     edited_records = edited.to_dict("records")
                     n_included = sum(1 for r in edited_records if r.get("✓"))
 
+                    # Helper: parse manufacturer and year from set_name
+                    def _mfr(set_name):
+                        s = (set_name or "").lower()
+                        for m in ["Topps","Bowman","Panini","Donruss","Upper Deck","Score","Fleer","Pacific","Select","Prizm","Mosaic","Optic","Stadium Club"]:
+                            if m.lower() in s:
+                                return m
+                        return "Topps"
+
+                    def _year(set_name):
+                        m = re.search(r"\b(19|20)\d{2}\b", set_name or "")
+                        return m.group() if m else ""
+
+                    # Condition ID → eBay item specific value
+                    _COND_SPECIFIC = {
+                        "2750": "400010",  # NM
+                        "3000": "400020",  # EX
+                        "4000": "400030",  # VG
+                        "5000": "400040",  # G
+                        "6000": "400050",  # Poor
+                    }
+
+                    ACTION_COL = "*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)"
+                    COLS = [
+                        ACTION_COL, "CustomLabel", "*Category", "StoreCategory",
+                        "*Title", "Subtitle", "Relationship", "*ConditionID",
+                        "*C:Graded", "*C:Sport", "*C:Player/Athlete", "*C:Parallel/Variety",
+                        "*C:Manufacturer", "C:Season", "*C:Features", "*C:Set",
+                        "CD:Grade - (ID: 27502)", "*C:League", "CD:Professional Grader - (ID: 27501)",
+                        "*C:Team", "*C:Autographed", "CD:Card Condition - (ID: 40001)",
+                        "*C:Card Name", "*C:Card Number", "CDA:Certification Number - (ID: 27503)",
+                        "*C:Type", "C:Signed By", "C:Autograph Authentication",
+                        "C:Year Manufactured", "C:Card Size", "C:Country/Region of Manufacturer",
+                        "C:Material", "C:Autograph Format", "C:Vintage", "C:Original/Licensed Reprint",
+                        "C:Event/Tournament", "C:Language", "C:Autograph Authentication Number",
+                        "C:Bundle Description", "C:California Prop 65 Warning", "C:Card Thickness",
+                        "C:Custom Bundle", "C:Insert Set", "C:Print Run",
+                        "PicURL", "GalleryType", "*Description", "*Format", "*Duration",
+                        "*StartPrice", "BuyItNowPrice", "*Quantity",
+                        "PayPalAccepted", "PayPalEmailAddress", "ImmediatePayRequired",
+                        "PaymentInstructions", "*Location", "PostalCode",
+                        "ShippingType", "ShippingService-1:Option", "ShippingService-1:FreeShipping",
+                        "ShippingService-1:Cost", "ShippingService-1:AdditionalCost",
+                        "ShippingService-2:Option", "ShippingService-2:Cost",
+                        "*DispatchTimeMax", "PromotionalShippingDiscount", "ShippingDiscountProfileID",
+                        "*ReturnsAcceptedOption", "ReturnsWithinOption", "RefundOption",
+                        "ShippingCostPaidByOption", "AdditionalDetails",
+                        "ShippingProfileName", "ReturnProfileName", "PaymentProfileName",
+                        "TakeBackPolicyID", "ProductCompliancePolicyID", "ScheduleTime",
+                        "BestOfferEnabled", "MinimumBestOfferPrice", "BestOfferAutoAcceptPrice",
+                        "*C:Rookie", "*C:Memorabilia", "ActiveListings", "SoldListings",
+                        "Confidence", "PricingPulledFrom",
+                    ]
+
                     ex_c1, ex_c2 = st.columns([2, 1])
                     if ex_c1.button(f"⬇️ Export eBay CSV ({n_included} cards)", type="primary", key="raw_export_btn"):
-                        ACTION_COL = "*Action(SiteID=US|Country=US|Currency=USD|Version=1193)"
-                        cols = [ACTION_COL, "*Title", "*Category", "*ConditionID",
-                                "Custom label (SKU)", "*StartPrice", "ShippingProfileName",
-                                "PostalCode", "PicURL", "Description", "ReturnsAcceptedOption"]
-                        buf = io.StringIO()
-                        writer = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
-                        writer.writeheader()
                         import datetime as _dt_exp
                         date_str   = _dt_exp.date.today().strftime("%m%d%y")
                         export_idx = 1
+
+                        buf = io.StringIO()
+                        # Row 1: Info header (eBay File Exchange requirement)
+                        info_row = ["Info", "Version=1.0.0", "Template=fx_category_template_EBAY_US"] + [""] * (len(COLS) - 3)
+                        buf.write(",".join(info_row) + "\n")
+                        # Row 2: Column headers
+                        writer = csv.DictWriter(buf, fieldnames=COLS, extrasaction="ignore")
+                        writer.writeheader()
+
                         for row, orig in zip(edited_records, identified):
                             if not row.get("✓"):
                                 continue
                             title    = (row.get("eBay Title") or orig.get("title", ""))[:80]
                             price    = float(row.get("Price ($)") or 2.49)
-                            cond_id  = _RAW_CONDITIONS.get(row.get("Condition", "Near Mint (NM)"), "2750")
+                            cond_lbl = row.get("Condition", "Near Mint (NM)")
+                            cond_id  = _RAW_CONDITIONS.get(cond_lbl, "2750")
+                            cond_sp  = _COND_SPECIFIC.get(cond_id, "400010")
                             sku      = f"DFS-{date_str}-{export_idx:04d}"
                             front_u  = orig.get("front_url", "")
                             back_u   = orig.get("back_url", "")
                             pic_url  = f"{front_u}|{back_u}" if back_u else front_u
+                            player   = orig.get("player", "")
+                            set_n    = orig.get("set_name", "")
+                            number   = orig.get("number", "")
+                            variant  = orig.get("variant", "")
+                            par      = variant if variant and variant.lower() not in ("base","") else ""
+                            year     = _year(set_n)
+                            mfr      = _mfr(set_n)
+                            sim      = orig.get("similarity", 0)
+
+                            # Shipping by price
+                            if price < 1.00:
+                                ship_cost = "0.00"; ship_free = "1"
+                            elif price < 20:
+                                ship_cost = "0.74"; ship_free = "0"
+                            else:
+                                ship_cost = "0.00"; ship_free = "1"
+
+                            desc = _scan_description(title, front_u)
+
                             writer.writerow({
-                                ACTION_COL:              "Add",
-                                "*Title":                title,
-                                "*Category":             "261328",
-                                "*ConditionID":          cond_id,
-                                "Custom label (SKU)":    sku,
-                                "*StartPrice":           f"{price:.2f}",
-                                "ShippingProfileName":   _scan_shipping(price),
-                                "PostalCode":            "85250-6312",
-                                "PicURL":                pic_url,
-                                "Description":           _scan_description(title),
-                                "ReturnsAcceptedOption": "ReturnsNotAccepted",
+                                ACTION_COL:                           "Add",
+                                "CustomLabel":                        sku,
+                                "*Category":                          "261328",
+                                "StoreCategory":                      "0",
+                                "*Title":                             title,
+                                "*ConditionID":                       cond_id,
+                                "*C:Graded":                          "No",
+                                "*C:Sport":                           "BASEBALL",
+                                "*C:Player/Athlete":                  player,
+                                "*C:Parallel/Variety":                par,
+                                "*C:Manufacturer":                    mfr,
+                                "C:Season":                           year,
+                                "*C:Set":                             set_n,
+                                "*C:League":                          "MLB",
+                                "*C:Autographed":                     "No",
+                                "CD:Card Condition - (ID: 40001)":    cond_sp,
+                                "*C:Card Number":                     number,
+                                "*C:Type":                            "Sports Trading Card",
+                                "C:Year Manufactured":                year,
+                                "C:Insert Set":                       par,
+                                "PicURL":                             pic_url,
+                                "*Description":                       desc,
+                                "*Format":                            "FixedPrice",
+                                "*Duration":                          "GTC",
+                                "*StartPrice":                        f"{price:.2f}",
+                                "BuyItNowPrice":                      "0",
+                                "*Quantity":                          "1",
+                                "PayPalAccepted":                     "1",
+                                "ImmediatePayRequired":               "1",
+                                "*Location":                          "Scottsdale,AZ",
+                                "PostalCode":                         "85250-6312",
+                                "ShippingType":                       "Flat",
+                                "ShippingService-1:Option":           "US_eBayStandardEnvelope",
+                                "ShippingService-1:FreeShipping":     ship_free,
+                                "ShippingService-1:Cost":             ship_cost,
+                                "ShippingService-1:AdditionalCost":   "0",
+                                "*DispatchTimeMax":                   "2",
+                                "*ReturnsAcceptedOption":             "ReturnsNotAccepted",
+                                "BestOfferEnabled":                   "1",
+                                "*C:Rookie":                          "No",
+                                "*C:Memorabilia":                     "No",
+                                "ActiveListings":                     "Active",
+                                "SoldListings":                       "Completed",
+                                "Confidence":                         f"{sim:.0f}%",
+                                "PricingPulledFrom":                  set_n + " " + player,
                             })
                             export_idx += 1
                         csv_bytes = buf.getvalue().encode("utf-8")
