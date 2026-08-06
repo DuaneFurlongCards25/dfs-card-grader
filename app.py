@@ -3713,19 +3713,20 @@ with tab8:
             _SCANNER_PY = Path(__file__).parent / "card-scanner" / "app.py"
             _PYTHON     = "/Library/Frameworks/Python.framework/Versions/3.14/bin/python3"
 
-            if not _scanner_running():
-                st.markdown("### 📷 Batch Scanner")
-                st.info("Keyboard-driven bulk matching — upload images, hit 1–8 to pick the right parallel, Enter to confirm, auto-advances to the next card. Comps + trend fetch in the background.")
-                if st.button("🚀 Launch Batch Scanner", type="primary", key="launch_scanner"):
-                    _sp.Popen(
-                        [_PYTHON, str(_SCANNER_PY)],
-                        cwd=str(_SCANNER_PY.parent),
-                        stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
-                    )
-                    import time as _t; _t.sleep(2)
-                    st.rerun()
-            else:
-                st.components.v1.iframe("http://localhost:5100", height=860, scrolling=True)
+            if _SCANNER_PY.exists():
+                if not _scanner_running():
+                    st.markdown("### 📷 Batch Scanner")
+                    st.info("Keyboard-driven bulk matching — upload images, hit 1–8 to pick the right parallel, Enter to confirm, auto-advances to the next card. Comps + trend fetch in the background.")
+                    if st.button("🚀 Launch Batch Scanner", type="primary", key="launch_scanner"):
+                        _sp.Popen(
+                            [_PYTHON, str(_SCANNER_PY)],
+                            cwd=str(_SCANNER_PY.parent),
+                            stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+                        )
+                        import time as _t; _t.sleep(2)
+                        st.rerun()
+                else:
+                    st.components.v1.iframe("http://localhost:5100", height=860, scrolling=True)
 
             if "raw_batch" not in st.session_state:
                 st.session_state.raw_batch = []
@@ -3974,6 +3975,51 @@ with tab8:
                                               "Condition", options=list(_RAW_CONDITIONS.keys()), width="medium"),
                         },
                     )
+
+                    # ── Re-identify low-confidence cards ──────────────────────
+                    low_conf_cards = [c for c in identified if c.get("low_conf")]
+                    if low_conf_cards:
+                        st.markdown("---")
+                        with st.expander("🔍 Re-identify a card (search by name / set)", expanded=True):
+                            reid_options = {f"Card {c['idx']+1} — {c.get('player','')} {c.get('set_name','')} (Conf: {c.get('similarity',0):.0f}%)": c for c in low_conf_cards}
+                            reid_label = st.selectbox("Which card to re-identify:", list(reid_options.keys()), key="reid_select")
+                            reid_card  = reid_options[reid_label]
+                            reid_q = st.text_input("Search query (player name, year, set):",
+                                value=f"{reid_card.get('player','')} {reid_card.get('set_name','')}".strip(),
+                                key="reid_query",
+                                placeholder="e.g. Ceddanne Rafaela 2024 Topps Chrome")
+                            if st.button("🔍 Search", key="reid_go") and reid_q:
+                                with st.spinner("Searching catalog…"):
+                                    sr = _ch_post("/v1/cards/search", {"query": reid_q, "k": 8}) or {}
+                                    reid_results = sr.get("results") or sr.get("candidates") or []
+                                    st.session_state["reid_results"] = reid_results
+                                    st.session_state["reid_card_idx"] = reid_card["idx"]
+
+                            reid_results = st.session_state.get("reid_results", [])
+                            if reid_results and st.session_state.get("reid_card_idx") == reid_card["idx"]:
+                                st.caption(f"{len(reid_results)} results — pick the correct card:")
+                                for ri, r in enumerate(reid_results):
+                                    rc_title = f"{r.get('year','')} {r.get('set','')} {r.get('player','').upper()} #{r.get('number','')}".strip()
+                                    rc_sub   = r.get('variant','') or 'Base'
+                                    if st.button(f"✓ {rc_title} — {rc_sub}", key=f"reid_pick_{ri}"):
+                                        # Update the card in raw_batch with the new match
+                                        for bc in st.session_state.raw_batch:
+                                            if bc["idx"] == reid_card["idx"]:
+                                                player = r.get("player","")
+                                                year   = r.get("year","")
+                                                set_n  = r.get("set","")
+                                                num    = r.get("number","")
+                                                var    = r.get("variant","")
+                                                par    = var if var and var.lower() != "base" else ""
+                                                parts  = [year, set_n, player.upper(), f"#{num}" if num else "", par]
+                                                bc["title"]      = " ".join(p for p in parts if p)
+                                                bc["player"]     = player
+                                                bc["set_name"]   = set_n
+                                                bc["card_id"]    = r.get("card_id","")
+                                                bc["similarity"] = r.get("similarity", 85)
+                                                bc["low_conf"]   = False
+                                                st.session_state["reid_results"] = []
+                                                st.rerun()
 
                     # ── Comps viewer ──────────────────────────────────────────
                     st.markdown("---")
