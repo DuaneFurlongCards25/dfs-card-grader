@@ -3708,6 +3708,84 @@ with tab8:
             import subprocess as _sp
             import socket as _sock
 
+            # ── eBay Export Settings (persists in session) ─────────────────
+            _BATCH_DEFAULTS = {
+                "sku_prefix":        "DFS",
+                "default_condition": "Near Mint (NM)",
+                "best_offer":        True,
+                "sport":             "BASEBALL",
+                "store_cat_baseball":  "44411116016",
+                "store_cat_basketball":"44411138016",
+                "store_cat_football":  "44411117016",
+                "store_cat_soccer":    "44411118016",
+                "store_cat_other":     "0",
+                "desc_template": (
+                    '<div style="font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;max-width:600px;margin:0 auto;">'
+                    '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">'
+                    '<tr>'
+                    '<td valign="top" style="width:180px;padding-right:20px;">'
+                    '<img src="[FRONT_IMAGE_URL]" alt="[LISTING_TITLE]" style="width:100%;max-width:180px;border-radius:8px;border:1px solid #e5e7eb;"/>'
+                    '</td>'
+                    '<td valign="top">'
+                    '<h2 style="margin:0 0 12px;font-size:22px;text-transform:uppercase;">[LISTING_TITLE]</h2>'
+                    '<ol style="margin:0 0 16px;padding-left:20px;">'
+                    '<li style="margin-bottom:8px;">All cards are scanned. If you see any lines or want more pictures, just ask!</li>'
+                    '<li style="margin-bottom:8px;">Cards over $20 ship with tracking. Memorabilia/patch cards ship Ground Advantage to prevent damage.</li>'
+                    '<li style="margin-bottom:8px;">Cards over $100 include shipping insurance — you\'re protected as the buyer.</li>'
+                    '</ol>'
+                    '<p style="margin:0;">My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions? Please ask!!!</p>'
+                    '</td>'
+                    '</tr>'
+                    '</table>'
+                    '</div>'
+                ),
+            }
+            for _k, _v in _BATCH_DEFAULTS.items():
+                if f"bx_{_k}" not in st.session_state:
+                    st.session_state[f"bx_{_k}"] = _v
+
+            with st.expander("⚙️ eBay Export Settings", expanded=False):
+                _sc1, _sc2 = st.columns(2)
+                with _sc1:
+                    st.markdown("**Listing Basics**")
+                    st.session_state["bx_sku_prefix"] = st.text_input(
+                        "SKU Prefix", value=st.session_state["bx_sku_prefix"], key="bxw_sku")
+                    st.session_state["bx_default_condition"] = st.selectbox(
+                        "Default Condition",
+                        list(_RAW_CONDITIONS.keys()),
+                        index=list(_RAW_CONDITIONS.keys()).index(st.session_state["bx_default_condition"]),
+                        key="bxw_cond")
+                    st.session_state["bx_sport"] = st.selectbox(
+                        "Sport", ["BASEBALL","BASKETBALL","FOOTBALL","SOCCER","OTHER"],
+                        index=["BASEBALL","BASKETBALL","FOOTBALL","SOCCER","OTHER"].index(st.session_state["bx_sport"]),
+                        key="bxw_sport")
+                    st.session_state["bx_best_offer"] = st.checkbox(
+                        "Enable Best Offer", value=st.session_state["bx_best_offer"], key="bxw_bo")
+                with _sc2:
+                    st.markdown("**eBay Store Category IDs**")
+                    st.caption("Find your category IDs in eBay Seller Hub → Store → Manage Categories")
+                    st.session_state["bx_store_cat_baseball"]   = st.text_input("Baseball",    value=st.session_state["bx_store_cat_baseball"],   key="bxw_sb")
+                    st.session_state["bx_store_cat_basketball"] = st.text_input("Basketball",  value=st.session_state["bx_store_cat_basketball"], key="bxw_sk")
+                    st.session_state["bx_store_cat_football"]   = st.text_input("Football",    value=st.session_state["bx_store_cat_football"],   key="bxw_sf")
+                    st.session_state["bx_store_cat_soccer"]     = st.text_input("Soccer",      value=st.session_state["bx_store_cat_soccer"],     key="bxw_sc")
+                    st.session_state["bx_store_cat_other"]      = st.text_input("Other/Default", value=st.session_state["bx_store_cat_other"],    key="bxw_so")
+
+                st.markdown("---")
+                st.markdown("**Description Template**")
+                st.caption("Use `[LISTING_TITLE]` and `[FRONT_IMAGE_URL]` as placeholders — they'll be replaced per card on export.")
+                new_tmpl = st.text_area(
+                    "HTML Template", value=st.session_state["bx_desc_template"],
+                    height=200, key="bxw_tmpl", label_visibility="collapsed")
+                st.session_state["bx_desc_template"] = new_tmpl
+
+                # Live preview
+                _prev_title = "JAZZ CHISHOLM 2019 Bowman Chrome #BTP-63 Green Refractor"
+                _prev_html  = new_tmpl.replace("[LISTING_TITLE]", _prev_title).replace("[FRONT_IMAGE_URL]", "")
+                with st.expander("👁 Preview description"):
+                    st.markdown(_prev_html, unsafe_allow_html=True)
+
+            st.markdown("---")
+
             def _scanner_running():
                 try:
                     s = _sock.create_connection(("localhost", 5100), timeout=1)
@@ -4138,6 +4216,20 @@ with tab8:
                         date_str   = _dt_exp.date.today().strftime("%m%d%y")
                         export_idx = 1
 
+                        # Pull settings from session state
+                        _sx_sku    = st.session_state.get("bx_sku_prefix", "DFS")
+                        _sx_sport  = st.session_state.get("bx_sport", "BASEBALL")
+                        _sx_bo     = "1" if st.session_state.get("bx_best_offer", True) else "0"
+                        _sx_tmpl   = st.session_state.get("bx_desc_template", "")
+                        _sport_cats = {
+                            "BASEBALL":   st.session_state.get("bx_store_cat_baseball",  "44411116016"),
+                            "BASKETBALL": st.session_state.get("bx_store_cat_basketball","44411138016"),
+                            "FOOTBALL":   st.session_state.get("bx_store_cat_football",  "44411117016"),
+                            "SOCCER":     st.session_state.get("bx_store_cat_soccer",    "44411118016"),
+                            "OTHER":      st.session_state.get("bx_store_cat_other",     "0"),
+                        }
+                        _league_map = {"BASEBALL":"MLB","BASKETBALL":"NBA","FOOTBALL":"NFL","SOCCER":"MLS","OTHER":""}
+
                         buf = io.StringIO()
                         # Row 1: Info header (eBay File Exchange requirement)
                         info_row = ["Info", "Version=1.0.0", "Template=fx_category_template_EBAY_US"] + [""] * (len(COLS) - 3)
@@ -4151,10 +4243,10 @@ with tab8:
                                 continue
                             title    = (row.get("eBay Title") or orig.get("title", ""))[:80]
                             price    = float(row.get("Price ($)") or 2.49)
-                            cond_lbl = row.get("Condition", "Near Mint (NM)")
+                            cond_lbl = row.get("Condition", st.session_state.get("bx_default_condition","Near Mint (NM)"))
                             cond_id  = _RAW_CONDITIONS.get(cond_lbl, "2750")
                             cond_sp  = _COND_SPECIFIC.get(cond_id, "400010")
-                            sku      = f"DFS-{date_str}-{export_idx:04d}"
+                            sku      = f"{_sx_sku}-{date_str}-{export_idx:04d}"
                             front_u  = orig.get("front_url", "")
                             back_u   = orig.get("back_url", "")
                             pic_url  = f"{front_u}|{back_u}" if back_u else front_u
@@ -4166,6 +4258,8 @@ with tab8:
                             year     = _year(set_n)
                             mfr      = _mfr(set_n)
                             sim      = orig.get("similarity", 0)
+                            store_cat = _sport_cats.get(_sx_sport, "0")
+                            league    = _league_map.get(_sx_sport, "")
 
                             # Shipping by price
                             if price < 1.00:
@@ -4175,23 +4269,27 @@ with tab8:
                             else:
                                 ship_cost = "0.00"; ship_free = "1"
 
-                            desc = _scan_description(title, front_u)
+                            # Build description from template
+                            if _sx_tmpl:
+                                desc = _sx_tmpl.replace("[LISTING_TITLE]", title).replace("[FRONT_IMAGE_URL]", front_u)
+                            else:
+                                desc = _scan_description(title, front_u)
 
                             writer.writerow({
                                 ACTION_COL:                           "Add",
                                 "CustomLabel":                        sku,
                                 "*Category":                          "261328",
-                                "StoreCategory":                      "0",
+                                "StoreCategory":                      store_cat,
                                 "*Title":                             title,
                                 "*ConditionID":                       cond_id,
                                 "*C:Graded":                          "No",
-                                "*C:Sport":                           "BASEBALL",
+                                "*C:Sport":                           _sx_sport,
                                 "*C:Player/Athlete":                  player,
                                 "*C:Parallel/Variety":                par,
                                 "*C:Manufacturer":                    mfr,
                                 "C:Season":                           year,
                                 "*C:Set":                             set_n,
-                                "*C:League":                          "MLB",
+                                "*C:League":                          league,
                                 "*C:Autographed":                     "No",
                                 "CD:Card Condition - (ID: 40001)":    cond_sp,
                                 "*C:Card Number":                     number,
@@ -4216,7 +4314,7 @@ with tab8:
                                 "ShippingService-1:AdditionalCost":   "0",
                                 "*DispatchTimeMax":                   "2",
                                 "*ReturnsAcceptedOption":             "ReturnsNotAccepted",
-                                "BestOfferEnabled":                   "1",
+                                "BestOfferEnabled":                   _sx_bo,
                                 "*C:Rookie":                          "No",
                                 "*C:Memorabilia":                     "No",
                                 "ActiveListings":                     "Active",
