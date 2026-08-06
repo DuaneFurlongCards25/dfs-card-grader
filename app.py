@@ -3699,7 +3699,33 @@ with tab8:
 
         # ── BATCH → EBAY ──────────────────────────────────────────────────────
         with scan_batch:
-            st.caption("Upload all your card scans at once — front and back interleaved (front1, back1, front2, back2…). CardHedger identifies each card, pulls recent sold comps, and exports an eBay-ready CSV with both images on every listing.")
+            import subprocess as _sp
+            import socket as _sock
+
+            def _scanner_running():
+                try:
+                    s = _sock.create_connection(("localhost", 5100), timeout=1)
+                    s.close()
+                    return True
+                except OSError:
+                    return False
+
+            _SCANNER_PY = Path(__file__).parent / "card-scanner" / "app.py"
+            _PYTHON     = "/Library/Frameworks/Python.framework/Versions/3.14/bin/python3"
+
+            if not _scanner_running():
+                st.markdown("### 📷 Batch Scanner")
+                st.info("Keyboard-driven bulk matching — upload images, hit 1–8 to pick the right parallel, Enter to confirm, auto-advances to the next card. Comps + trend fetch in the background.")
+                if st.button("🚀 Launch Batch Scanner", type="primary", key="launch_scanner"):
+                    _sp.Popen(
+                        [_PYTHON, str(_SCANNER_PY)],
+                        cwd=str(_SCANNER_PY.parent),
+                        stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+                    )
+                    import time as _t; _t.sleep(2)
+                    st.rerun()
+            else:
+                st.components.v1.iframe("http://localhost:5100", height=860, scrolling=True)
 
             if "raw_batch" not in st.session_state:
                 st.session_state.raw_batch = []
@@ -3727,14 +3753,52 @@ with tab8:
 
                 st.success(f"✅ {n_pairs} card pair{'s' if n_pairs != 1 else ''} detected")
 
-                # Paired thumbnail preview — front and back as separate images
+                # Paired thumbnail preview — front and back side by side, compact
+                from PIL import Image as _PIL_Image
+                import io as _io
+
+                if "raw_batch_rots" not in st.session_state:
+                    st.session_state.raw_batch_rots = {}
+
+                def _rotated_bytes(file_bytes, deg):
+                    if deg == 0:
+                        return file_bytes
+                    img = _PIL_Image.open(_io.BytesIO(file_bytes))
+                    img = img.rotate(-deg, expand=True)
+                    buf = _io.BytesIO()
+                    img.save(buf, format="JPEG")
+                    return buf.getvalue()
+
                 preview_n = min(n_pairs, 6)
                 for ci in range(preview_n):
-                    col_f, col_b = st.columns(2)
+                    fkey = f"rot_f_{ci}"
+                    bkey = f"rot_b_{ci}"
+                    if fkey not in st.session_state.raw_batch_rots:
+                        st.session_state.raw_batch_rots[fkey] = 0
+                    if bkey not in st.session_state.raw_batch_rots:
+                        st.session_state.raw_batch_rots[bkey] = 0
+
+                    fb = _rotated_bytes(front_files[ci].getvalue(), st.session_state.raw_batch_rots[fkey])
+                    bb = _rotated_bytes(back_files[ci].getvalue(), st.session_state.raw_batch_rots[bkey])
+
+                    col_f, col_b, col_rf, col_rb, _sp = st.columns([3, 3, 1, 1, 4])
                     with col_f:
-                        st.image(front_files[ci].getvalue(), caption=f"#{ci+1} Front", width=180)
+                        st.image(fb, caption=f"#{ci+1} Front", use_container_width=True)
                     with col_b:
-                        st.image(back_files[ci].getvalue(), caption=f"#{ci+1} Back", width=180)
+                        st.image(bb, caption=f"#{ci+1} Back", use_container_width=True)
+                    with col_rf:
+                        st.write("")
+                        st.write("")
+                        if st.button("↻", key=f"rfbtn_{ci}", help="Rotate front"):
+                            st.session_state.raw_batch_rots[fkey] = (st.session_state.raw_batch_rots[fkey] + 90) % 360
+                            st.rerun()
+                    with col_rb:
+                        st.write("")
+                        st.write("")
+                        if st.button("↻", key=f"rbbtn_{ci}", help="Rotate back"):
+                            st.session_state.raw_batch_rots[bkey] = (st.session_state.raw_batch_rots[bkey] + 90) % 360
+                            st.rerun()
+
                 if n_pairs > 6:
                     st.caption(f"+ {n_pairs - 6} more pairs not shown")
 
@@ -3759,15 +3823,21 @@ with tab8:
                                 "condition_id": "2750",
                             }
                             try:
-                                front_url, front_path = _scan_upload_to_supabase(ff.getvalue(), f"f_{i}_{ff.name}")
-                                back_url,  back_path  = _scan_upload_to_supabase(bf.getvalue(), f"b_{i}_{bf.name}")
+                                # Apply any user rotations before upload + match
+                                _frot = st.session_state.raw_batch_rots.get(f"rot_f_{i}", 0)
+                                _brot = st.session_state.raw_batch_rots.get(f"rot_b_{i}", 0)
+                                _front_bytes = _rotated_bytes(ff.getvalue(), _frot)
+                                _back_bytes  = _rotated_bytes(bf.getvalue(), _brot)
+
+                                front_url, front_path = _scan_upload_to_supabase(_front_bytes, f"f_{i}_{ff.name}")
+                                back_url,  back_path  = _scan_upload_to_supabase(_back_bytes,  f"b_{i}_{bf.name}")
                                 c["front_url"]  = front_url
                                 c["front_path"] = front_path
                                 c["back_url"]   = back_url
                                 c["back_path"]  = back_path
 
                                 # Send as base64 to avoid URL accessibility issues
-                                _front_b64 = base64.b64encode(ff.getvalue()).decode()
+                                _front_b64 = base64.b64encode(_front_bytes).decode()
 
                                 # Try image-match first (AI-powered)
                                 match_res  = _ch_post("/v1/cards/image-match", {"image_base64": _front_b64, "k": 5}) or {}
