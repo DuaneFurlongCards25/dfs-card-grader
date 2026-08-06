@@ -4261,13 +4261,13 @@ with tab8:
                             store_cat = _sport_cats.get(_sx_sport, "0")
                             league    = _league_map.get(_sx_sport, "")
 
-                            # Shipping by price
+                            # Shipping by price (use _exp_ prefix to avoid leaking into other tab scopes)
                             if price < 1.00:
-                                ship_cost = "0.00"; ship_free = "1"
+                                _exp_ship_cost = "0.00"; _exp_ship_free = "1"
                             elif price < 20:
-                                ship_cost = "0.74"; ship_free = "0"
+                                _exp_ship_cost = "0.74"; _exp_ship_free = "0"
                             else:
-                                ship_cost = "0.00"; ship_free = "1"
+                                _exp_ship_cost = "0.00"; _exp_ship_free = "1"
 
                             # Build description from template
                             if _sx_tmpl:
@@ -4309,8 +4309,8 @@ with tab8:
                                 "PostalCode":                         "85250-6312",
                                 "ShippingType":                       "Flat",
                                 "ShippingService-1:Option":           "US_eBayStandardEnvelope",
-                                "ShippingService-1:FreeShipping":     ship_free,
-                                "ShippingService-1:Cost":             ship_cost,
+                                "ShippingService-1:FreeShipping":     _exp_ship_free,
+                                "ShippingService-1:Cost":             _exp_ship_cost,
                                 "ShippingService-1:AdditionalCost":   "0",
                                 "*DispatchTimeMax":                   "2",
                                 "*ReturnsAcceptedOption":             "ReturnsNotAccepted",
@@ -4611,7 +4611,9 @@ with tab2:
 
         fee_b = PSA_FEES[bp_tier]
         cal_b = int(PSA_DAYS.get(bp_tier, 60) * 1.4)
-        gvf_b = grade_vs_flip(avg_buy, avg_raw, avg_10, avg_9, avg_gem, bp_tier, ship_cost, opp_rate)
+        _bp_ship = float(ship_cost) if isinstance(ship_cost, (int, float)) else 14.0
+        _bp_opp  = float(opp_rate)  if isinstance(opp_rate,  (int, float)) else 6.0
+        gvf_b = grade_vs_flip(avg_buy, avg_raw, avg_10, avg_9, avg_gem, bp_tier, _bp_ship, _bp_opp)
         capital_total = gvf_b["capital"] * n_cards
         hold_total = gvf_b["hold"] * n_cards
         raw_total = (gvf_b["raw_net"] or 0) * n_cards
