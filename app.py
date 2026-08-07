@@ -863,6 +863,55 @@ def sb_delete(row_id: int):
     except Exception:
         pass
 
+# ─── Scan Stacks Supabase helpers ────────────────────────────────────────────
+def _sb_req(method, path, data=None, extra_headers=None):
+    """Generic Supabase REST helper."""
+    if not SUPABASE_URL:
+        return None
+    h = {**sb_headers(), **(extra_headers or {})}
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/rest/v1/{path}",
+        data=json.dumps(data).encode() if data else None,
+        headers=h, method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
+            body = r.read().decode()
+            return json.loads(body) if body.strip() else []
+    except Exception:
+        return None
+
+def stacks_list():
+    return _sb_req("GET", "scan_stacks?order=id.desc&select=*") or []
+
+def stack_create(name, notes=""):
+    rows = _sb_req("POST", "scan_stacks", {"name": name, "notes": notes, "status": "open"})
+    return rows[0] if rows else None
+
+def stack_update(stack_id, updates):
+    _sb_req("PATCH", f"scan_stacks?id=eq.{stack_id}", updates,
+            extra_headers={"Prefer": "return=minimal"})
+
+def stack_delete(stack_id):
+    _sb_req("DELETE", f"scan_stacks?id=eq.{stack_id}", extra_headers={"Prefer": "return=minimal"})
+
+def stack_cards_get(stack_id):
+    return _sb_req("GET", f"scan_cards?stack_id=eq.{stack_id}&order=idx.asc&select=*") or []
+
+def stack_card_upsert(card: dict):
+    """Insert or replace a card row (matched on stack_id + idx)."""
+    _sb_req("POST", "scan_cards", card,
+            extra_headers={"Prefer": "resolution=merge-duplicates,return=minimal",
+                           "on_conflict": "stack_id,idx"})
+
+def stack_cards_delete(stack_id):
+    _sb_req("DELETE", f"scan_cards?stack_id=eq.{stack_id}",
+            extra_headers={"Prefer": "return=minimal"})
+
+def stack_card_update(card_id, updates):
+    _sb_req("PATCH", f"scan_cards?id=eq.{card_id}", updates,
+            extra_headers={"Prefer": "return=minimal"})
+
 # ─── Shipment Intake Supabase helpers ─────────────────────────────────────────
 def sb_intake_get():
     """Fetch all shipment intake records, newest first. Returns (rows, error_str)."""
@@ -3784,577 +3833,746 @@ with tab8:
                 with st.expander("👁 Preview description"):
                     st.markdown(_prev_html, unsafe_allow_html=True)
 
-            st.markdown("---")
-
-            def _scanner_running():
-                try:
-                    s = _sock.create_connection(("localhost", 5100), timeout=1)
-                    s.close()
-                    return True
-                except OSError:
-                    return False
-
-            _SCANNER_PY = Path(__file__).parent / "card-scanner" / "app.py"
-            _PYTHON     = "/Library/Frameworks/Python.framework/Versions/3.14/bin/python3"
-
-            if _SCANNER_PY.exists():
-                if not _scanner_running():
-                    st.markdown("### 📷 Batch Scanner")
-                    st.info("Keyboard-driven bulk matching — upload images, hit 1–8 to pick the right parallel, Enter to confirm, auto-advances to the next card. Comps + trend fetch in the background.")
-                    if st.button("🚀 Launch Batch Scanner", type="primary", key="launch_scanner"):
-                        _sp.Popen(
-                            [_PYTHON, str(_SCANNER_PY)],
-                            cwd=str(_SCANNER_PY.parent),
-                            stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
-                        )
-                        import time as _t; _t.sleep(2)
-                        st.rerun()
-                else:
-                    st.components.v1.iframe("http://localhost:5100", height=860, scrolling=True)
-
+            # ── Stacks session state ────────────────────────────────────────
             if "raw_batch" not in st.session_state:
                 st.session_state.raw_batch = []
             if "raw_batch_comps" not in st.session_state:
                 st.session_state.raw_batch_comps = {}
+            if "bx_active_stack_id" not in st.session_state:
+                st.session_state["bx_active_stack_id"] = None
+            if "bx_active_stack_name" not in st.session_state:
+                st.session_state["bx_active_stack_name"] = ""
+            if "bx_stacks_cache" not in st.session_state:
+                st.session_state["bx_stacks_cache"] = None
 
-            # ── Step 1: Upload ─────────────────────────────────────────────
-            all_files = st.file_uploader(
-                "📷 Drop all card scans here (front + back interleaved: front1, back1, front2, back2…)",
-                type=["jpg", "jpeg", "png", "tif", "tiff"],
-                accept_multiple_files=True,
-                key="raw_all_files",
-                help="Select all images at once — Cmd+A in Finder or drag the whole folder. Odd files = fronts, even files = backs.",
-            )
+            _STACKS_SQL = """create table if not exists scan_stacks (
+  id bigint primary key generated always as identity,
+  name text not null,
+  notes text,
+  status text default 'open',
+  total_cards int default 0,
+  created_at timestamptz default now()
+);
+create table if not exists scan_cards (
+  id bigint primary key generated always as identity,
+  stack_id bigint not null references scan_stacks(id) on delete cascade,
+  idx int not null,
+  front_file text,
+  front_url text,
+  back_url text,
+  player text,
+  title text,
+  similarity numeric,
+  fmv numeric,
+  price numeric,
+  status text default 'identified',
+  card_data_json text,
+  created_at timestamptz default now(),
+  unique(stack_id, idx)
+);
+alter table scan_stacks disable row level security;
+alter table scan_cards disable row level security;"""
 
-            n_files = len(all_files) if all_files else 0
+            st.markdown("---")
 
-            if n_files > 0:
-                if n_files % 2 != 0:
-                    st.warning(f"⚠️ {n_files} images selected — need an even number (one front + one back per card). Got {n_files // 2} pairs + 1 leftover.")
+            # ══════════════════════════════════════════════════════════════════
+            # STACKS LIST VIEW  (no active stack)
+            # ══════════════════════════════════════════════════════════════════
+            if st.session_state["bx_active_stack_id"] is None:
+                _slh1, _slh2 = st.columns([5, 1])
+                _slh1.markdown("### 📦 Stacks")
+                if _slh2.button("➕ New Stack", type="primary", key="bx_new_stack_btn"):
+                    st.session_state["bx_show_new_form"] = True
 
-                n_pairs = n_files // 2
-                front_files = all_files[0::2]   # indices 0, 2, 4 …
-                back_files  = all_files[1::2]   # indices 1, 3, 5 …
-
-                st.success(f"✅ {n_pairs} card pair{'s' if n_pairs != 1 else ''} detected")
-
-                # Paired thumbnail preview — front and back side by side, compact
-                from PIL import Image as _PIL_Image
-                import io as _io
-
-                if "raw_batch_rots" not in st.session_state:
-                    st.session_state.raw_batch_rots = {}
-
-                def _rotated_bytes(file_bytes, deg):
-                    if deg == 0:
-                        return file_bytes
-                    img = _PIL_Image.open(_io.BytesIO(file_bytes))
-                    img = img.rotate(-deg, expand=True)
-                    buf = _io.BytesIO()
-                    img.save(buf, format="JPEG")
-                    return buf.getvalue()
-
-                preview_n = min(n_pairs, 6)
-                for ci in range(preview_n):
-                    fkey = f"rot_f_{ci}"
-                    bkey = f"rot_b_{ci}"
-                    if fkey not in st.session_state.raw_batch_rots:
-                        st.session_state.raw_batch_rots[fkey] = 0
-                    if bkey not in st.session_state.raw_batch_rots:
-                        st.session_state.raw_batch_rots[bkey] = 0
-
-                    fb = _rotated_bytes(front_files[ci].getvalue(), st.session_state.raw_batch_rots[fkey])
-                    bb = _rotated_bytes(back_files[ci].getvalue(), st.session_state.raw_batch_rots[bkey])
-
-                    col_f, col_b, col_rf, col_rb, _sp = st.columns([3, 3, 1, 1, 4])
-                    with col_f:
-                        st.image(fb, caption=f"#{ci+1} Front", use_container_width=True)
-                    with col_b:
-                        st.image(bb, caption=f"#{ci+1} Back", use_container_width=True)
-                    with col_rf:
-                        st.write("")
-                        st.write("")
-                        if st.button("↻", key=f"rfbtn_{ci}", help="Rotate front"):
-                            st.session_state.raw_batch_rots[fkey] = (st.session_state.raw_batch_rots[fkey] + 90) % 360
-                            st.rerun()
-                    with col_rb:
-                        st.write("")
-                        st.write("")
-                        if st.button("↻", key=f"rbbtn_{ci}", help="Rotate back"):
-                            st.session_state.raw_batch_rots[bkey] = (st.session_state.raw_batch_rots[bkey] + 90) % 360
-                            st.rerun()
-
-                if n_pairs > 6:
-                    st.caption(f"+ {n_pairs - 6} more pairs not shown")
-
-                st.markdown("---")
-                if st.button(f"🔍 Identify & Price All ({n_pairs} cards)", type="primary", key="raw_batch_go", disabled=n_pairs == 0):
-                        st.session_state.raw_batch = []
-                        st.session_state.raw_batch_comps = {}
-                        prog    = st.progress(0.0)
-                        status  = st.empty()
-                        cards   = []
-
-                        # Phase 1: upload + image-match (one card at a time)
-                        for i, (ff, bf) in enumerate(zip(front_files, back_files)):
-                            status.text(f"Identifying card {i+1}/{n_pairs}: {ff.name}…")
-                            c = {
-                                "idx":          i,
-                                "front_file":   ff.name,
-                                "back_file":    bf.name,
-                                "status":       "error",
-                                "error":        "",
-                                "include":      True,
-                                "condition_id": "2750",
-                            }
-                            try:
-                                # Apply any user rotations before upload + match
-                                _frot = st.session_state.raw_batch_rots.get(f"rot_f_{i}", 0)
-                                _brot = st.session_state.raw_batch_rots.get(f"rot_b_{i}", 0)
-                                _front_bytes = _rotated_bytes(ff.getvalue(), _frot)
-                                _back_bytes  = _rotated_bytes(bf.getvalue(), _brot)
-
-                                front_url, front_path = _scan_upload_to_supabase(_front_bytes, f"f_{i}_{ff.name}")
-                                back_url,  back_path  = _scan_upload_to_supabase(_back_bytes,  f"b_{i}_{bf.name}")
-                                c["front_url"]  = front_url
-                                c["front_path"] = front_path
-                                c["back_url"]   = back_url
-                                c["back_path"]  = back_path
-
-                                # Send as base64 to avoid URL accessibility issues
-                                _front_b64 = base64.b64encode(_front_bytes).decode()
-
-                                # Try image-match first (AI-powered)
-                                match_res  = _ch_post("/v1/cards/image-match", {"image_base64": _front_b64, "k": 5}) or {}
-                                best       = match_res.get("best_match") or {}
-                                candidates = match_res.get("candidates") or []
-
-                                # Fallback: image-search (broader KNN, no AI filter)
-                                if not best.get("card_id") and not candidates:
-                                    search_res = _ch_post("/v1/cards/image-search", {"image_base64": _front_b64, "k": 5}) or {}
-                                    candidates = search_res.get("results") or search_res.get("candidates") or []
-                                    match_res  = search_res
-
-                                if best and best.get("card_id"):
-                                    c.update({
-                                        "card_id":    best.get("card_id", ""),
-                                        "player":     best.get("player", ""),
-                                        "set_name":   best.get("set", ""),
-                                        "number":     best.get("number", ""),
-                                        "variant":    best.get("variant", ""),
-                                        "similarity": float(best.get("similarity") or 0),
-                                        "candidates": candidates,
-                                        "status":     "identified",
-                                        "low_conf":   float(best.get("similarity") or 0) < 80,
-                                    })
-                                elif candidates:
-                                    top = candidates[0]
-                                    c.update({
-                                        "card_id":    top.get("card_id", ""),
-                                        "player":     top.get("player", ""),
-                                        "set_name":   top.get("set", ""),
-                                        "number":     top.get("number", ""),
-                                        "variant":    top.get("variant", ""),
-                                        "similarity": float(top.get("similarity") or 0),
-                                        "candidates": candidates,
-                                        "status":     "identified",
-                                        "low_conf":   True,
-                                    })
+                if st.session_state.get("bx_show_new_form"):
+                    with st.form("bx_new_stack_form", clear_on_submit=True):
+                        _nsc1, _nsc2 = st.columns([2, 3])
+                        _ns_name  = _nsc1.text_input("Stack name *", placeholder="RBLOT-08-06-26")
+                        _ns_notes = _nsc2.text_input("Notes", placeholder="Baseball box, 131 cards")
+                        if st.form_submit_button("✅ Create & Open"):
+                            _nm = (_ns_name or "").strip()
+                            if _nm:
+                                _ns = stack_create(_nm, (_ns_notes or "").strip())
+                                if _ns:
+                                    _px = _nm.split("-")[0].upper() if "-" in _nm else _nm[:8].upper()
+                                    st.session_state["bx_active_stack_id"]   = _ns["id"]
+                                    st.session_state["bx_active_stack_name"] = _ns["name"]
+                                    st.session_state["bx_sku_prefix"]        = _px
+                                    st.session_state.raw_batch               = []
+                                    st.session_state.raw_batch_comps         = {}
+                                    st.session_state["bx_show_new_form"]     = False
+                                    st.session_state["bx_stacks_cache"]      = None
+                                    st.rerun()
                                 else:
-                                    api_msg = match_res.get("message") or match_res.get("error") or "No candidates returned"
-                                    c["error"] = f"No visual match — {api_msg}"
+                                    st.error("Failed to create stack — run the SQL setup first:")
+                                    st.code(_STACKS_SQL, language="sql")
 
-                                if c.get("status") == "identified":
-                                    c["title"] = _raw_title(
-                                        c["player"], c["set_name"], c["number"], c.get("variant", "")
-                                    )
-                            except Exception as exc:
-                                c["error"] = str(exc)
+                    with st.expander("📋 First-time setup SQL (run once in Supabase)", expanded=False):
+                        st.code(_STACKS_SQL, language="sql")
 
-                            cards.append(c)
-                            prog.progress((i + 1) / n_pairs * 0.7)
+                # Load + display stacks list
+                if st.session_state["bx_stacks_cache"] is None:
+                    _raw_sl = stacks_list()
+                    for _s in _raw_sl:
+                        _scs = stack_cards_get(_s["id"])
+                        _s["_n"]       = len(_scs)
+                        _s["_matched"] = sum(1 for c in _scs if c.get("status") not in ("error",))
+                        _s["_over80"]  = sum(1 for c in _scs if float(c.get("similarity") or 0) >= 80)
+                        _s["_listed"]  = sum(1 for c in _scs if c.get("status") == "listed")
+                    st.session_state["bx_stacks_cache"] = _raw_sl
 
-                        # Phase 2: batch FMV for all identified cards (1 API call)
-                        identified_cards = [c for c in cards if c.get("card_id")]
-                        if identified_cards:
-                            status.text(f"Fetching FMV for {len(identified_cards)} cards (batch)…")
-                            fmv_items = [{"card_id": c["card_id"], "grade": "Raw"} for c in identified_cards]
-                            fmv_res   = ch_fmv_batch(fmv_items)
-                            fmv_by_id = {}
-                            for r in (fmv_res.get("results") or []):
-                                cid = r.get("card_id")
-                                if cid:
-                                    fmv_by_id[cid] = r
-                            for c in identified_cards:
-                                fmv = fmv_by_id.get(c["card_id"], {})
-                                raw_p = fmv.get("price")
-                                c["fmv"]      = round(float(raw_p), 2) if raw_p else None
-                                c["fmv_low"]  = fmv.get("price_low")
-                                c["fmv_high"] = fmv.get("price_high")
-                                c["fmv_conf"] = fmv.get("confidence_grade", "")
-                                c["price"]    = c["fmv"] if c["fmv"] else 2.49
+                _stacks = st.session_state["bx_stacks_cache"]
+                if not _stacks:
+                    if not st.session_state.get("bx_show_new_form"):
+                        st.info("No stacks yet — click **➕ New Stack** to create your first batch.")
+                else:
+                    _hc = st.columns([3,1,1,1,1,1,1,1])
+                    for _hl, _hv in zip(_hc, ["**Name**","**Cards**","**Matched**","**>80%**","**Listed**","**Created**","",""]):
+                        _hl.caption(_hv)
+                    st.markdown("---")
+                    for _si, _s in enumerate(_stacks):
+                        _rc = st.columns([3,1,1,1,1,1,1,1])
+                        _rc[0].write(_s["name"])
+                        _rc[1].write(str(_s["_n"]))
+                        _rc[2].write(str(_s["_matched"]))
+                        _rc[3].write(str(_s["_over80"]))
+                        _rc[4].write(str(_s["_listed"]))
+                        _rc[5].write((_s.get("created_at") or "")[:10])
+                        if _rc[6].button("▶ Open", key=f"stk_open_{_s['id']}"):
+                            _saved = stack_cards_get(_s["id"])
+                            _loaded = []
+                            for _sc in _saved:
+                                try:
+                                    _cd = json.loads(_sc.get("card_data_json") or "{}")
+                                    if _cd:
+                                        _loaded.append(_cd)
+                                except Exception:
+                                    pass
+                            _px2 = _s["name"].split("-")[0].upper() if "-" in _s["name"] else _s["name"][:8].upper()
+                            st.session_state["bx_active_stack_id"]   = _s["id"]
+                            st.session_state["bx_active_stack_name"] = _s["name"]
+                            st.session_state["bx_sku_prefix"]        = _px2
+                            st.session_state.raw_batch               = _loaded
+                            st.session_state.raw_batch_comps         = {}
+                            st.rerun()
+                        if _rc[7].button("🗑", key=f"stk_del_{_s['id']}", help="Delete stack and all its cards"):
+                            stack_cards_delete(_s["id"])
+                            stack_delete(_s["id"])
+                            st.session_state["bx_stacks_cache"] = None
+                            st.rerun()
 
-                        prog.progress(1.0)
-                        n_ok  = sum(1 for c in cards if c["status"] == "identified")
-                        n_err = len(cards) - n_ok
-                        status.text(f"Done — {n_ok} identified, {n_err} failed.")
-                        st.session_state.raw_batch = cards
-                        st.rerun()
+            # ══════════════════════════════════════════════════════════════════
+            # ACTIVE STACK VIEW
+            # ══════════════════════════════════════════════════════════════════
+            else:
+                _ash1, _ash2 = st.columns([5, 1])
+                _ash1.markdown(f"### 📦 {st.session_state['bx_active_stack_name']}")
+                if _ash2.button("← Stacks", key="bx_back_stacks"):
+                    st.session_state["bx_active_stack_id"]   = None
+                    st.session_state["bx_active_stack_name"] = ""
+                    st.session_state["bx_stacks_cache"]      = None
+                    st.session_state.raw_batch               = []
+                    st.session_state.raw_batch_comps         = {}
+                    st.rerun()
 
-            # ── Step 2: Review & Price ─────────────────────────────────────
-            raw_batch = st.session_state.raw_batch
-            if raw_batch:
-                identified = [c for c in raw_batch if c.get("status") == "identified"]
-                failed     = [c for c in raw_batch if c.get("status") != "identified"]
+                import subprocess as _sp
+                import socket as _sock
 
-                if failed:
-                    with st.expander(f"⚠️ {len(failed)} card(s) could not be identified"):
-                        for c in failed:
-                            st.error(f"Card {c['idx']+1} ({c['front_file']}): {c.get('error', 'Unknown error')}")
+                def _scanner_running():
+                    try:
+                        s = _sock.create_connection(("localhost", 5100), timeout=1)
+                        s.close()
+                        return True
+                    except OSError:
+                        return False
 
-                if identified:
-                    n_low = sum(1 for c in identified if c.get("low_conf"))
-                    if n_low:
-                        st.warning(f"⚠️ {n_low} card(s) have low match confidence — review those rows carefully before exporting.")
+                _SCANNER_PY = Path(__file__).parent / "card-scanner" / "app.py"
+                _PYTHON     = "/Library/Frameworks/Python.framework/Versions/3.14/bin/python3"
+
+                if _SCANNER_PY.exists():
+                    if not _scanner_running():
+                        st.markdown("### 📷 Batch Scanner")
+                        st.info("Keyboard-driven bulk matching — upload images, hit 1–8 to pick the right parallel, Enter to confirm, auto-advances to the next card. Comps + trend fetch in the background.")
+                        if st.button("🚀 Launch Batch Scanner", type="primary", key="launch_scanner"):
+                            _sp.Popen(
+                                [_PYTHON, str(_SCANNER_PY)],
+                                cwd=str(_SCANNER_PY.parent),
+                                stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+                            )
+                            import time as _t; _t.sleep(2)
+                            st.rerun()
                     else:
-                        st.success(f"✅ {len(identified)} cards identified")
+                        st.components.v1.iframe("http://localhost:5100", height=860, scrolling=True)
 
-                    st.markdown("**Step 2 — Review & Price**")
-
-                    # Build editable table
-                    import urllib.parse as _uparse
-                    edit_rows = []
-                    for c in identified:
-                        sim = c.get("similarity", 0)
-                        fmv_display = f"${c['fmv']:.2f}" if c.get("fmv") else "—"
-                        cond_label  = next((k for k, v in _RAW_CONDITIONS.items() if v == c.get("condition_id", "2750")), "Near Mint (NM)")
-                        ebay_q      = _uparse.quote_plus(c.get("title", c.get("player", "")))
-                        ebay_url    = f"https://www.ebay.com/sch/i.html?_nkw={ebay_q}&_sacat=261328&LH_Sold=1&LH_Complete=1"
-                        raw_par = c.get("variant", "")
-                        par_display = raw_par if raw_par and raw_par.lower() not in ("base","") else ""
-                        edit_rows.append({
-                            "✓":          c.get("include", True),
-                            "#":          c["idx"] + 1,
-                            "Player":     c.get("player", ""),
-                            "Parallel":   par_display,
-                            "eBay Title": c.get("title", ""),
-                            "Conf %":     f"{sim:.0f}" if sim else "?",
-                            "FMV":        fmv_display,
-                            "FMV Conf":   c.get("fmv_conf", ""),
-                            "Price ($)":  float(c.get("price") or 2.49),
-                            "Condition":  cond_label,
-                            "🔍 eBay":    ebay_url,
-                        })
-
-                    edited = st.data_editor(
-                        pd.DataFrame(edit_rows),
-                        use_container_width=True,
-                        hide_index=True,
-                        key="raw_batch_editor",
-                        column_config={
-                            "✓":          st.column_config.CheckboxColumn("Include", width="small"),
-                            "#":          st.column_config.NumberColumn("#", width="small", disabled=True),
-                            "Player":     st.column_config.TextColumn("Player", width="medium", disabled=True),
-                            "Parallel":   st.column_config.TextColumn("Parallel ✏️", width="medium",
-                                              help="Edit if CardHedger got the parallel wrong — updates the title and CSV export"),
-                            "eBay Title": st.column_config.TextColumn("eBay Title (editable)", max_chars=80, width="large"),
-                            "Conf %":     st.column_config.TextColumn("Conf%", width="small", disabled=True,
-                                              help="Visual match confidence from CardHedger — below 80% means double-check"),
-                            "FMV":        st.column_config.TextColumn("FMV", width="small", disabled=True),
-                            "FMV Conf":   st.column_config.TextColumn("FMV Grade", width="small", disabled=True,
-                                              help="A=high data confidence, B=medium, C=low"),
-                            "Price ($)":  st.column_config.NumberColumn("Your Price", min_value=0.01, format="$%.2f"),
-                            "Condition":  st.column_config.SelectboxColumn(
-                                              "Condition", options=list(_RAW_CONDITIONS.keys()), width="medium"),
-                            "🔍 eBay":    st.column_config.LinkColumn("🔍 eBay", display_text="View Sold", width="small"),
-                        },
-                    )
-
-                    # ── Re-identify low-confidence cards ──────────────────────
-                    low_conf_cards = [c for c in identified if c.get("low_conf")]
-                    if low_conf_cards:
-                        st.markdown("---")
-                        with st.expander("🔍 Re-identify a card (search by name / set)", expanded=True):
-                            reid_options = {f"Card {c['idx']+1} — {c.get('player','')} {c.get('set_name','')} (Conf: {c.get('similarity',0):.0f}%)": c for c in low_conf_cards}
-                            reid_label = st.selectbox("Which card to re-identify:", list(reid_options.keys()), key="reid_select")
-                            reid_card  = reid_options[reid_label]
-                            reid_q = st.text_input("Search query (player name, year, set):",
-                                value=f"{reid_card.get('player','')} {reid_card.get('set_name','')}".strip(),
-                                key="reid_query",
-                                placeholder="e.g. Ceddanne Rafaela 2024 Topps Chrome")
-                            if st.button("🔍 Search", key="reid_go") and reid_q:
-                                with st.spinner("Searching catalog…"):
-                                    sr = _ch_post("/v1/cards/card-search", {"search": reid_q, "page": 1, "page_size": 10}) or {}
-                                    for _rk in ("cards", "data", "results", "items"):
-                                        if _rk in sr and isinstance(sr[_rk], list):
-                                            reid_results = sr[_rk]; break
+                # ── Step 1: Upload ─────────────────────────────────────────
+                all_files = st.file_uploader(
+                    "📷 Drop all card scans here (front + back interleaved: front1, back1, front2, back2…)",
+                    type=["jpg", "jpeg", "png", "tif", "tiff"],
+                    accept_multiple_files=True,
+                    key="raw_all_files",
+                    help="Select all images at once — Cmd+A in Finder or drag the whole folder. Odd files = fronts, even files = backs.",
+                )
+    
+                n_files = len(all_files) if all_files else 0
+    
+                if n_files > 0:
+                    if n_files % 2 != 0:
+                        st.warning(f"⚠️ {n_files} images selected — need an even number (one front + one back per card). Got {n_files // 2} pairs + 1 leftover.")
+    
+                    n_pairs = n_files // 2
+                    front_files = all_files[0::2]   # indices 0, 2, 4 …
+                    back_files  = all_files[1::2]   # indices 1, 3, 5 …
+    
+                    st.success(f"✅ {n_pairs} card pair{'s' if n_pairs != 1 else ''} detected")
+    
+                    # Paired thumbnail preview — front and back side by side, compact
+                    from PIL import Image as _PIL_Image
+                    import io as _io
+    
+                    if "raw_batch_rots" not in st.session_state:
+                        st.session_state.raw_batch_rots = {}
+    
+                    def _rotated_bytes(file_bytes, deg):
+                        if deg == 0:
+                            return file_bytes
+                        img = _PIL_Image.open(_io.BytesIO(file_bytes))
+                        img = img.rotate(-deg, expand=True)
+                        buf = _io.BytesIO()
+                        img.save(buf, format="JPEG")
+                        return buf.getvalue()
+    
+                    preview_n = min(n_pairs, 6)
+                    for ci in range(preview_n):
+                        fkey = f"rot_f_{ci}"
+                        bkey = f"rot_b_{ci}"
+                        if fkey not in st.session_state.raw_batch_rots:
+                            st.session_state.raw_batch_rots[fkey] = 0
+                        if bkey not in st.session_state.raw_batch_rots:
+                            st.session_state.raw_batch_rots[bkey] = 0
+    
+                        fb = _rotated_bytes(front_files[ci].getvalue(), st.session_state.raw_batch_rots[fkey])
+                        bb = _rotated_bytes(back_files[ci].getvalue(), st.session_state.raw_batch_rots[bkey])
+    
+                        col_f, col_b, col_rf, col_rb, _sp = st.columns([3, 3, 1, 1, 4])
+                        with col_f:
+                            st.image(fb, caption=f"#{ci+1} Front", use_container_width=True)
+                        with col_b:
+                            st.image(bb, caption=f"#{ci+1} Back", use_container_width=True)
+                        with col_rf:
+                            st.write("")
+                            st.write("")
+                            if st.button("↻", key=f"rfbtn_{ci}", help="Rotate front"):
+                                st.session_state.raw_batch_rots[fkey] = (st.session_state.raw_batch_rots[fkey] + 90) % 360
+                                st.rerun()
+                        with col_rb:
+                            st.write("")
+                            st.write("")
+                            if st.button("↻", key=f"rbbtn_{ci}", help="Rotate back"):
+                                st.session_state.raw_batch_rots[bkey] = (st.session_state.raw_batch_rots[bkey] + 90) % 360
+                                st.rerun()
+    
+                    if n_pairs > 6:
+                        st.caption(f"+ {n_pairs - 6} more pairs not shown")
+    
+                    st.markdown("---")
+                    if st.button(f"🔍 Identify & Price All ({n_pairs} cards)", type="primary", key="raw_batch_go", disabled=n_pairs == 0):
+                            st.session_state.raw_batch = []
+                            st.session_state.raw_batch_comps = {}
+                            prog    = st.progress(0.0)
+                            status  = st.empty()
+                            cards   = []
+    
+                            # Phase 1: upload + image-match (one card at a time)
+                            for i, (ff, bf) in enumerate(zip(front_files, back_files)):
+                                status.text(f"Identifying card {i+1}/{n_pairs}: {ff.name}…")
+                                c = {
+                                    "idx":          i,
+                                    "front_file":   ff.name,
+                                    "back_file":    bf.name,
+                                    "status":       "error",
+                                    "error":        "",
+                                    "include":      True,
+                                    "condition_id": "2750",
+                                }
+                                try:
+                                    # Apply any user rotations before upload + match
+                                    _frot = st.session_state.raw_batch_rots.get(f"rot_f_{i}", 0)
+                                    _brot = st.session_state.raw_batch_rots.get(f"rot_b_{i}", 0)
+                                    _front_bytes = _rotated_bytes(ff.getvalue(), _frot)
+                                    _back_bytes  = _rotated_bytes(bf.getvalue(), _brot)
+    
+                                    front_url, front_path = _scan_upload_to_supabase(_front_bytes, f"f_{i}_{ff.name}")
+                                    back_url,  back_path  = _scan_upload_to_supabase(_back_bytes,  f"b_{i}_{bf.name}")
+                                    c["front_url"]  = front_url
+                                    c["front_path"] = front_path
+                                    c["back_url"]   = back_url
+                                    c["back_path"]  = back_path
+    
+                                    # Send as base64 to avoid URL accessibility issues
+                                    _front_b64 = base64.b64encode(_front_bytes).decode()
+    
+                                    # Try image-match first (AI-powered)
+                                    match_res  = _ch_post("/v1/cards/image-match", {"image_base64": _front_b64, "k": 5}) or {}
+                                    best       = match_res.get("best_match") or {}
+                                    candidates = match_res.get("candidates") or []
+    
+                                    # Fallback: image-search (broader KNN, no AI filter)
+                                    if not best.get("card_id") and not candidates:
+                                        search_res = _ch_post("/v1/cards/image-search", {"image_base64": _front_b64, "k": 5}) or {}
+                                        candidates = search_res.get("results") or search_res.get("candidates") or []
+                                        match_res  = search_res
+    
+                                    if best and best.get("card_id"):
+                                        c.update({
+                                            "card_id":    best.get("card_id", ""),
+                                            "player":     best.get("player", ""),
+                                            "set_name":   best.get("set", ""),
+                                            "number":     best.get("number", ""),
+                                            "variant":    best.get("variant", ""),
+                                            "similarity": float(best.get("similarity") or 0),
+                                            "candidates": candidates,
+                                            "status":     "identified",
+                                            "low_conf":   float(best.get("similarity") or 0) < 80,
+                                        })
+                                    elif candidates:
+                                        top = candidates[0]
+                                        c.update({
+                                            "card_id":    top.get("card_id", ""),
+                                            "player":     top.get("player", ""),
+                                            "set_name":   top.get("set", ""),
+                                            "number":     top.get("number", ""),
+                                            "variant":    top.get("variant", ""),
+                                            "similarity": float(top.get("similarity") or 0),
+                                            "candidates": candidates,
+                                            "status":     "identified",
+                                            "low_conf":   True,
+                                        })
                                     else:
-                                        reid_results = sr if isinstance(sr, list) else []
-                                    st.session_state["reid_results"] = reid_results
-                                    st.session_state["reid_card_idx"] = reid_card["idx"]
-
-                            reid_results = st.session_state.get("reid_results", [])
-                            if reid_results and st.session_state.get("reid_card_idx") == reid_card["idx"]:
-                                st.caption(f"{len(reid_results)} results — pick the correct card:")
-                                for ri, r in enumerate(reid_results):
-                                    # card-search returns card_name or player; set_name; card_number; year; parallel
-                                    player = r.get("card_name") or r.get("player","")
-                                    year   = str(r.get("year",""))
-                                    set_n  = r.get("set_name") or r.get("set","")
-                                    num    = r.get("card_number") or r.get("number","")
-                                    par    = r.get("parallel") or r.get("variant","")
-                                    par    = par if par and par.lower() not in ("base","") else ""
-                                    rc_title = f"{year} {set_n} {player.upper()} #{num}".strip()
-                                    if st.button(f"✓  {rc_title}{' — '+par if par else ''}", key=f"reid_pick_{ri}"):
-                                        for bc in st.session_state.raw_batch:
-                                            if bc["idx"] == reid_card["idx"]:
-                                                parts  = [year, set_n, player.upper(), f"#{num}" if num else "", par]
-                                                bc["title"]      = " ".join(p for p in parts if p)[:80]
-                                                bc["player"]     = player
-                                                bc["set_name"]   = set_n
-                                                bc["number"]     = num
-                                                bc["variant"]    = par
-                                                bc["card_id"]    = r.get("card_id") or r.get("id","")
-                                                bc["similarity"] = 90
-                                                bc["low_conf"]   = False
-                                                st.session_state["reid_results"] = []
-                                                st.rerun()
-
-                    # ── Comps viewer ──────────────────────────────────────────
-                    st.markdown("---")
-                    st.markdown("**Comparable Sales**")
-                    comp_options = {
-                        f"Card {c['idx']+1} — {c.get('player','')} {c.get('set_name','')}": c
-                        for c in identified if c.get("card_id")
-                    }
-                    if comp_options:
-                        sel_label = st.selectbox("View comps for:", list(comp_options.keys()), key="raw_comp_select")
-                        sel_card  = comp_options[sel_label]
-                        cid       = sel_card["card_id"]
-                        if cid not in st.session_state.raw_batch_comps:
-                            with st.spinner("Loading comparable sales…"):
-                                st.session_state.raw_batch_comps[cid] = ch_comps_raw(cid)
-                        comp = st.session_state.raw_batch_comps.get(cid, {})
-                        sales = comp.get("raw_prices") or []
-                        if sales:
-                            mc1, mc2, mc3, mc4 = st.columns(4)
-                            mc1.metric("Comp Price", f"${comp.get('comp_price', 0):.2f}")
-                            mc2.metric("High",       f"${comp.get('high', 0):.2f}")
-                            mc3.metric("Low",        f"${comp.get('low', 0):.2f}")
-                            mc4.metric("Sales used", comp.get("count_used", "—"))
-                            comp_df = pd.DataFrame([{
-                                "Date":   (s.get("sale_date") or "")[:10],
-                                "Price":  f"${s.get('price', 0):.2f}",
-                                "Source": s.get("price_source", ""),
-                            } for s in sales[:10]])
-                            st.dataframe(comp_df, use_container_width=True, hide_index=True)
+                                        api_msg = match_res.get("message") or match_res.get("error") or "No candidates returned"
+                                        c["error"] = f"No visual match — {api_msg}"
+    
+                                    if c.get("status") == "identified":
+                                        c["title"] = _raw_title(
+                                            c["player"], c["set_name"], c["number"], c.get("variant", "")
+                                        )
+                                except Exception as exc:
+                                    c["error"] = str(exc)
+    
+                                cards.append(c)
+                                prog.progress((i + 1) / n_pairs * 0.7)
+    
+                            # Phase 2: batch FMV for all identified cards (1 API call)
+                            identified_cards = [c for c in cards if c.get("card_id")]
+                            if identified_cards:
+                                status.text(f"Fetching FMV for {len(identified_cards)} cards (batch)…")
+                                fmv_items = [{"card_id": c["card_id"], "grade": "Raw"} for c in identified_cards]
+                                fmv_res   = ch_fmv_batch(fmv_items)
+                                fmv_by_id = {}
+                                for r in (fmv_res.get("results") or []):
+                                    cid = r.get("card_id")
+                                    if cid:
+                                        fmv_by_id[cid] = r
+                                for c in identified_cards:
+                                    fmv = fmv_by_id.get(c["card_id"], {})
+                                    raw_p = fmv.get("price")
+                                    c["fmv"]      = round(float(raw_p), 2) if raw_p else None
+                                    c["fmv_low"]  = fmv.get("price_low")
+                                    c["fmv_high"] = fmv.get("price_high")
+                                    c["fmv_conf"] = fmv.get("confidence_grade", "")
+                                    c["price"]    = c["fmv"] if c["fmv"] else 2.49
+    
+                            prog.progress(1.0)
+                            n_ok  = sum(1 for c in cards if c["status"] == "identified")
+                            n_err = len(cards) - n_ok
+                            status.text(f"Done — {n_ok} identified, {n_err} failed.")
+                            st.session_state.raw_batch = cards
+                            # Persist to Supabase under active stack
+                            if st.session_state.get("bx_active_stack_id"):
+                                for _psc in cards:
+                                    stack_card_upsert({
+                                        "stack_id":       st.session_state["bx_active_stack_id"],
+                                        "idx":            _psc["idx"],
+                                        "front_file":     _psc.get("front_file", ""),
+                                        "front_url":      _psc.get("front_url", ""),
+                                        "back_url":       _psc.get("back_url", ""),
+                                        "player":         _psc.get("player", ""),
+                                        "title":          _psc.get("title", ""),
+                                        "similarity":     _psc.get("similarity") or 0,
+                                        "fmv":            _psc.get("fmv"),
+                                        "price":          _psc.get("price") or 2.49,
+                                        "status":         _psc.get("status", "error"),
+                                        "card_data_json": json.dumps(_psc),
+                                    })
+                                stack_update(st.session_state["bx_active_stack_id"],
+                                             {"total_cards": len(cards)})
+                                st.session_state["bx_stacks_cache"] = None
+                            st.rerun()
+    
+                # ── Step 2: Review & Price ─────────────────────────────────────
+                raw_batch = st.session_state.raw_batch
+                if raw_batch:
+                    identified = [c for c in raw_batch if c.get("status") == "identified"]
+                    failed     = [c for c in raw_batch if c.get("status") != "identified"]
+    
+                    if failed:
+                        with st.expander(f"⚠️ {len(failed)} card(s) could not be identified"):
+                            for c in failed:
+                                st.error(f"Card {c['idx']+1} ({c['front_file']}): {c.get('error', 'Unknown error')}")
+    
+                    if identified:
+                        n_low = sum(1 for c in identified if c.get("low_conf"))
+                        if n_low:
+                            st.warning(f"⚠️ {n_low} card(s) have low match confidence — review those rows carefully before exporting.")
                         else:
-                            fmv_val = sel_card.get("fmv")
-                            if fmv_val:
-                                st.info(f"No raw comps found in CardHedger — FMV estimate: ${fmv_val:.2f} ({sel_card.get('fmv_conf','')})")
-                            else:
-                                st.info("No comparable raw sales found for this card.")
-
-                    # ── Export ────────────────────────────────────────────────
-                    st.markdown("---")
-                    st.markdown("**Step 3 — Export to eBay**")
-                    st.caption("✏️ Edit the **Your Price** column above to set your sell price per card before exporting.")
-                    edited_records = edited.to_dict("records")
-                    n_included = sum(1 for r in edited_records if r.get("✓"))
-
-                    # Helper: parse manufacturer and year from set_name
-                    def _mfr(set_name):
-                        s = (set_name or "").lower()
-                        for m in ["Topps","Bowman","Panini","Donruss","Upper Deck","Score","Fleer","Pacific","Select","Prizm","Mosaic","Optic","Stadium Club"]:
-                            if m.lower() in s:
-                                return m
-                        return "Topps"
-
-                    def _year(set_name):
-                        m = re.search(r"\b(19|20)\d{2}\b", set_name or "")
-                        return m.group() if m else ""
-
-                    # Condition ID → eBay item specific value
-                    _COND_SPECIFIC = {
-                        "2750": "400010",  # NM
-                        "3000": "400020",  # EX
-                        "4000": "400030",  # VG
-                        "5000": "400040",  # G
-                        "6000": "400050",  # Poor
-                    }
-
-                    ACTION_COL = "*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)"
-                    COLS = [
-                        ACTION_COL, "CustomLabel", "*Category", "StoreCategory",
-                        "*Title", "Subtitle", "Relationship", "*ConditionID",
-                        "*C:Graded", "*C:Sport", "*C:Player/Athlete", "*C:Parallel/Variety",
-                        "*C:Manufacturer", "C:Season", "*C:Features", "*C:Set",
-                        "CD:Grade - (ID: 27502)", "*C:League", "CD:Professional Grader - (ID: 27501)",
-                        "*C:Team", "*C:Autographed", "CD:Card Condition - (ID: 40001)",
-                        "*C:Card Name", "*C:Card Number", "CDA:Certification Number - (ID: 27503)",
-                        "*C:Type", "C:Signed By", "C:Autograph Authentication",
-                        "C:Year Manufactured", "C:Card Size", "C:Country/Region of Manufacturer",
-                        "C:Material", "C:Autograph Format", "C:Vintage", "C:Original/Licensed Reprint",
-                        "C:Event/Tournament", "C:Language", "C:Autograph Authentication Number",
-                        "C:Bundle Description", "C:California Prop 65 Warning", "C:Card Thickness",
-                        "C:Custom Bundle", "C:Insert Set", "C:Print Run",
-                        "PicURL", "GalleryType", "*Description", "*Format", "*Duration",
-                        "*StartPrice", "BuyItNowPrice", "*Quantity",
-                        "PayPalAccepted", "PayPalEmailAddress", "ImmediatePayRequired",
-                        "PaymentInstructions", "*Location", "PostalCode",
-                        "ShippingType", "ShippingService-1:Option", "ShippingService-1:FreeShipping",
-                        "ShippingService-1:Cost", "ShippingService-1:AdditionalCost",
-                        "ShippingService-2:Option", "ShippingService-2:Cost",
-                        "*DispatchTimeMax", "PromotionalShippingDiscount", "ShippingDiscountProfileID",
-                        "*ReturnsAcceptedOption", "ReturnsWithinOption", "RefundOption",
-                        "ShippingCostPaidByOption", "AdditionalDetails",
-                        "ShippingProfileName", "ReturnProfileName", "PaymentProfileName",
-                        "TakeBackPolicyID", "ProductCompliancePolicyID", "ScheduleTime",
-                        "BestOfferEnabled", "MinimumBestOfferPrice", "BestOfferAutoAcceptPrice",
-                        "*C:Rookie", "*C:Memorabilia", "ActiveListings", "SoldListings",
-                        "Confidence", "PricingPulledFrom",
-                    ]
-
-                    ex_c1, ex_c2 = st.columns([2, 1])
-                    if ex_c1.button(f"⬇️ Export eBay CSV ({n_included} cards)", type="primary", key="raw_export_btn"):
-                        import datetime as _dt_exp
-                        date_str   = _dt_exp.date.today().strftime("%m%d%y")
-                        export_idx = 1
-
-                        # Pull settings from session state
-                        _sx_sku    = st.session_state.get("bx_sku_prefix", "DFS")
-                        _sx_sport  = st.session_state.get("bx_sport", "BASEBALL")
-                        _sx_bo     = "1" if st.session_state.get("bx_best_offer", True) else "0"
-                        _sx_tmpl   = st.session_state.get("bx_desc_template", "")
-                        _sport_cats = {
-                            "BASEBALL":   st.session_state.get("bx_store_cat_baseball",  "44411116016"),
-                            "BASKETBALL": st.session_state.get("bx_store_cat_basketball","44411138016"),
-                            "FOOTBALL":   st.session_state.get("bx_store_cat_football",  "44411117016"),
-                            "SOCCER":     st.session_state.get("bx_store_cat_soccer",    "44411118016"),
-                            "OTHER":      st.session_state.get("bx_store_cat_other",     "0"),
-                        }
-                        _league_map = {"BASEBALL":"MLB","BASKETBALL":"NBA","FOOTBALL":"NFL","SOCCER":"MLS","OTHER":""}
-
-                        buf = io.StringIO()
-                        # Row 1: Info header (eBay File Exchange requirement)
-                        info_row = ["Info", "Version=1.0.0", "Template=fx_category_template_EBAY_US"] + [""] * (len(COLS) - 3)
-                        buf.write(",".join(info_row) + "\n")
-                        # Row 2: Column headers
-                        writer = csv.DictWriter(buf, fieldnames=COLS, extrasaction="ignore")
-                        writer.writeheader()
-
-                        for row, orig in zip(edited_records, identified):
-                            if not row.get("✓"):
-                                continue
-                            title    = (row.get("eBay Title") or orig.get("title", ""))[:80]
-                            price    = float(row.get("Price ($)") or 2.49)
-                            cond_lbl = row.get("Condition", st.session_state.get("bx_default_condition","Near Mint (NM)"))
-                            cond_id  = _RAW_CONDITIONS.get(cond_lbl, "2750")
-                            cond_sp  = _COND_SPECIFIC.get(cond_id, "400010")
-                            sku      = f"{_sx_sku}-{date_str}-{export_idx:04d}"
-                            front_u  = orig.get("front_url", "")
-                            back_u   = orig.get("back_url", "")
-                            pic_url  = f"{front_u}|{back_u}" if back_u else front_u
-                            player   = orig.get("player", "")
-                            set_n    = orig.get("set_name", "")
-                            number   = orig.get("number", "")
-                            # Parallel: prefer what user typed in the table over CardHedger's value
-                            _tbl_par = (row.get("Parallel") or "").strip()
-                            _api_par = orig.get("variant", "")
-                            par      = _tbl_par if _tbl_par else (_api_par if _api_par and _api_par.lower() not in ("base","") else "")
-                            # If parallel was edited in the table, rebuild the title with the corrected parallel
-                            _base_title = row.get("eBay Title") or orig.get("title", "")
-                            if _tbl_par and _tbl_par.lower() not in _base_title.lower():
-                                _parts = [_year(set_n), set_n, player.upper(), f"#{number}" if number else "", _tbl_par]
-                                _rebuilt = " ".join(p for p in _parts if p)[:80]
-                                title = _rebuilt
-                            else:
-                                title = _base_title[:80]
-                            year     = _year(set_n)
-                            mfr      = _mfr(set_n)
-                            sim      = orig.get("similarity", 0)
-                            store_cat = _sport_cats.get(_sx_sport, "0")
-                            league    = _league_map.get(_sx_sport, "")
-
-                            # Shipping by price (use _exp_ prefix to avoid leaking into other tab scopes)
-                            if price < 1.00:
-                                _exp_ship_cost = "0.00"; _exp_ship_free = "1"
-                            elif price < 20:
-                                _exp_ship_cost = "0.74"; _exp_ship_free = "0"
-                            else:
-                                _exp_ship_cost = "0.00"; _exp_ship_free = "1"
-
-                            # Build description from template
-                            if _sx_tmpl:
-                                desc = _sx_tmpl.replace("[LISTING_TITLE]", title).replace("[FRONT_IMAGE_URL]", front_u)
-                            else:
-                                desc = _scan_description(title, front_u)
-
-                            writer.writerow({
-                                ACTION_COL:                           "Add",
-                                "CustomLabel":                        sku,
-                                "*Category":                          "261328",
-                                "StoreCategory":                      store_cat,
-                                "*Title":                             title,
-                                "*ConditionID":                       cond_id,
-                                "*C:Graded":                          "No",
-                                "*C:Sport":                           _sx_sport,
-                                "*C:Player/Athlete":                  player,
-                                "*C:Parallel/Variety":                par,
-                                "*C:Manufacturer":                    mfr,
-                                "C:Season":                           year,
-                                "*C:Set":                             set_n,
-                                "*C:League":                          league,
-                                "*C:Autographed":                     "No",
-                                "CD:Card Condition - (ID: 40001)":    cond_sp,
-                                "*C:Card Number":                     number,
-                                "*C:Type":                            "Sports Trading Card",
-                                "C:Year Manufactured":                year,
-                                "C:Insert Set":                       par,
-                                "PicURL":                             pic_url,
-                                "*Description":                       desc,
-                                "*Format":                            "FixedPrice",
-                                "*Duration":                          "GTC",
-                                "*StartPrice":                        f"{price:.2f}",
-                                "BuyItNowPrice":                      "0",
-                                "*Quantity":                          "1",
-                                "PayPalAccepted":                     "1",
-                                "ImmediatePayRequired":               "1",
-                                "*Location":                          "Scottsdale,AZ",
-                                "PostalCode":                         "85250-6312",
-                                "ShippingType":                       "Flat",
-                                "ShippingService-1:Option":           "US_eBayStandardEnvelope",
-                                "ShippingService-1:FreeShipping":     _exp_ship_free,
-                                "ShippingService-1:Cost":             _exp_ship_cost,
-                                "ShippingService-1:AdditionalCost":   "0",
-                                "*DispatchTimeMax":                   "2",
-                                "*ReturnsAcceptedOption":             "ReturnsNotAccepted",
-                                "BestOfferEnabled":                   _sx_bo,
-                                "*C:Rookie":                          "No",
-                                "*C:Memorabilia":                     "No",
-                                "ActiveListings":                     "Active",
-                                "SoldListings":                       "Completed",
-                                "Confidence":                         f"{sim:.0f}%",
-                                "PricingPulledFrom":                  set_n + " " + player,
+                            st.success(f"✅ {len(identified)} cards identified")
+    
+                        st.markdown("**Step 2 — Review & Price**")
+    
+                        # Build editable table
+                        import urllib.parse as _uparse
+                        edit_rows = []
+                        for c in identified:
+                            sim = c.get("similarity", 0)
+                            fmv_display = f"${c['fmv']:.2f}" if c.get("fmv") else "—"
+                            cond_label  = next((k for k, v in _RAW_CONDITIONS.items() if v == c.get("condition_id", "2750")), "Near Mint (NM)")
+                            ebay_q      = _uparse.quote_plus(c.get("title", c.get("player", "")))
+                            ebay_url    = f"https://www.ebay.com/sch/i.html?_nkw={ebay_q}&_sacat=261328&LH_Sold=1&LH_Complete=1"
+                            raw_par = c.get("variant", "")
+                            par_display = raw_par if raw_par and raw_par.lower() not in ("base","") else ""
+                            edit_rows.append({
+                                "✓":          c.get("include", True),
+                                "#":          c["idx"] + 1,
+                                "Player":     c.get("player", ""),
+                                "Parallel":   par_display,
+                                "eBay Title": c.get("title", ""),
+                                "Conf %":     f"{sim:.0f}" if sim else "?",
+                                "FMV":        fmv_display,
+                                "FMV Conf":   c.get("fmv_conf", ""),
+                                "Price ($)":  float(c.get("price") or 2.49),
+                                "Condition":  cond_label,
+                                "🔍 eBay":    ebay_url,
                             })
-                            export_idx += 1
-                        csv_bytes = buf.getvalue().encode("utf-8")
-                        filename  = f"DFS_RawListings_{date_str}.csv"
-                        st.download_button(
-                            label=f"📥 Download {filename}",
-                            data=csv_bytes,
-                            file_name=filename,
-                            mime="text/csv",
-                            key="raw_dl_btn",
+    
+                        edited = st.data_editor(
+                            pd.DataFrame(edit_rows),
+                            use_container_width=True,
+                            hide_index=True,
+                            key="raw_batch_editor",
+                            column_config={
+                                "✓":          st.column_config.CheckboxColumn("Include", width="small"),
+                                "#":          st.column_config.NumberColumn("#", width="small", disabled=True),
+                                "Player":     st.column_config.TextColumn("Player", width="medium", disabled=True),
+                                "Parallel":   st.column_config.TextColumn("Parallel ✏️", width="medium",
+                                                  help="Edit if CardHedger got the parallel wrong — updates the title and CSV export"),
+                                "eBay Title": st.column_config.TextColumn("eBay Title (editable)", max_chars=80, width="large"),
+                                "Conf %":     st.column_config.TextColumn("Conf%", width="small", disabled=True,
+                                                  help="Visual match confidence from CardHedger — below 80% means double-check"),
+                                "FMV":        st.column_config.TextColumn("FMV", width="small", disabled=True),
+                                "FMV Conf":   st.column_config.TextColumn("FMV Grade", width="small", disabled=True,
+                                                  help="A=high data confidence, B=medium, C=low"),
+                                "Price ($)":  st.column_config.NumberColumn("Your Price", min_value=0.01, format="$%.2f"),
+                                "Condition":  st.column_config.SelectboxColumn(
+                                                  "Condition", options=list(_RAW_CONDITIONS.keys()), width="medium"),
+                                "🔍 eBay":    st.column_config.LinkColumn("🔍 eBay", display_text="View Sold", width="small"),
+                            },
                         )
-
-                    if ex_c2.button("🗑️ Clear Batch", key="raw_clear_btn"):
-                        st.session_state.raw_batch = []
-                        st.session_state.raw_batch_comps = {}
-                        st.rerun()
-
-            elif not all_files and not st.session_state.raw_batch:
-                st.info("💡 **How it works:** Select all scans at once — front and back interleaved (front1, back1, front2, back2…). CardHedger visually matches each card, shows recent sold comps, and exports an eBay Add CSV with both images on every listing.")
+    
+                        # ── Re-identify low-confidence cards ──────────────────────
+                        low_conf_cards = [c for c in identified if c.get("low_conf")]
+                        if low_conf_cards:
+                            st.markdown("---")
+                            with st.expander("🔍 Re-identify a card (search by name / set)", expanded=True):
+                                reid_options = {f"Card {c['idx']+1} — {c.get('player','')} {c.get('set_name','')} (Conf: {c.get('similarity',0):.0f}%)": c for c in low_conf_cards}
+                                reid_label = st.selectbox("Which card to re-identify:", list(reid_options.keys()), key="reid_select")
+                                reid_card  = reid_options[reid_label]
+                                reid_q = st.text_input("Search query (player name, year, set):",
+                                    value=f"{reid_card.get('player','')} {reid_card.get('set_name','')}".strip(),
+                                    key="reid_query",
+                                    placeholder="e.g. Ceddanne Rafaela 2024 Topps Chrome")
+                                if st.button("🔍 Search", key="reid_go") and reid_q:
+                                    with st.spinner("Searching catalog…"):
+                                        sr = _ch_post("/v1/cards/card-search", {"search": reid_q, "page": 1, "page_size": 10}) or {}
+                                        for _rk in ("cards", "data", "results", "items"):
+                                            if _rk in sr and isinstance(sr[_rk], list):
+                                                reid_results = sr[_rk]; break
+                                        else:
+                                            reid_results = sr if isinstance(sr, list) else []
+                                        st.session_state["reid_results"] = reid_results
+                                        st.session_state["reid_card_idx"] = reid_card["idx"]
+    
+                                reid_results = st.session_state.get("reid_results", [])
+                                if reid_results and st.session_state.get("reid_card_idx") == reid_card["idx"]:
+                                    st.caption(f"{len(reid_results)} results — pick the correct card:")
+                                    for ri, r in enumerate(reid_results):
+                                        # card-search returns card_name or player; set_name; card_number; year; parallel
+                                        player = r.get("card_name") or r.get("player","")
+                                        year   = str(r.get("year",""))
+                                        set_n  = r.get("set_name") or r.get("set","")
+                                        num    = r.get("card_number") or r.get("number","")
+                                        par    = r.get("parallel") or r.get("variant","")
+                                        par    = par if par and par.lower() not in ("base","") else ""
+                                        rc_title = f"{year} {set_n} {player.upper()} #{num}".strip()
+                                        if st.button(f"✓  {rc_title}{' — '+par if par else ''}", key=f"reid_pick_{ri}"):
+                                            for bc in st.session_state.raw_batch:
+                                                if bc["idx"] == reid_card["idx"]:
+                                                    parts  = [year, set_n, player.upper(), f"#{num}" if num else "", par]
+                                                    bc["title"]      = " ".join(p for p in parts if p)[:80]
+                                                    bc["player"]     = player
+                                                    bc["set_name"]   = set_n
+                                                    bc["number"]     = num
+                                                    bc["variant"]    = par
+                                                    bc["card_id"]    = r.get("card_id") or r.get("id","")
+                                                    bc["similarity"] = 90
+                                                    bc["low_conf"]   = False
+                                                    st.session_state["reid_results"] = []
+                                                    st.rerun()
+    
+                        # ── Comps viewer ──────────────────────────────────────────
+                        st.markdown("---")
+                        st.markdown("**Comparable Sales**")
+                        comp_options = {
+                            f"Card {c['idx']+1} — {c.get('player','')} {c.get('set_name','')}": c
+                            for c in identified if c.get("card_id")
+                        }
+                        if comp_options:
+                            sel_label = st.selectbox("View comps for:", list(comp_options.keys()), key="raw_comp_select")
+                            sel_card  = comp_options[sel_label]
+                            cid       = sel_card["card_id"]
+                            if cid not in st.session_state.raw_batch_comps:
+                                with st.spinner("Loading comparable sales…"):
+                                    st.session_state.raw_batch_comps[cid] = ch_comps_raw(cid)
+                            comp = st.session_state.raw_batch_comps.get(cid, {})
+                            sales = comp.get("raw_prices") or []
+                            if sales:
+                                mc1, mc2, mc3, mc4 = st.columns(4)
+                                mc1.metric("Comp Price", f"${comp.get('comp_price', 0):.2f}")
+                                mc2.metric("High",       f"${comp.get('high', 0):.2f}")
+                                mc3.metric("Low",        f"${comp.get('low', 0):.2f}")
+                                mc4.metric("Sales used", comp.get("count_used", "—"))
+                                comp_df = pd.DataFrame([{
+                                    "Date":   (s.get("sale_date") or "")[:10],
+                                    "Price":  f"${s.get('price', 0):.2f}",
+                                    "Source": s.get("price_source", ""),
+                                } for s in sales[:10]])
+                                st.dataframe(comp_df, use_container_width=True, hide_index=True)
+                            else:
+                                fmv_val = sel_card.get("fmv")
+                                if fmv_val:
+                                    st.info(f"No raw comps found in CardHedger — FMV estimate: ${fmv_val:.2f} ({sel_card.get('fmv_conf','')})")
+                                else:
+                                    st.info("No comparable raw sales found for this card.")
+    
+                        # ── Export ────────────────────────────────────────────────
+                        st.markdown("---")
+                        st.markdown("**Step 3 — Export to eBay**")
+                        st.caption("✏️ Edit the **Your Price** column above to set your sell price per card before exporting.")
+                        edited_records = edited.to_dict("records")
+                        n_included = sum(1 for r in edited_records if r.get("✓"))
+    
+                        # Helper: parse manufacturer and year from set_name
+                        def _mfr(set_name):
+                            s = (set_name or "").lower()
+                            for m in ["Topps","Bowman","Panini","Donruss","Upper Deck","Score","Fleer","Pacific","Select","Prizm","Mosaic","Optic","Stadium Club"]:
+                                if m.lower() in s:
+                                    return m
+                            return "Topps"
+    
+                        def _year(set_name):
+                            m = re.search(r"\b(19|20)\d{2}\b", set_name or "")
+                            return m.group() if m else ""
+    
+                        # Condition ID → eBay item specific value
+                        _COND_SPECIFIC = {
+                            "2750": "400010",  # NM
+                            "3000": "400020",  # EX
+                            "4000": "400030",  # VG
+                            "5000": "400040",  # G
+                            "6000": "400050",  # Poor
+                        }
+    
+                        ACTION_COL = "*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)"
+                        COLS = [
+                            ACTION_COL, "CustomLabel", "*Category", "StoreCategory",
+                            "*Title", "Subtitle", "Relationship", "*ConditionID",
+                            "*C:Graded", "*C:Sport", "*C:Player/Athlete", "*C:Parallel/Variety",
+                            "*C:Manufacturer", "C:Season", "*C:Features", "*C:Set",
+                            "CD:Grade - (ID: 27502)", "*C:League", "CD:Professional Grader - (ID: 27501)",
+                            "*C:Team", "*C:Autographed", "CD:Card Condition - (ID: 40001)",
+                            "*C:Card Name", "*C:Card Number", "CDA:Certification Number - (ID: 27503)",
+                            "*C:Type", "C:Signed By", "C:Autograph Authentication",
+                            "C:Year Manufactured", "C:Card Size", "C:Country/Region of Manufacturer",
+                            "C:Material", "C:Autograph Format", "C:Vintage", "C:Original/Licensed Reprint",
+                            "C:Event/Tournament", "C:Language", "C:Autograph Authentication Number",
+                            "C:Bundle Description", "C:California Prop 65 Warning", "C:Card Thickness",
+                            "C:Custom Bundle", "C:Insert Set", "C:Print Run",
+                            "PicURL", "GalleryType", "*Description", "*Format", "*Duration",
+                            "*StartPrice", "BuyItNowPrice", "*Quantity",
+                            "PayPalAccepted", "PayPalEmailAddress", "ImmediatePayRequired",
+                            "PaymentInstructions", "*Location", "PostalCode",
+                            "ShippingType", "ShippingService-1:Option", "ShippingService-1:FreeShipping",
+                            "ShippingService-1:Cost", "ShippingService-1:AdditionalCost",
+                            "ShippingService-2:Option", "ShippingService-2:Cost",
+                            "*DispatchTimeMax", "PromotionalShippingDiscount", "ShippingDiscountProfileID",
+                            "*ReturnsAcceptedOption", "ReturnsWithinOption", "RefundOption",
+                            "ShippingCostPaidByOption", "AdditionalDetails",
+                            "ShippingProfileName", "ReturnProfileName", "PaymentProfileName",
+                            "TakeBackPolicyID", "ProductCompliancePolicyID", "ScheduleTime",
+                            "BestOfferEnabled", "MinimumBestOfferPrice", "BestOfferAutoAcceptPrice",
+                            "*C:Rookie", "*C:Memorabilia", "ActiveListings", "SoldListings",
+                            "Confidence", "PricingPulledFrom",
+                        ]
+    
+                        ex_c1, ex_c2 = st.columns([2, 1])
+                        if ex_c1.button(f"⬇️ Export eBay CSV ({n_included} cards)", type="primary", key="raw_export_btn"):
+                            import datetime as _dt_exp
+                            date_str   = _dt_exp.date.today().strftime("%m%d%y")
+                            export_idx = 1
+    
+                            # Pull settings from session state
+                            _sx_sku    = st.session_state.get("bx_sku_prefix", "DFS")
+                            _sx_sport  = st.session_state.get("bx_sport", "BASEBALL")
+                            _sx_bo     = "1" if st.session_state.get("bx_best_offer", True) else "0"
+                            _sx_tmpl   = st.session_state.get("bx_desc_template", "")
+                            _sport_cats = {
+                                "BASEBALL":   st.session_state.get("bx_store_cat_baseball",  "44411116016"),
+                                "BASKETBALL": st.session_state.get("bx_store_cat_basketball","44411138016"),
+                                "FOOTBALL":   st.session_state.get("bx_store_cat_football",  "44411117016"),
+                                "SOCCER":     st.session_state.get("bx_store_cat_soccer",    "44411118016"),
+                                "OTHER":      st.session_state.get("bx_store_cat_other",     "0"),
+                            }
+                            _league_map = {"BASEBALL":"MLB","BASKETBALL":"NBA","FOOTBALL":"NFL","SOCCER":"MLS","OTHER":""}
+    
+                            buf = io.StringIO()
+                            # Row 1: Info header (eBay File Exchange requirement)
+                            info_row = ["Info", "Version=1.0.0", "Template=fx_category_template_EBAY_US"] + [""] * (len(COLS) - 3)
+                            buf.write(",".join(info_row) + "\n")
+                            # Row 2: Column headers
+                            writer = csv.DictWriter(buf, fieldnames=COLS, extrasaction="ignore")
+                            writer.writeheader()
+    
+                            for row, orig in zip(edited_records, identified):
+                                if not row.get("✓"):
+                                    continue
+                                title    = (row.get("eBay Title") or orig.get("title", ""))[:80]
+                                price    = float(row.get("Price ($)") or 2.49)
+                                cond_lbl = row.get("Condition", st.session_state.get("bx_default_condition","Near Mint (NM)"))
+                                cond_id  = _RAW_CONDITIONS.get(cond_lbl, "2750")
+                                cond_sp  = _COND_SPECIFIC.get(cond_id, "400010")
+                                sku      = f"{_sx_sku}-{date_str}-{export_idx:04d}"
+                                front_u  = orig.get("front_url", "")
+                                back_u   = orig.get("back_url", "")
+                                pic_url  = f"{front_u}|{back_u}" if back_u else front_u
+                                player   = orig.get("player", "")
+                                set_n    = orig.get("set_name", "")
+                                number   = orig.get("number", "")
+                                # Parallel: prefer what user typed in the table over CardHedger's value
+                                _tbl_par = (row.get("Parallel") or "").strip()
+                                _api_par = orig.get("variant", "")
+                                par      = _tbl_par if _tbl_par else (_api_par if _api_par and _api_par.lower() not in ("base","") else "")
+                                # If parallel was edited in the table, rebuild the title with the corrected parallel
+                                _base_title = row.get("eBay Title") or orig.get("title", "")
+                                if _tbl_par and _tbl_par.lower() not in _base_title.lower():
+                                    _parts = [_year(set_n), set_n, player.upper(), f"#{number}" if number else "", _tbl_par]
+                                    _rebuilt = " ".join(p for p in _parts if p)[:80]
+                                    title = _rebuilt
+                                else:
+                                    title = _base_title[:80]
+                                year     = _year(set_n)
+                                mfr      = _mfr(set_n)
+                                sim      = orig.get("similarity", 0)
+                                store_cat = _sport_cats.get(_sx_sport, "0")
+                                league    = _league_map.get(_sx_sport, "")
+    
+                                # Shipping by price (use _exp_ prefix to avoid leaking into other tab scopes)
+                                if price < 1.00:
+                                    _exp_ship_cost = "0.00"; _exp_ship_free = "1"
+                                elif price < 20:
+                                    _exp_ship_cost = "0.74"; _exp_ship_free = "0"
+                                else:
+                                    _exp_ship_cost = "0.00"; _exp_ship_free = "1"
+    
+                                # Build description from template
+                                if _sx_tmpl:
+                                    desc = _sx_tmpl.replace("[LISTING_TITLE]", title).replace("[FRONT_IMAGE_URL]", front_u)
+                                else:
+                                    desc = _scan_description(title, front_u)
+    
+                                writer.writerow({
+                                    ACTION_COL:                           "Add",
+                                    "CustomLabel":                        sku,
+                                    "*Category":                          "261328",
+                                    "StoreCategory":                      store_cat,
+                                    "*Title":                             title,
+                                    "*ConditionID":                       cond_id,
+                                    "*C:Graded":                          "No",
+                                    "*C:Sport":                           _sx_sport,
+                                    "*C:Player/Athlete":                  player,
+                                    "*C:Parallel/Variety":                par,
+                                    "*C:Manufacturer":                    mfr,
+                                    "C:Season":                           year,
+                                    "*C:Set":                             set_n,
+                                    "*C:League":                          league,
+                                    "*C:Autographed":                     "No",
+                                    "CD:Card Condition - (ID: 40001)":    cond_sp,
+                                    "*C:Card Number":                     number,
+                                    "*C:Type":                            "Sports Trading Card",
+                                    "C:Year Manufactured":                year,
+                                    "C:Insert Set":                       par,
+                                    "PicURL":                             pic_url,
+                                    "*Description":                       desc,
+                                    "*Format":                            "FixedPrice",
+                                    "*Duration":                          "GTC",
+                                    "*StartPrice":                        f"{price:.2f}",
+                                    "BuyItNowPrice":                      "0",
+                                    "*Quantity":                          "1",
+                                    "PayPalAccepted":                     "1",
+                                    "ImmediatePayRequired":               "1",
+                                    "*Location":                          "Scottsdale,AZ",
+                                    "PostalCode":                         "85250-6312",
+                                    "ShippingType":                       "Flat",
+                                    "ShippingService-1:Option":           "US_eBayStandardEnvelope",
+                                    "ShippingService-1:FreeShipping":     _exp_ship_free,
+                                    "ShippingService-1:Cost":             _exp_ship_cost,
+                                    "ShippingService-1:AdditionalCost":   "0",
+                                    "*DispatchTimeMax":                   "2",
+                                    "*ReturnsAcceptedOption":             "ReturnsNotAccepted",
+                                    "BestOfferEnabled":                   _sx_bo,
+                                    "*C:Rookie":                          "No",
+                                    "*C:Memorabilia":                     "No",
+                                    "ActiveListings":                     "Active",
+                                    "SoldListings":                       "Completed",
+                                    "Confidence":                         f"{sim:.0f}%",
+                                    "PricingPulledFrom":                  set_n + " " + player,
+                                })
+                                export_idx += 1
+                            csv_bytes = buf.getvalue().encode("utf-8")
+                            filename  = f"DFS_RawListings_{date_str}.csv"
+                            # Mark exported cards as listed in Supabase
+                            if st.session_state.get("bx_active_stack_id"):
+                                _exp_idxs = {orig["idx"] for row, orig in zip(edited_records, identified) if row.get("✓")}
+                                _sc_rows  = stack_cards_get(st.session_state["bx_active_stack_id"])
+                                for _scr in _sc_rows:
+                                    if _scr.get("idx") in _exp_idxs:
+                                        stack_card_update(_scr["id"], {"status": "listed"})
+                                        for _bc in st.session_state.raw_batch:
+                                            if _bc.get("idx") == _scr.get("idx"):
+                                                _bc["status"] = "listed"
+                                st.session_state["bx_stacks_cache"] = None
+                            st.download_button(
+                                label=f"📥 Download {filename}",
+                                data=csv_bytes,
+                                file_name=filename,
+                                mime="text/csv",
+                                key="raw_dl_btn",
+                            )
+    
+                        if ex_c2.button("🗑️ Clear Batch", key="raw_clear_btn"):
+                            st.session_state.raw_batch = []
+                            st.session_state.raw_batch_comps = {}
+                            st.rerun()
+    
+                elif not all_files and not st.session_state.raw_batch:
+                    st.info("💡 **How it works:** Select all scans at once — front and back interleaved (front1, back1, front2, back2…). CardHedger visually matches each card, shows recent sold comps, and exports an eBay Add CSV with both images on every listing.")
 
 with tab2:
     st.markdown("## 📦 Inventory Check")
