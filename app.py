@@ -4030,10 +4030,13 @@ with tab8:
                         cond_label  = next((k for k, v in _RAW_CONDITIONS.items() if v == c.get("condition_id", "2750")), "Near Mint (NM)")
                         ebay_q      = _uparse.quote_plus(c.get("title", c.get("player", "")))
                         ebay_url    = f"https://www.ebay.com/sch/i.html?_nkw={ebay_q}&_sacat=261328&LH_Sold=1&LH_Complete=1"
+                        raw_par = c.get("variant", "")
+                        par_display = raw_par if raw_par and raw_par.lower() not in ("base","") else ""
                         edit_rows.append({
                             "✓":          c.get("include", True),
                             "#":          c["idx"] + 1,
                             "Player":     c.get("player", ""),
+                            "Parallel":   par_display,
                             "eBay Title": c.get("title", ""),
                             "Conf %":     f"{sim:.0f}" if sim else "?",
                             "FMV":        fmv_display,
@@ -4052,6 +4055,8 @@ with tab8:
                             "✓":          st.column_config.CheckboxColumn("Include", width="small"),
                             "#":          st.column_config.NumberColumn("#", width="small", disabled=True),
                             "Player":     st.column_config.TextColumn("Player", width="medium", disabled=True),
+                            "Parallel":   st.column_config.TextColumn("Parallel ✏️", width="medium",
+                                              help="Edit if CardHedger got the parallel wrong — updates the title and CSV export"),
                             "eBay Title": st.column_config.TextColumn("eBay Title (editable)", max_chars=80, width="large"),
                             "Conf %":     st.column_config.TextColumn("Conf%", width="small", disabled=True,
                                               help="Visual match confidence from CardHedger — below 80% means double-check"),
@@ -4253,8 +4258,18 @@ with tab8:
                             player   = orig.get("player", "")
                             set_n    = orig.get("set_name", "")
                             number   = orig.get("number", "")
-                            variant  = orig.get("variant", "")
-                            par      = variant if variant and variant.lower() not in ("base","") else ""
+                            # Parallel: prefer what user typed in the table over CardHedger's value
+                            _tbl_par = (row.get("Parallel") or "").strip()
+                            _api_par = orig.get("variant", "")
+                            par      = _tbl_par if _tbl_par else (_api_par if _api_par and _api_par.lower() not in ("base","") else "")
+                            # If parallel was edited in the table, rebuild the title with the corrected parallel
+                            _base_title = row.get("eBay Title") or orig.get("title", "")
+                            if _tbl_par and _tbl_par.lower() not in _base_title.lower():
+                                _parts = [_year(set_n), set_n, player.upper(), f"#{number}" if number else "", _tbl_par]
+                                _rebuilt = " ".join(p for p in _parts if p)[:80]
+                                title = _rebuilt
+                            else:
+                                title = _base_title[:80]
                             year     = _year(set_n)
                             mfr      = _mfr(set_n)
                             sim      = orig.get("similarity", 0)
