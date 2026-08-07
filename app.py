@@ -3880,16 +3880,16 @@ alter table scan_cards disable row level security;"""
             # ══════════════════════════════════════════════════════════════════
             if st.session_state["bx_active_stack_id"] is None:
                 _slh1, _slh2 = st.columns([5, 1])
-                _slh1.markdown("### 📦 Stacks")
-                if _slh2.button("➕ New Stack", type="primary", key="bx_new_stack_btn"):
+                _slh1.markdown("### 📦 Lots")
+                if _slh2.button("➕ New Lot", type="primary", key="bx_new_stack_btn"):
                     st.session_state["bx_show_new_form"] = True
 
                 if st.session_state.get("bx_show_new_form"):
                     with st.form("bx_new_stack_form", clear_on_submit=True):
                         _nsc1, _nsc2 = st.columns([2, 3])
-                        _ns_name  = _nsc1.text_input("Stack name *", placeholder="RBLOT-08-06-26")
+                        _ns_name  = _nsc1.text_input("Lot name *", placeholder="RBLOT-08-06-26")
                         _ns_notes = _nsc2.text_input("Notes", placeholder="Baseball box, 131 cards")
-                        if st.form_submit_button("✅ Create & Open"):
+                        if st.form_submit_button("✅ Create Lot & Open"):
                             _nm = (_ns_name or "").strip()
                             if _nm:
                                 _ns = stack_create(_nm, (_ns_notes or "").strip())
@@ -3904,7 +3904,7 @@ alter table scan_cards disable row level security;"""
                                     st.session_state["bx_stacks_cache"]      = None
                                     st.rerun()
                                 else:
-                                    st.error("Failed to create stack — run the SQL setup first:")
+                                    st.error("Failed to create lot — run the SQL setup first:")
                                     st.code(_STACKS_SQL, language="sql")
 
                     with st.expander("📋 First-time setup SQL (run once in Supabase)", expanded=False):
@@ -3924,7 +3924,7 @@ alter table scan_cards disable row level security;"""
                 _stacks = st.session_state["bx_stacks_cache"]
                 if not _stacks:
                     if not st.session_state.get("bx_show_new_form"):
-                        st.info("No stacks yet — click **➕ New Stack** to create your first batch.")
+                        st.info("No stacks yet — click **➕ New Lot** to create your first batch.")
                 else:
                     _hc = st.columns([3,1,1,1,1,1,1,1])
                     for _hl, _hv in zip(_hc, ["**Name**","**Cards**","**Matched**","**>80%**","**Listed**","**Created**","",""]):
@@ -3955,7 +3955,7 @@ alter table scan_cards disable row level security;"""
                             st.session_state.raw_batch               = _loaded
                             st.session_state.raw_batch_comps         = {}
                             st.rerun()
-                        if _rc[7].button("🗑", key=f"stk_del_{_s['id']}", help="Delete stack and all its cards"):
+                        if _rc[7].button("🗑", key=f"stk_del_{_s['id']}", help="Delete lot and all its cards"):
                             stack_cards_delete(_s["id"])
                             stack_delete(_s["id"])
                             st.session_state["bx_stacks_cache"] = None
@@ -3967,7 +3967,7 @@ alter table scan_cards disable row level security;"""
             else:
                 _ash1, _ash2 = st.columns([5, 1])
                 _ash1.markdown(f"### 📦 {st.session_state['bx_active_stack_name']}")
-                if _ash2.button("← Stacks", key="bx_back_stacks"):
+                if _ash2.button("← Lots", key="bx_back_stacks"):
                     st.session_state["bx_active_stack_id"]   = None
                     st.session_state["bx_active_stack_name"] = ""
                     st.session_state["bx_stacks_cache"]      = None
