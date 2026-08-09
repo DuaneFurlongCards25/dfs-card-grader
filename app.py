@@ -3831,9 +3831,19 @@ with tab8:
 
                         _ab_query = build_card_query(_abcv) if not _abcv.get("_error") else ""
                         _ab_avg   = ""
+                        _ab_query_used = _ab_query
 
                         if not _abcv.get("_error") and _ab_run_comps and _ab_query:
+                            # Try specific query first, then broaden progressively if no results
                             _ab_sold = fetch_ebay_sold(_ab_query, DEFAULT_EBAY_KEY, max_results=15)
+                            if not _ab_sold and _abcv.get("numbered"):
+                                # Drop print run — find any copy of this parallel
+                                _ab_query_used = build_card_query({**_abcv, "numbered": ""})
+                                _ab_sold = fetch_ebay_sold(_ab_query_used, DEFAULT_EBAY_KEY, max_results=15)
+                            if not _ab_sold and _abcv.get("parallel"):
+                                # Drop parallel too — find base card comps
+                                _ab_query_used = build_card_query({**_abcv, "numbered": "", "parallel": ""})
+                                _ab_sold = fetch_ebay_sold(_ab_query_used, DEFAULT_EBAY_KEY, max_results=15)
                             _ab_avg_val = ebay_avg(_ab_sold)
                             _ab_avg = f"${_ab_avg_val:,.2f}" if _ab_avg_val else "no data"
 
@@ -3848,7 +3858,7 @@ with tab8:
                             "Parallel":   _abcv.get("parallel", ""),
                             "Sport":      _abcv.get("sport", ""),
                             "eBay Avg":   _ab_avg,
-                            "eBay Query": _ab_query,
+                            "eBay Query": _ab_query_used,
                             "Status":     ("Error: " + _abcv["_error"]) if _abcv.get("_error") else "OK",
                         })
 
