@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.28"
+APP_VERSION = "1.5.29"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -338,6 +338,7 @@ SUPABASE_KEY = get_secret("supabase", "key")
 DEFAULT_EBAY_KEY = get_secret("ebay", "app_id")
 CARDHEDGER_KEY = get_secret("cardhedger", "api_key")
 CARDHEDGER_BASE = "https://api.cardhedger.com"
+ANTHROPIC_KEY = get_secret("anthropic", "api_key")
 WP_PROXY_URL   = "https://duanefurlongstudios.com/wp-admin/admin-ajax.php?action=dfs_gemrate"
 
 # ─── Page config ──────────────────────────────────────────────────────────────
@@ -1441,6 +1442,93 @@ def ch_image_match(image_b64):
                 return _r
     # Return last error so caller can show it
     return _r or {}
+
+# ─── Claude Vision Card Identification ────────────────────────────────────────
+
+_CLAUDE_CARD_PROMPT = """You are a professional trading card expert. Identify this trading card from the image.
+
+Return ONLY a valid JSON object with these exact fields — no prose, no markdown fences:
+{
+  "player": "Full player/subject name exactly as printed on the card",
+  "year": "4-digit release year",
+  "brand": "Manufacturer (Topps, Panini, Bowman, Upper Deck, Fleer, etc.)",
+  "set": "Full set name (e.g. Bowman Chrome, Topps Heritage, Panini Prizm, Topps Update)",
+  "card_number": "Card number with any prefix (e.g. #187, BCP-53, TOG-14)",
+  "parallel": "Parallel or refractor type (e.g. Silver Prizm, Gold Refractor, Wave Prizm). Empty string for base cards.",
+  "sport": "Baseball, Basketball, Football, Soccer, or Hockey",
+  "numbered": "Print run if visible on card (e.g. /99, /250). Empty string if not visible.",
+  "rookie": true or false,
+  "team": "Team name as shown on card",
+  "notes": "Any other notable details: RC, 1st Bowman, autograph, relic, etc."
+}
+
+Read the card carefully — player name, year, set name, card number are usually printed directly on the card.
+Only report what you can actually see. Use empty string for anything you cannot read clearly."""
+
+def claude_identify_card(image_b64: str, media_type: str = "image/jpeg") -> dict:
+    """Identify a trading card using Claude Vision. Returns structured card data."""
+    if not ANTHROPIC_KEY:
+        return {"_error": "Anthropic API key not configured"}
+    payload = {
+        "model": "claude-sonnet-5",
+        "max_tokens": 1024,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": media_type, "data": image_b64},
+                },
+                {"type": "text", "text": _CLAUDE_CARD_PROMPT},
+            ],
+        }],
+    }
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=data,
+        headers={
+            "x-api-key": ANTHROPIC_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=30) as r:
+            resp = json.loads(r.read().decode())
+        text = resp["content"][0]["text"].strip()
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if m:
+            return json.loads(m.group(0))
+        return {"_error": "No JSON in response", "_raw": text}
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="ignore")
+        return {"_error": f"HTTP {e.code}", "_raw": body}
+    except Exception as e:
+        return {"_error": str(e)}
+
+def build_card_query(info: dict, include_parallel: bool = True) -> str:
+    """Build a precise eBay search query from Claude-identified card fields."""
+    parts = []
+    if info.get("year"):
+        parts.append(info["year"])
+    if info.get("brand"):
+        parts.append(info["brand"])
+    set_name = info.get("set", "")
+    brand = info.get("brand", "")
+    if set_name and brand.lower() not in set_name.lower():
+        parts.append(set_name)
+    elif set_name:
+        parts.append(set_name)
+    if info.get("player"):
+        parts.append(info["player"])
+    if info.get("card_number"):
+        parts.append(info["card_number"])
+    if include_parallel and info.get("parallel"):
+        parts.append(info["parallel"])
+    if info.get("numbered"):
+        parts.append(info["numbered"])
+    return " ".join(dict.fromkeys(parts))  # deduplicate preserving order
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def ch_prices_by_cert(cert, grader="PSA", days=180):
@@ -3492,202 +3580,180 @@ with tab8:
                         st.warning("Card matched but no ID returned — can't pull live pricing.")
 
         with scan_raw:
-            st.caption("Upload a photo of the **front of a raw card**. On iPhone, tap the button and choose **Take Photo** to snap one directly.")
-            up = st.file_uploader("Card photo", type=["jpg", "jpeg", "png", "webp"], key="scan_up")
+            st.caption("Upload a high-res photo of the card front. Claude AI reads the card and pulls live eBay sold comps instantly.")
 
-            if up is not None:
+            if not ANTHROPIC_KEY:
+                st.warning("⚠️ Add your Anthropic API key to `.streamlit/secrets.toml` under `[anthropic] api_key = \"sk-ant-...\"` to enable AI card recognition.")
+
+            _up = st.file_uploader("Card photo (front)", type=["jpg", "jpeg", "png", "webp", "heic"], key="scan_up")
+
+            if _up is not None:
                 import io as _io
-                _up_bytes = up.getvalue()
+                _up_bytes = _up.getvalue()
+                _mime = "image/jpeg"
+                if _up.name.lower().endswith(".png"):
+                    _mime = "image/png"
+                elif _up.name.lower().endswith(".webp"):
+                    _mime = "image/webp"
 
+                # Resize to keep API payload reasonable (~1.5MB max)
                 try:
                     from PIL import Image as _PIL
                     _img = _PIL.open(_io.BytesIO(_up_bytes))
-                    _img.thumbnail((800, 800), _PIL.LANCZOS)
+                    _img.thumbnail((1600, 1600), _PIL.LANCZOS)
                     _buf = _io.BytesIO()
-                    _img.save(_buf, format="JPEG", quality=85)
-                    b64 = base64.b64encode(_buf.getvalue()).decode()
+                    _img.save(_buf, format="JPEG", quality=90)
+                    _b64 = base64.b64encode(_buf.getvalue()).decode()
+                    _mime = "image/jpeg"
                 except Exception:
-                    b64 = base64.b64encode(_up_bytes).decode()
+                    _b64 = base64.b64encode(_up_bytes).decode()
 
-                # Clear cache only when a new file is uploaded
-                _up_key = up.name + str(up.size)
-                if st.session_state.get("_scan_last_file") != _up_key:
-                    st.session_state["_scan_last_file"] = _up_key
-                    ch_image_match.clear()
+                # ── Run Claude Vision identification ──────────────────────
+                _scan_file_key = _up.name + str(_up.size)
+                if st.session_state.get("_cv_file_key") != _scan_file_key:
+                    st.session_state["_cv_file_key"] = _scan_file_key
+                    st.session_state.pop("_cv_result", None)
+                    st.session_state.pop("_cv_query", None)
+                    st.session_state.pop("_cv_ebay_sold", None)
 
-                with st.spinner("Identifying card…"):
-                    res = ch_image_match(b64)
+                if "_cv_result" not in st.session_state:
+                    with st.spinner("🔍 AI reading card…"):
+                        _cv = claude_identify_card(_b64, _mime)
+                    st.session_state["_cv_result"] = _cv
+                else:
+                    _cv = st.session_state["_cv_result"]
 
-                cands = []
-                if isinstance(res, list):
-                    cands = res
-                elif isinstance(res, dict):
-                    for _ck in ("candidates", "matches", "cards", "results", "data", "items"):
-                        _v = res.get(_ck)
-                        if isinstance(_v, list) and _v:
-                            cands = _v
-                            break
+                # ── Split: image left, fields right ───────────────────────
+                _col_img, _col_fields = st.columns([1, 2])
+                with _col_img:
+                    st.image(_up_bytes, use_container_width=True)
 
-                # ── No image match → text search fallback ─────────────────
-                if not cands:
-                    _nm_left, _nm_right = st.columns([1, 2])
-                    with _nm_left:
-                        st.image(_up_bytes, width=220)
-                    with _nm_right:
-                        _ch_err  = (res or {}).get("_ch_error", "")
-                        _ch_body = (res or {}).get("_ch_body", "")
-                        if _ch_err:
-                            st.error(f"API error: **{_ch_err}**")
-                            if _ch_body:
-                                st.code(_ch_body, language="json")
-                        else:
-                            st.warning("📷 Image not recognized — type the card name to search manually.")
-                        _mq = st.text_input(
-                            "🔍 Search by card name",
-                            placeholder="e.g. Jacob Misiorowski 2026 Bowman",
-                            key="scan_manual_q",
-                        )
-                        if _mq:
-                            with st.spinner("Searching…"):
-                                _sr = ch_search(_mq)
-                                _mm = ch_card_match(_mq) if not _sr else None
-                            _found = _sr[0] if _sr else _mm
-                            if _found:
-                                cands = [{
-                                    "card_id":     _found.get("card_id") or _found.get("id") or "",
-                                    "description": _found.get("description") or _found.get("name") or _found.get("title") or "Unknown",
-                                    "similarity":  "text match",
-                                    "set":         _found.get("set") or _found.get("set_name") or "",
-                                    "variant":     _found.get("variant") or "",
-                                }]
-                                if len(_sr) > 1:
-                                    st.caption(f"Top result from {len(_sr)} matches — be more specific if wrong.")
-                            else:
-                                st.error("No card found — try a shorter or different search term.")
-                    if not cands:
-                        with st.expander("🔍 Debug — raw API response"):
-                            st.json(res if res else {"error": "API returned nothing"})
+                with _col_fields:
+                    if _cv.get("_error"):
+                        st.error(f"Recognition error: {_cv['_error']}")
+                        if _cv.get("_raw"):
+                            with st.expander("Raw response"):
+                                st.text(_cv["_raw"])
+                    else:
+                        st.markdown("#### 🃏 Identified Card")
+                        _rc1, _rc2 = st.columns(2)
+                        _cv_player  = _rc1.text_input("Player", value=_cv.get("player", ""), key="cv_player")
+                        _cv_year    = _rc2.text_input("Year",   value=_cv.get("year", ""),   key="cv_year")
+                        _cv_brand   = _rc1.text_input("Brand",  value=_cv.get("brand", ""),  key="cv_brand")
+                        _cv_set     = _rc2.text_input("Set",    value=_cv.get("set", ""),    key="cv_set")
+                        _cv_num     = _rc1.text_input("Card #", value=_cv.get("card_number", ""), key="cv_num")
+                        _cv_par     = _rc2.text_input("Parallel / Variety", value=_cv.get("parallel", ""), key="cv_par")
+                        _cv_sport   = _rc1.text_input("Sport",  value=_cv.get("sport", ""),  key="cv_sport")
+                        _cv_team    = _rc2.text_input("Team",   value=_cv.get("team", ""),   key="cv_team")
+                        _cv_num_pr  = _rc1.text_input("Print run", value=_cv.get("numbered", ""), key="cv_numbered")
+                        _cv_notes   = _rc2.text_input("Notes",  value=_cv.get("notes", ""),  key="cv_notes")
 
-                # ── Matched → identity + market data ──────────────────────
-                if cands:
-                    top = cands[0]
-                    scan_card_id = (top.get("card_id") or top.get("id") or top.get("cardId") or "")
-                    _top_desc    = (top.get("description") or top.get("title") or top.get("name") or top.get("card_name") or "Unknown card")
-                    _top_sim     = (top.get("similarity") or top.get("score") or top.get("confidence") or "?")
-                    _top_set     = (top.get("set") or top.get("set_name") or top.get("setName") or "")
-                    _top_var     = (top.get("variant") or top.get("parallel") or top.get("card_number") or "")
+                        # Build the eBay search query from (possibly edited) fields
+                        _cv_info_live = {
+                            "player": _cv_player, "year": _cv_year, "brand": _cv_brand,
+                            "set": _cv_set, "card_number": _cv_num, "parallel": _cv_par,
+                            "numbered": _cv_num_pr,
+                        }
+                        _cv_query = build_card_query(_cv_info_live)
+                        st.caption(f"**Search query:** `{_cv_query}`")
 
-                    id_img, id_info = st.columns([1, 2])
-                    with id_img:
-                        card_img_url = safe_image_url(ch_card_image(scan_card_id) if scan_card_id else "")
-                        st.image(card_img_url if card_img_url else _up_bytes, use_container_width=True)
-                    with id_info:
-                        st.markdown(f"### {_top_desc}")
-                        _sim_label = f"Match confidence: **{_top_sim}%** · " if _top_sim != "text match" else "✅ Text search · "
-                        st.caption(f"{_sim_label}{_top_set}{' · ' + _top_var if _top_var else ''}")
-                        scan_grade = st.selectbox(
-                            "Grade to price",
-                            ["Raw", "PSA 10", "PSA 9"],
-                            key="scan_grade_sel",
-                            help="Raw = what you'd pay today for an ungraded card. PSA 10/9 = check graded value.",
-                        )
-
-                    if len(cands) > 1:
-                        with st.expander("Other possible matches"):
-                            for c in cands[1:5]:
-                                _cd = c.get("description") or c.get("title") or c.get("name") or "?"
-                                _cs = c.get("similarity") or c.get("score") or c.get("confidence") or "?"
-                                st.markdown(f"- {_cd} · _sim {_cs}%_")
-
+                # ── eBay sold comps ────────────────────────────────────────
+                if not _cv.get("_error") and _cv_query:
                     st.divider()
+                    _comp_col1, _comp_col2 = st.columns([3, 1])
+                    with _comp_col1:
+                        st.markdown("### 📊 eBay Sold Comps")
+                    with _comp_col2:
+                        _cv_grade = st.selectbox("Grade", ["Raw", "PSA 10", "PSA 9", "PSA 8"], key="cv_grade_sel")
 
-                    if scan_card_id:
-                        with st.spinner(f"Loading {scan_grade} market data…"):
-                            _sc_comp = ch_comps(scan_card_id, scan_grade)
-                            _sc_fmv  = ch_fmv(scan_card_id, scan_grade)
-                            _sc_hist = ch_price_history(scan_card_id, scan_grade, 90)
-                            _sc_meta = ch_card_meta(scan_card_id)
+                    # Append grade to query if not Raw
+                    _ebay_q = _cv_query if _cv_grade == "Raw" else f"{_cv_query} {_cv_grade}"
 
-                        _sc_avg   = _sc_comp.get("comp_price") or _sc_comp.get("average") or _sc_comp.get("mean")
-                        _sc_fmv_v = fmv_price(_sc_fmv)
-                        _sc_show  = _sc_fmv_v or _sc_avg
+                    if st.session_state.get("_cv_query") != _ebay_q:
+                        st.session_state["_cv_query"] = _ebay_q
+                        st.session_state.pop("_cv_ebay_sold", None)
 
-                        _sc_sales = []
-                        for _k in ("raw_prices", "sales", "comps", "data"):
-                            if _k in _sc_comp and isinstance(_sc_comp[_k], list):
-                                _sc_sales = _sc_comp[_k]; break
+                    if "_cv_ebay_sold" not in st.session_state:
+                        with st.spinner("Pulling eBay sold listings…"):
+                            _cv_sold = fetch_ebay_sold(_ebay_q, DEFAULT_EBAY_KEY, max_results=20)
+                        st.session_state["_cv_ebay_sold"] = _cv_sold
+                    else:
+                        _cv_sold = st.session_state["_cv_ebay_sold"]
 
-                        _sc_dir, _sc_pct = calculate_trend(_sc_hist)
-                        _s7  = _sc_meta.get("7 Day Sales")
-                        _s30 = _sc_meta.get("30 Day Sales")
+                    if _cv_sold:
+                        _cv_prices = [x["price"] for x in _cv_sold if x.get("price", 0) > 0]
+                        _cv_avg    = ebay_avg(_cv_sold)
+                        _cv_lo     = min(_cv_prices) if _cv_prices else None
+                        _cv_hi     = max(_cv_prices) if _cv_prices else None
 
-                        # ── BUY SIGNAL ────────────────────────────────────
-                        if _sc_dir == "up" and _sc_pct > 5:
-                            st.success(f"🔥 **HOT** — Up **{_sc_pct:+.0f}%** over 90 days. Demand is rising — buy now before price climbs.")
-                        elif _sc_dir == "down" and _sc_pct < -5:
-                            st.error(f"🛑 **COOLING** — Down **{abs(_sc_pct):.0f}%** over 90 days. Market softening — negotiate hard or wait for the floor.")
-                        elif _sc_dir is not None:
-                            st.info(f"➡️ **STABLE** — Flat market ({_sc_pct:+.0f}% in 90d). No urgency either way — FMV below is a fair anchor.")
-                        else:
-                            st.warning("⚠️ Not enough history to call direction. Check recent sales below.")
+                        _m1, _m2, _m3, _m4 = st.columns(4)
+                        _m1.metric("Avg sold", f"${_cv_avg:,.2f}" if _cv_avg else "—")
+                        _m2.metric("Low",  f"${_cv_lo:,.2f}"  if _cv_lo  else "—")
+                        _m3.metric("High", f"${_cv_hi:,.2f}"  if _cv_hi  else "—")
+                        _m4.metric("Sales found", str(len(_cv_sold)))
 
-                        # ── Price metrics ─────────────────────────────────
-                        pm1, pm2, pm3, pm4 = st.columns(4)
-                        pm1.metric(f"{scan_grade} value", f"${_sc_show:,.2f}" if _sc_show else "—",
-                                   help="FMV (Winsorized median) if available, else comp average.")
-                        try:
-                            _lo = float(_sc_fmv.get("price_low") or 0)
-                            _hi = float(_sc_fmv.get("price_high") or 0)
-                            pm2.metric("FMV range", f"${_lo:,.0f}–${_hi:,.0f}" if _lo and _hi else "—")
-                        except Exception:
-                            pm2.metric("FMV range", "—")
-                        pm3.metric("Sales · 7d",  f"{int(_s7):,}"  if isinstance(_s7,  (int, float)) else "—")
-                        pm4.metric("Sales · 30d", f"{int(_s30):,}" if isinstance(_s30, (int, float)) else "—")
+                        _cv_rows = []
+                        for _s in _cv_sold:
+                            _cv_rows.append({
+                                "Title": _s.get("title", "")[:60],
+                                "Sold": f"${_s['price']:,.2f}",
+                                "Date": _s.get("date", "")[:10],
+                                "Link": _s.get("url", ""),
+                            })
+                        _cv_df = pd.DataFrame(_cv_rows)
+                        st.dataframe(
+                            _cv_df,
+                            use_container_width=True,
+                            hide_index=True,
+                            height=320,
+                            column_config={
+                                "Title": st.column_config.TextColumn("Title", width="large"),
+                                "Sold":  st.column_config.TextColumn("Sold",  width="small"),
+                                "Date":  st.column_config.TextColumn("Date",  width="small"),
+                                "Link":  st.column_config.LinkColumn("eBay",  width="small"),
+                            },
+                        )
+                        st.caption(f"eBay completed sales · query: `{_ebay_q}` · avg trims top/bottom 10%")
 
-                        _conf = _sc_fmv.get("confidence_grade")
-                        if _conf:
-                            st.caption(f"🎯 FMV confidence: **{_conf}** (A = highest — based on recent sold volume)")
+                        # Narrow query option (strip parallel for base card comparison)
+                        if _cv_par:
+                            with st.expander("🔍 Compare without parallel (base card comps)"):
+                                _base_q = build_card_query(_cv_info_live, include_parallel=False)
+                                _base_q_g = _base_q if _cv_grade == "Raw" else f"{_base_q} {_cv_grade}"
+                                _base_sold = fetch_ebay_sold(_base_q_g, DEFAULT_EBAY_KEY, max_results=15)
+                                if _base_sold:
+                                    _base_avg = ebay_avg(_base_sold)
+                                    st.metric("Base card avg", f"${_base_avg:,.2f}" if _base_avg else "—")
+                                    _brows = [{"Title": s.get("title","")[:60], "Sold": f"${s['price']:,.2f}", "Date": s.get("date","")[:10]} for s in _base_sold]
+                                    st.dataframe(pd.DataFrame(_brows), hide_index=True, use_container_width=True)
+                                else:
+                                    st.info("No base card comps found.")
+                    else:
+                        st.warning("No eBay sold results — try editing the fields above to narrow or broaden the search.")
+                        st.markdown(f"🔗 [Search eBay sold manually](https://www.ebay.com/sch/i.html?_nkw={urllib.parse.quote_plus(_ebay_q)}&LH_Sold=1&LH_Complete=1)")
 
-                        # ── Recent individual sales ───────────────────────
-                        st.markdown(f"**📋 Recent {scan_grade} individual sales**")
-
-                        import datetime as _dt_scan
-
-                        def _fmt_scan_sale(s):
-                            p = _extract_price(s)
-                            if not p:
-                                return None
-                            _rd = s.get("sale_date", "") or s.get("closing_date", "")
-                            try:
-                                _d = _dt_scan.datetime.fromisoformat(_rd.replace("Z", "+00:00"))
-                                _ds = _d.strftime("%-m/%-d/%y")
-                            except Exception:
-                                _ds = (_rd or "")[:10]
-                            _st = s.get("sale_type", "") or ""
-                            _tl = ("🏷 BIN"     if "bin"     in _st.lower() or _st == "" else
-                                   "🔨 Auction" if "auction" in _st.lower() else
-                                   "💬 Offer"   if "offer"   in _st.lower() else _st)
-                            return {"Date": _ds, "Price": f"${p:,.2f}", "Type": _tl}
-
-                        if _sc_sales:
-                            _sale_rows = [r for s in _sc_sales[:8] if (r := _fmt_scan_sale(s))]
-                            if _sale_rows:
-                                st.dataframe(
-                                    pd.DataFrame(_sale_rows),
-                                    use_container_width=True, hide_index=True, height=240,
-                                    column_config={
-                                        "Price": st.column_config.TextColumn("Price"),
-                                        "Date":  st.column_config.TextColumn("Date"),
-                                        "Type":  st.column_config.TextColumn("Type"),
-                                    },
-                                )
-                                st.caption("🏷 BIN = fixed price · 🔨 Auction = competitive bid · 💬 Offer = accepted below ask. BIN prices are most reliable for fair value.")
+                    # ── CardHedger FMV (secondary source) ─────────────────
+                    if CARDHEDGER_KEY and _cv_query:
+                        with st.expander("📈 CardHedger FMV (cross-check)"):
+                            with st.spinner("CardHedger lookup…"):
+                                _ch_match = ch_card_match(_cv_query)
+                            if _ch_match:
+                                _ch_id  = _ch_match.get("card_id") or _ch_match.get("id") or ""
+                                _ch_dsc = _ch_match.get("description") or _ch_match.get("name") or _ch_match.get("title") or ""
+                                if _ch_dsc:
+                                    st.caption(f"Matched: **{_ch_dsc}**")
+                                if _ch_id:
+                                    _ch_fmv_r = ch_fmv(_ch_id, _cv_grade)
+                                    _ch_fmv_v = fmv_price(_ch_fmv_r)
+                                    _ch_comp_r = ch_comps(_ch_id, _cv_grade)
+                                    _ch_avg = _ch_comp_r.get("comp_price") or _ch_comp_r.get("average")
+                                    _ch_show = _ch_fmv_v or _ch_avg
+                                    if _ch_show:
+                                        st.metric(f"CardHedger FMV ({_cv_grade})", f"${_ch_show:,.2f}")
+                                    else:
+                                        st.info("No CardHedger FMV for this card/grade.")
                             else:
-                                st.info(f"No {scan_grade} individual sales returned.")
-                        else:
-                            st.info(f"No {scan_grade} sales data for this card.")
-
-                        render_price_trend(scan_card_id, key_prefix="scan_raw", default_grade=scan_grade)
+                                st.info("No CardHedger match for this query.")
 
         with scan_cert:
             st.caption("Enter the cert number printed on the slab label to pull the card + recent sold prices and buy signal.")
