@@ -1520,24 +1520,37 @@ def claude_identify_card(image_b64: str, media_type: str = "image/jpeg") -> dict
 def build_card_query(info: dict, include_parallel: bool = True) -> str:
     """Build a precise eBay search query from Claude-identified card fields."""
     parts = []
-    if info.get("year"):
-        parts.append(info["year"])
-    if info.get("brand"):
-        parts.append(info["brand"])
-    set_name = info.get("set", "")
-    brand = info.get("brand", "")
-    if set_name and brand.lower() not in set_name.lower():
-        parts.append(set_name)
-    elif set_name:
-        parts.append(set_name)
-    if info.get("player"):
-        parts.append(info["player"])
-    if info.get("card_number"):
-        parts.append(info["card_number"])
-    if include_parallel and info.get("parallel"):
-        parts.append(info["parallel"])
-    if info.get("numbered"):
-        parts.append(info["numbered"])
+    year     = (info.get("year")        or "").strip()
+    brand    = (info.get("brand")       or "").strip()
+    set_name = (info.get("set")         or "").strip()
+    player   = (info.get("player")      or "").strip()
+    card_num = (info.get("card_number") or "").strip()
+    parallel = (info.get("parallel")    or "").strip()
+    numbered = (info.get("numbered")    or "").strip()
+
+    if year:
+        parts.append(year)
+    if brand:
+        parts.append(brand)
+
+    # Strip brand from the front of the set name to avoid "Topps Topps Tier One…"
+    if set_name:
+        set_clean = re.sub(rf"^{re.escape(brand)}\s*", "", set_name, flags=re.IGNORECASE).strip()
+        if set_clean:
+            parts.append(set_clean)
+
+    if player:
+        parts.append(player)
+    if card_num:
+        parts.append(card_num)
+
+    # Skip parallel if it's already embedded in the set name (e.g. "Silver Signatures" in "Tier One Silver Signatures")
+    if include_parallel and parallel and parallel.lower() not in set_name.lower():
+        parts.append(parallel)
+
+    if numbered:
+        parts.append(numbered)
+
     return " ".join(dict.fromkeys(parts))  # deduplicate preserving order
 
 @st.cache_data(ttl=1800, show_spinner=False)
