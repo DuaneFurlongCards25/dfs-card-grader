@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.29"
+APP_VERSION = "1.5.30"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -25,6 +25,16 @@ APP_TAGLINE = "Gem rate research + grading ROI calculator"
 DAILY_PRICING_CAP = 50
 
 RELEASE_NOTES = {
+    "1.5.30": {
+        "emoji": "🤖",
+        "title": "AI Batch Scanner — scan multiple cards at once",
+        "items": [
+            ("🤖", "New 🤖 AI Batch tab: upload 1–100+ card photos, Claude Vision reads every card in sequence with a progress bar."),
+            ("📊", "eBay comps fetched automatically after each identification — shows avg sold price per card."),
+            ("📥", "Export all results as CSV (player, year, set, card #, parallel, sport, eBay avg, search query)."),
+            ("💰", "Cost: ~1¢ per card (Claude Sonnet 5 vision). Zero tokens wasted — processes only the cards you upload."),
+        ],
+    },
     "1.5.28": {
         "emoji": "📝",
         "title": "Manual sale logger on outstanding cards",
@@ -3491,7 +3501,7 @@ with tab8:
     if not CARDHEDGER_KEY:
         st.info("📊 Connect the CardHedger API to use scanning.")
     else:
-        scan_search, scan_raw, scan_cert, scan_batch = st.tabs(["🔍 Title Search", "🃏 Raw card photo", "🎫 Graded slab (cert #)", "📦 Batch → eBay"])
+        scan_search, scan_raw, scan_ai_batch, scan_cert, scan_batch = st.tabs(["🔍 Title Search", "🃏 Raw card photo", "🤖 AI Batch", "🎫 Graded slab (cert #)", "📦 Batch → eBay"])
 
         # ── TITLE SEARCH ──────────────────────────────────────────────────────
         with scan_search:
@@ -3754,6 +3764,119 @@ with tab8:
                                         st.info("No CardHedger FMV for this card/grade.")
                             else:
                                 st.info("No CardHedger match for this query.")
+
+        # ── AI BATCH SCANNER ──────────────────────────────────────────────────
+        with scan_ai_batch:
+            st.caption("Upload multiple card photos — Claude AI identifies each one and pulls eBay comps. ~1¢ per card.")
+
+            if not ANTHROPIC_KEY:
+                st.warning("⚠️ Add your Anthropic API key to `.streamlit/secrets.toml` under `[anthropic] api_key = \"sk-ant-...\"` to enable AI card recognition.")
+
+            _ab_files = st.file_uploader(
+                "Card photos — front sides (one card per image, any order)",
+                type=["jpg", "jpeg", "png", "webp"],
+                accept_multiple_files=True,
+                key="ai_batch_files",
+            )
+
+            _ab_run_comps = st.checkbox("Pull eBay comps for each card after scan", value=True, key="ai_batch_comps_chk")
+
+            if _ab_files:
+                _ab_n = len(_ab_files)
+                _ab_cost_lo = _ab_n * 0.007
+                _ab_cost_hi = _ab_n * 0.014
+                st.info(
+                    f"**{_ab_n} card{'s' if _ab_n != 1 else ''} selected.** "
+                    f"Estimated cost: ${_ab_cost_lo:.2f}–${_ab_cost_hi:.2f} "
+                    f"(intro through Aug 31: ${_ab_cost_lo:.2f} · regular: ${_ab_cost_hi:.2f})"
+                )
+
+                if ANTHROPIC_KEY and st.button("🤖 Scan All Cards", type="primary", key="ai_batch_go"):
+                    import io as _aio
+                    from PIL import Image as _PILB
+
+                    _ab_results = []
+                    _ab_bar    = st.progress(0, text="Starting…")
+                    _ab_status = st.empty()
+
+                    for _abi, _abf in enumerate(_ab_files):
+                        _ab_status.markdown(f"Scanning **{_abi + 1}/{_ab_n}**: `{_abf.name}`")
+
+                        # Resize to 1600px max (keeps tokens and payload small)
+                        try:
+                            _abimg = _PILB.open(_aio.BytesIO(_abf.getvalue()))
+                            _abimg.thumbnail((1600, 1600), _PILB.LANCZOS)
+                            _abbuf = _aio.BytesIO()
+                            _abimg.save(_abbuf, format="JPEG", quality=90)
+                            _abb64 = base64.b64encode(_abbuf.getvalue()).decode()
+                            _abmime = "image/jpeg"
+                        except Exception:
+                            _abb64  = base64.b64encode(_abf.getvalue()).decode()
+                            _abmime = "image/jpeg"
+
+                        _abcv = claude_identify_card(_abb64, _abmime)
+
+                        _ab_query = build_card_query(_abcv) if not _abcv.get("_error") else ""
+                        _ab_avg   = ""
+
+                        if not _abcv.get("_error") and _ab_run_comps and _ab_query:
+                            _ab_sold = fetch_ebay_sold(_ab_query, DEFAULT_EBAY_KEY, max_results=15)
+                            _ab_avg_val = ebay_avg(_ab_sold)
+                            _ab_avg = f"${_ab_avg_val:,.2f}" if _ab_avg_val else "no data"
+
+                        _ab_results.append({
+                            "#":          _abi + 1,
+                            "File":       _abf.name,
+                            "Player":     _abcv.get("player", ""),
+                            "Year":       _abcv.get("year", ""),
+                            "Brand":      _abcv.get("brand", ""),
+                            "Set":        _abcv.get("set", ""),
+                            "Card #":     _abcv.get("card_number", ""),
+                            "Parallel":   _abcv.get("parallel", ""),
+                            "Sport":      _abcv.get("sport", ""),
+                            "eBay Avg":   _ab_avg,
+                            "eBay Query": _ab_query,
+                            "Status":     ("Error: " + _abcv["_error"]) if _abcv.get("_error") else "OK",
+                        })
+
+                        _ab_bar.progress((_abi + 1) / _ab_n, text=f"Done {_abi + 1}/{_ab_n}")
+
+                    _ab_status.empty()
+                    _ab_bar.empty()
+                    st.session_state["ai_batch_results"] = _ab_results
+                    st.success(f"✅ Scanned {len(_ab_results)} cards!")
+                    st.rerun()
+
+            if st.session_state.get("ai_batch_results"):
+                _ab_res = st.session_state["ai_batch_results"]
+                _ab_df  = pd.DataFrame(_ab_res)
+                st.markdown(f"### Results — {len(_ab_res)} cards")
+                st.dataframe(
+                    _ab_df,
+                    hide_index=True,
+                    use_container_width=True,
+                    height=min(500, 45 + len(_ab_res) * 36),
+                    column_config={
+                        "#":          st.column_config.NumberColumn("#",        width="small"),
+                        "File":       st.column_config.TextColumn("File",       width="medium"),
+                        "Player":     st.column_config.TextColumn("Player",     width="medium"),
+                        "Year":       st.column_config.TextColumn("Year",       width="small"),
+                        "Brand":      st.column_config.TextColumn("Brand",      width="small"),
+                        "Set":        st.column_config.TextColumn("Set",        width="medium"),
+                        "Card #":     st.column_config.TextColumn("Card #",     width="small"),
+                        "Parallel":   st.column_config.TextColumn("Parallel",   width="medium"),
+                        "Sport":      st.column_config.TextColumn("Sport",      width="small"),
+                        "eBay Avg":   st.column_config.TextColumn("eBay Avg",   width="small"),
+                        "eBay Query": st.column_config.TextColumn("eBay Query", width="large"),
+                        "Status":     st.column_config.TextColumn("Status",     width="small"),
+                    },
+                )
+                _ab_csv = _ab_df.to_csv(index=False)
+                _abc1, _abc2 = st.columns([1, 4])
+                _abc1.download_button("📥 Export CSV", _ab_csv, "ai_batch_scan.csv", "text/csv", key="ai_batch_dl")
+                if _abc2.button("🗑 Clear results", key="ai_batch_clear"):
+                    st.session_state.pop("ai_batch_results", None)
+                    st.rerun()
 
         with scan_cert:
             st.caption("Enter the cert number printed on the slab label to pull the card + recent sold prices and buy signal.")
