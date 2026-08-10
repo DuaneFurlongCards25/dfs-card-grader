@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.32"
+APP_VERSION = "1.5.33"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -3780,54 +3780,92 @@ with tab8:
 
         # ── AI BATCH SCANNER ──────────────────────────────────────────────────
         with scan_ai_batch:
-            st.caption("Upload multiple card photos — Claude AI identifies each one and pulls eBay comps. ~1¢ per card.")
+            st.caption("Upload front photos — Claude identifies each card and pulls CardHedger comps. Optionally add backs to auto-generate eBay corner crops. ~1¢ per card.")
 
             if not ANTHROPIC_KEY:
                 st.warning("⚠️ Add your Anthropic API key to `.streamlit/secrets.toml` under `[anthropic] api_key = \"sk-ant-...\"` to enable AI card recognition.")
 
-            _ab_files = st.file_uploader(
-                "Card photos — front sides (one card per image, any order)",
-                type=["jpg", "jpeg", "png", "webp"],
-                accept_multiple_files=True,
-                key="ai_batch_files",
-            )
+            _ab_col1, _ab_col2 = st.columns(2)
+            with _ab_col1:
+                st.markdown("**Front images** *(required — Claude reads these)*")
+                _ab_files = st.file_uploader(
+                    "Front images",
+                    type=["jpg", "jpeg", "png", "webp"],
+                    accept_multiple_files=True,
+                    key="ai_batch_files",
+                    label_visibility="collapsed",
+                )
+            with _ab_col2:
+                st.markdown("**Back images** *(optional — for eBay corner crops only, not scanned)*")
+                _ab_back_files = st.file_uploader(
+                    "Back images",
+                    type=["jpg", "jpeg", "png", "webp"],
+                    accept_multiple_files=True,
+                    key="ai_batch_back_files",
+                    label_visibility="collapsed",
+                )
 
             _ab_grade = st.radio("Grade for comps", ["Raw", "PSA 10", "PSA 9", "PSA 8"], horizontal=True, key="ai_batch_grade")
             _ab_run_comps = st.checkbox("Pull CardHedger comps + trend after scan", value=True, key="ai_batch_comps_chk")
 
             if _ab_files:
                 _ab_n = len(_ab_files)
+                _ab_n_back = len(_ab_back_files) if _ab_back_files else 0
                 _ab_cost_lo = _ab_n * 0.007
                 _ab_cost_hi = _ab_n * 0.014
+                _ab_img_note = f" · {_ab_n_back} back{'s' if _ab_n_back != 1 else ''} → will generate eBay image ZIPs" if _ab_n_back else " · No backs uploaded — add backs to get eBay corner crops"
                 st.info(
-                    f"**{_ab_n} card{'s' if _ab_n != 1 else ''} selected.** "
-                    f"Claude Vision cost: ~${_ab_cost_lo:.2f}–${_ab_cost_hi:.2f}"
+                    f"**{_ab_n} front{'s' if _ab_n != 1 else ''}** · Claude Vision cost: ~${_ab_cost_lo:.2f}–${_ab_cost_hi:.2f}{_ab_img_note}"
                 )
+                if _ab_n_back and _ab_n_back != _ab_n:
+                    st.warning(f"⚠️ {_ab_n} fronts but {_ab_n_back} backs — they must match in count and order. Extra backs will be ignored.", icon="⚠️")
 
                 if ANTHROPIC_KEY and st.button("🤖 Scan All Cards", type="primary", key="ai_batch_go"):
                     import io as _aio
+                    import zipfile as _ab_zipmod
                     from PIL import Image as _PILB
 
+                    # Helper: crop one corner from a PIL image
+                    _AB_CROP_PCT = 0.28
+                    def _ab_corner_bytes(img, side):
+                        w, h = img.size
+                        cx, cy = int(w * _AB_CROP_PCT), int(h * _AB_CROP_PCT)
+                        regions = [("tl",(0,0,cx,cy)), ("tr",(w-cx,0,w,cy)),
+                                   ("bl",(0,h-cy,cx,h)), ("br",(w-cx,h-cy,w,h))]
+                        out = {}
+                        for name, box in regions:
+                            buf = _aio.BytesIO()
+                            img.crop(box).convert("RGB").save(buf, format="JPEG", quality=92)
+                            out[f"{side}_{name}"] = buf.getvalue()
+                        return out
+
+                    def _ab_img_to_bytes(img):
+                        buf = _aio.BytesIO()
+                        img.convert("RGB").save(buf, format="JPEG", quality=92)
+                        return buf.getvalue()
+
                     _ab_results = []
+                    _ab_img_zips = {}   # card_index → zip bytes (only when back provided)
                     _ab_bar    = st.progress(0, text="Starting…")
                     _ab_status = st.empty()
 
                     for _abi, _abf in enumerate(_ab_files):
                         _ab_status.markdown(f"Scanning **{_abi + 1}/{_ab_n}**: `{_abf.name}`")
 
-                        # Resize to 1600px max
+                        # Load + resize front (for Vision)
                         try:
-                            _abimg = _PILB.open(_aio.BytesIO(_abf.getvalue()))
-                            _abimg.thumbnail((1600, 1600), _PILB.LANCZOS)
+                            _abimg_front = _PILB.open(_aio.BytesIO(_abf.getvalue()))
+                            _abimg_front.thumbnail((1600, 1600), _PILB.LANCZOS)
                             _abbuf = _aio.BytesIO()
-                            _abimg.save(_abbuf, format="JPEG", quality=90)
+                            _abimg_front.save(_abbuf, format="JPEG", quality=90)
                             _abb64 = base64.b64encode(_abbuf.getvalue()).decode()
                             _abmime = "image/jpeg"
                         except Exception:
                             _abb64  = base64.b64encode(_abf.getvalue()).decode()
                             _abmime = "image/jpeg"
+                            _abimg_front = None
 
-                        # Step 1: Claude Vision identification
+                        # Step 1: Claude Vision — front only, no tokens wasted on back
                         _abcv = claude_identify_card(_abb64, _abmime)
                         _ab_query = build_card_query(_abcv) if not _abcv.get("_error") else ""
 
@@ -3869,6 +3907,36 @@ with tab8:
                                     elif _ab_dir is not None:
                                         _ab_trend = f"→ {_ab_pct:+.0f}%"
 
+                        # Step 3: eBay image pack (front + back corners)
+                        _ab_has_images = False
+                        if _abimg_front and _ab_back_files and _abi < len(_ab_back_files):
+                            try:
+                                _ab_status.markdown(f"Generating images **{_abi + 1}/{_ab_n}**: `{_abf.name}`")
+                                _abimg_back = _PILB.open(_aio.BytesIO(_ab_back_files[_abi].getvalue()))
+                                _ab_slug = re.sub(r"[^\w]+", "_", (
+                                    _abcv.get("player") or _abf.name.rsplit(".",1)[0]
+                                ).strip()).strip("_")[:30]
+                                _ab_prefix = f"card_{_abi+1:02d}_{_ab_slug}"
+
+                                _ab_front_corners = _ab_corner_bytes(_abimg_front, "front")
+                                _ab_back_corners  = _ab_corner_bytes(_abimg_back,  "back")
+
+                                _ab_zip_buf = _aio.BytesIO()
+                                with _ab_zipmod.ZipFile(_ab_zip_buf, "w", _ab_zipmod.ZIP_DEFLATED) as _abzf:
+                                    _abzf.writestr(f"{_ab_prefix}_1_front.jpg",        _ab_img_to_bytes(_abimg_front))
+                                    _abzf.writestr(f"{_ab_prefix}_2_back.jpg",         _ab_img_to_bytes(_abimg_back))
+                                    _abzf.writestr(f"{_ab_prefix}_3_front_tl.jpg",     _ab_front_corners["front_tl"])
+                                    _abzf.writestr(f"{_ab_prefix}_4_front_tr.jpg",     _ab_front_corners["front_tr"])
+                                    _abzf.writestr(f"{_ab_prefix}_5_front_bl.jpg",     _ab_front_corners["front_bl"])
+                                    _abzf.writestr(f"{_ab_prefix}_6_front_br.jpg",     _ab_front_corners["front_br"])
+                                    _abzf.writestr(f"{_ab_prefix}_7_back_tl.jpg",      _ab_back_corners["back_tl"])
+                                    _abzf.writestr(f"{_ab_prefix}_8_back_tr.jpg",      _ab_back_corners["back_tr"])
+                                _ab_zip_buf.seek(0)
+                                _ab_img_zips[_abi] = (_ab_prefix, _ab_zip_buf.getvalue())
+                                _ab_has_images = True
+                            except Exception:
+                                pass
+
                         _ab_results.append({
                             "#":           _abi + 1,
                             "Player":      _abcv.get("player", ""),
@@ -3883,6 +3951,7 @@ with tab8:
                             "Low":         _ab_low,
                             "High":        _ab_high,
                             "Trend (90d)": _ab_trend,
+                            "Images":      "✅ 8 images" if _ab_has_images else ("—" if not _ab_back_files else "⚠️ error"),
                             "Query":       _ab_query,
                             "Status":      ("Error: " + _abcv["_error"]) if _abcv.get("_error") else "OK",
                         })
@@ -3892,11 +3961,13 @@ with tab8:
                     _ab_status.empty()
                     _ab_bar.empty()
                     st.session_state["ai_batch_results"] = _ab_results
-                    st.success(f"✅ Scanned {len(_ab_results)} cards!")
+                    st.session_state["ai_batch_img_zips"] = _ab_img_zips
+                    st.success(f"✅ Scanned {len(_ab_results)} cards!" + (f" · {len(_ab_img_zips)} eBay image packs ready." if _ab_img_zips else ""))
                     st.rerun()
 
             if st.session_state.get("ai_batch_results"):
-                _ab_res = st.session_state["ai_batch_results"]
+                _ab_res      = st.session_state["ai_batch_results"]
+                _ab_img_zips = st.session_state.get("ai_batch_img_zips", {})
                 _ab_df  = pd.DataFrame(_ab_res)
                 st.markdown(f"### Results — {len(_ab_res)} cards · grade: {_ab_grade}")
                 st.dataframe(
@@ -3918,15 +3989,47 @@ with tab8:
                         "Low":         st.column_config.TextColumn("Low",           width="small"),
                         "High":        st.column_config.TextColumn("High",          width="small"),
                         "Trend (90d)": st.column_config.TextColumn("Trend (90d)",   width="small"),
+                        "Images":      st.column_config.TextColumn("Images",        width="small"),
                         "Query":       st.column_config.TextColumn("Query",         width="large"),
                         "Status":      st.column_config.TextColumn("Status",        width="small"),
                     },
                 )
+
+                # ── Download row ───────────────────────────────────────────
+                _ab_btn_cols = st.columns([1, 1, 3])
                 _ab_csv = _ab_df.to_csv(index=False)
-                _abc1, _abc2 = st.columns([1, 4])
-                _abc1.download_button("📥 Export CSV", _ab_csv, "ai_batch_scan.csv", "text/csv", key="ai_batch_dl")
-                if _abc2.button("🗑 Clear results", key="ai_batch_clear"):
+                _ab_btn_cols[0].download_button("📥 Export CSV", _ab_csv, "ai_batch_scan.csv", "text/csv", key="ai_batch_dl")
+
+                if _ab_img_zips:
+                    # Bundle all per-card ZIPs into one master ZIP
+                    import io as _abio2
+                    import zipfile as _abzm2
+                    _ab_master_buf = _abio2.BytesIO()
+                    with _abzm2.ZipFile(_ab_master_buf, "w", _abzm2.ZIP_DEFLATED) as _ab_mzf:
+                        for _ab_idx, (_ab_pfx, _ab_zbytes) in _ab_img_zips.items():
+                            # Each card's 8 images go into their own sub-folder
+                            import zipfile as _abzm3
+                            _ab_inner = _abio2.BytesIO(_ab_zbytes)
+                            with _abzm3.ZipFile(_ab_inner, "r") as _ab_inner_zf:
+                                for _ab_inner_name in _ab_inner_zf.namelist():
+                                    _ab_mzf.writestr(
+                                        f"{_ab_pfx}/{_ab_inner_name}",
+                                        _ab_inner_zf.read(_ab_inner_name)
+                                    )
+                    _ab_master_buf.seek(0)
+                    _ab_btn_cols[1].download_button(
+                        f"📸 Download {len(_ab_img_zips)} eBay image packs",
+                        _ab_master_buf.getvalue(),
+                        "ebay_images_all_cards.zip",
+                        "application/zip",
+                        key="ai_batch_img_dl",
+                        type="primary",
+                    )
+                    st.caption("ZIP contains one folder per card, each with 8 images: front, back, 4 front corners, 2 back corners. Unzip → open card folder → drag all 8 into eBay.")
+
+                if _ab_btn_cols[2].button("🗑 Clear results", key="ai_batch_clear"):
                     st.session_state.pop("ai_batch_results", None)
+                    st.session_state.pop("ai_batch_img_zips", None)
                     st.rerun()
 
         with scan_cert:
