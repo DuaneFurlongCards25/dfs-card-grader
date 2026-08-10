@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.33"
+APP_VERSION = "1.5.34"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -4102,15 +4102,17 @@ with tab8:
 
             # ── eBay Export Settings (persists in session) ─────────────────
             _BATCH_DEFAULTS = {
-                "sku_prefix":        "DFS",
-                "default_condition": "Near Mint (NM)",
-                "best_offer":        True,
-                "sport":             "BASEBALL",
-                "store_cat_baseball":  "44411116016",
-                "store_cat_basketball":"44411138016",
-                "store_cat_football":  "44411117016",
-                "store_cat_soccer":    "44411118016",
-                "store_cat_other":     "0",
+                "sku_prefix":            "DFS",
+                "default_condition":     "Near Mint (NM)",
+                "best_offer":            True,
+                "bo_min_price":          "",
+                "bo_auto_accept_price":  "",
+                "sport":                 "BASEBALL",
+                "store_cat_baseball":    "44411116016",
+                "store_cat_basketball":  "44411138016",
+                "store_cat_football":    "44411117016",
+                "store_cat_soccer":      "44411118016",
+                "store_cat_other":       "0",
                 "desc_template": (
                     '<div style="font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;max-width:600px;margin:0 auto;">'
                     '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">'
@@ -4153,6 +4155,16 @@ with tab8:
                         key="bxw_sport")
                     st.session_state["bx_best_offer"] = st.checkbox(
                         "Enable Best Offer", value=st.session_state["bx_best_offer"], key="bxw_bo")
+                    if st.session_state["bx_best_offer"]:
+                        _boc1, _boc2 = st.columns(2)
+                        st.session_state["bx_bo_min_price"] = _boc1.text_input(
+                            "Min Best Offer ($)", value=st.session_state.get("bx_bo_min_price",""),
+                            placeholder="e.g. 1.50", key="bxw_bo_min",
+                            help="eBay auto-declines offers below this amount. Leave blank to allow all offers.")
+                        st.session_state["bx_bo_auto_accept_price"] = _boc2.text_input(
+                            "Auto-Accept ($)", value=st.session_state.get("bx_bo_auto_accept_price",""),
+                            placeholder="e.g. 3.00", key="bxw_bo_aa",
+                            help="eBay auto-accepts offers at or above this amount.")
                 with _sc2:
                     st.markdown("**eBay Store Category IDs**")
                     st.caption("Find your category IDs in eBay Seller Hub → Store → Manage Categories")
@@ -4573,8 +4585,11 @@ alter table scan_cards disable row level security;"""
     
                         # Build editable table
                         import urllib.parse as _uparse
+                        import datetime as _dt_prev
+                        _prev_date_str = _dt_prev.date.today().strftime("%m%d%y")
+                        _prev_sku_pfx  = st.session_state.get("bx_sku_prefix", "DFS")
                         edit_rows = []
-                        for c in identified:
+                        for _ei, c in enumerate(identified):
                             sim = c.get("similarity", 0)
                             fmv_display = f"${c['fmv']:.2f}" if c.get("fmv") else "—"
                             cond_label  = next((k for k, v in _RAW_CONDITIONS.items() if v == c.get("condition_id", "2750")), "Near Mint (NM)")
@@ -4582,12 +4597,15 @@ alter table scan_cards disable row level security;"""
                             ebay_url    = f"https://www.ebay.com/sch/i.html?_nkw={ebay_q}&_sacat=261328&LH_Sold=1&LH_Complete=1"
                             raw_par = c.get("variant", "")
                             par_display = raw_par if raw_par and raw_par.lower() not in ("base","") else ""
+                            auto_sku = f"{_prev_sku_pfx}-{_prev_date_str}-{_ei+1:04d}"
                             edit_rows.append({
                                 "✓":          c.get("include", True),
                                 "#":          c["idx"] + 1,
+                                "Custom SKU": c.get("custom_sku", auto_sku),
                                 "Player":     c.get("player", ""),
                                 "Parallel":   par_display,
                                 "eBay Title": c.get("title", ""),
+                                "Sport":      c.get("sport", st.session_state.get("bx_sport","BASEBALL")),
                                 "Conf %":     f"{sim:.0f}" if sim else "?",
                                 "FMV":        fmv_display,
                                 "FMV Conf":   c.get("fmv_conf", ""),
@@ -4604,10 +4622,15 @@ alter table scan_cards disable row level security;"""
                             column_config={
                                 "✓":          st.column_config.CheckboxColumn("Include", width="small"),
                                 "#":          st.column_config.NumberColumn("#", width="small", disabled=True),
+                                "Custom SKU": st.column_config.TextColumn("SKU ✏️", width="medium",
+                                                  help="Auto-generated from your SKU prefix + date. Edit to set a custom SKU per card."),
                                 "Player":     st.column_config.TextColumn("Player", width="medium", disabled=True),
                                 "Parallel":   st.column_config.TextColumn("Parallel ✏️", width="medium",
                                                   help="Edit if CardHedger got the parallel wrong — updates the title and CSV export"),
                                 "eBay Title": st.column_config.TextColumn("eBay Title (editable)", max_chars=80, width="large"),
+                                "Sport":      st.column_config.SelectboxColumn(
+                                                  "Sport", options=["BASEBALL","BASKETBALL","FOOTBALL","SOCCER","OTHER"], width="small",
+                                                  help="Override sport per card for mixed-sport batches"),
                                 "Conf %":     st.column_config.TextColumn("Conf%", width="small", disabled=True,
                                                   help="Visual match confidence from CardHedger — below 80% means double-check"),
                                 "FMV":        st.column_config.TextColumn("FMV", width="small", disabled=True),
@@ -4793,6 +4816,9 @@ alter table scan_cards disable row level security;"""
                             writer = csv.DictWriter(buf, fieldnames=COLS, extrasaction="ignore")
                             writer.writeheader()
     
+                            _sx_bo_min = st.session_state.get("bx_bo_min_price", "").strip()
+                            _sx_bo_aa  = st.session_state.get("bx_bo_auto_accept_price", "").strip()
+
                             for row, orig in zip(edited_records, identified):
                                 if not row.get("✓"):
                                     continue
@@ -4801,45 +4827,47 @@ alter table scan_cards disable row level security;"""
                                 cond_lbl = row.get("Condition", st.session_state.get("bx_default_condition","Near Mint (NM)"))
                                 cond_id  = _RAW_CONDITIONS.get(cond_lbl, "2750")
                                 cond_sp  = _COND_SPECIFIC.get(cond_id, "400010")
-                                sku      = f"{_sx_sku}-{date_str}-{export_idx:04d}"
+                                # Custom SKU: use what's in the table (user may have edited it)
+                                sku      = (row.get("Custom SKU") or "").strip() or f"{_sx_sku}-{date_str}-{export_idx:04d}"
                                 front_u  = orig.get("front_url", "")
                                 back_u   = orig.get("back_url", "")
                                 pic_url  = f"{front_u}|{back_u}" if back_u else front_u
                                 player   = orig.get("player", "")
                                 set_n    = orig.get("set_name", "")
                                 number   = orig.get("number", "")
-                                # Parallel: prefer what user typed in the table over CardHedger's value
+                                team     = orig.get("team", "")
+                                # Parallel: prefer what user typed in the table
                                 _tbl_par = (row.get("Parallel") or "").strip()
                                 _api_par = orig.get("variant", "")
                                 par      = _tbl_par if _tbl_par else (_api_par if _api_par and _api_par.lower() not in ("base","") else "")
-                                # If parallel was edited in the table, rebuild the title with the corrected parallel
+                                # Rebuild title if parallel was corrected
                                 _base_title = row.get("eBay Title") or orig.get("title", "")
                                 if _tbl_par and _tbl_par.lower() not in _base_title.lower():
                                     _parts = [_year(set_n), set_n, player.upper(), f"#{number}" if number else "", _tbl_par]
-                                    _rebuilt = " ".join(p for p in _parts if p)[:80]
-                                    title = _rebuilt
+                                    title = " ".join(p for p in _parts if p)[:80]
                                 else:
                                     title = _base_title[:80]
-                                year     = _year(set_n)
-                                mfr      = _mfr(set_n)
-                                sim      = orig.get("similarity", 0)
-                                store_cat = _sport_cats.get(_sx_sport, "0")
-                                league    = _league_map.get(_sx_sport, "")
-    
-                                # Shipping by price (use _exp_ prefix to avoid leaking into other tab scopes)
+                                year      = _year(set_n)
+                                mfr       = _mfr(set_n)
+                                sim       = orig.get("similarity", 0)
+                                # Per-row sport (editable in table for mixed-sport batches)
+                                row_sport = (row.get("Sport") or _sx_sport).upper()
+                                store_cat = _sport_cats.get(row_sport, _sport_cats.get(_sx_sport, "0"))
+                                league    = _league_map.get(row_sport, _league_map.get(_sx_sport, ""))
+                                features  = "Parallel" if par else ""
+
                                 if price < 1.00:
                                     _exp_ship_cost = "0.00"; _exp_ship_free = "1"
                                 elif price < 20:
                                     _exp_ship_cost = "0.74"; _exp_ship_free = "0"
                                 else:
                                     _exp_ship_cost = "0.00"; _exp_ship_free = "1"
-    
-                                # Build description from template
+
                                 if _sx_tmpl:
                                     desc = _sx_tmpl.replace("[LISTING_TITLE]", title).replace("[FRONT_IMAGE_URL]", front_u)
                                 else:
                                     desc = _scan_description(title, front_u)
-    
+
                                 writer.writerow({
                                     ACTION_COL:                           "Add",
                                     "CustomLabel":                        sku,
@@ -4848,13 +4876,16 @@ alter table scan_cards disable row level security;"""
                                     "*Title":                             title,
                                     "*ConditionID":                       cond_id,
                                     "*C:Graded":                          "No",
-                                    "*C:Sport":                           _sx_sport,
+                                    "*C:Sport":                           row_sport,
                                     "*C:Player/Athlete":                  player,
+                                    "*C:Card Name":                       player,
                                     "*C:Parallel/Variety":                par,
                                     "*C:Manufacturer":                    mfr,
                                     "C:Season":                           year,
+                                    "*C:Features":                        features,
                                     "*C:Set":                             set_n,
                                     "*C:League":                          league,
+                                    "*C:Team":                            team,
                                     "*C:Autographed":                     "No",
                                     "CD:Card Condition - (ID: 40001)":    cond_sp,
                                     "*C:Card Number":                     number,
@@ -4866,7 +4897,6 @@ alter table scan_cards disable row level security;"""
                                     "*Format":                            "FixedPrice",
                                     "*Duration":                          "GTC",
                                     "*StartPrice":                        f"{price:.2f}",
-                                    "BuyItNowPrice":                      "0",
                                     "*Quantity":                          "1",
                                     "PayPalAccepted":                     "1",
                                     "ImmediatePayRequired":               "1",
@@ -4880,6 +4910,8 @@ alter table scan_cards disable row level security;"""
                                     "*DispatchTimeMax":                   "2",
                                     "*ReturnsAcceptedOption":             "ReturnsNotAccepted",
                                     "BestOfferEnabled":                   _sx_bo,
+                                    "MinimumBestOfferPrice":              _sx_bo_min if _sx_bo == "1" else "",
+                                    "BestOfferAutoAcceptPrice":           _sx_bo_aa  if _sx_bo == "1" else "",
                                     "*C:Rookie":                          "No",
                                     "*C:Memorabilia":                     "No",
                                     "ActiveListings":                     "Active",
