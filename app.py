@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.35"
+APP_VERSION = "1.5.36"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -3937,6 +3937,8 @@ with tab8:
                             except Exception:
                                 pass
 
+                        _ab_ebay_q   = urllib.parse.quote_plus(_ab_query)
+                        _ab_sold_url = f"https://www.ebay.com/sch/i.html?_nkw={_ab_ebay_q}&_sacat=261328&LH_Sold=1&LH_Complete=1"
                         _ab_results.append({
                             "#":           _abi + 1,
                             "Player":      _abcv.get("player", ""),
@@ -3952,6 +3954,7 @@ with tab8:
                             "High":        _ab_high,
                             "Trend (90d)": _ab_trend,
                             "Images":      "✅ 8 images" if _ab_has_images else ("—" if not _ab_back_files else "⚠️ error"),
+                            "🔍 Sold":     _ab_sold_url,
                             "Query":       _ab_query,
                             "Status":      ("Error: " + _abcv["_error"]) if _abcv.get("_error") else "OK",
                         })
@@ -3990,6 +3993,7 @@ with tab8:
                         "High":        st.column_config.TextColumn("High",          width="small"),
                         "Trend (90d)": st.column_config.TextColumn("Trend (90d)",   width="small"),
                         "Images":      st.column_config.TextColumn("Images",        width="small"),
+                        "🔍 Sold":     st.column_config.LinkColumn("🔍 Sold", display_text="eBay ↗", width="small"),
                         "Query":       st.column_config.TextColumn("Query",         width="large"),
                         "Status":      st.column_config.TextColumn("Status",        width="small"),
                     },
@@ -4187,6 +4191,42 @@ with tab8:
                 st.session_state["bx_payment_profile"] = _bp3.text_input(
                     "Payment policy name", value=st.session_state.get("bx_payment_profile", ""),
                     placeholder="e.g. Immediate Pay", key="bxw_pay_prof")
+
+                st.markdown("---")
+                st.markdown("**⏱ Drip Schedule** *(stagger listings hourly to boost eBay visibility)*")
+                st.caption("eBay rewards consistent activity. Upload once — eBay lists each card at its scheduled time automatically.")
+                _drip_enabled = st.checkbox("Enable drip posting", value=st.session_state.get("bx_drip_enabled", False), key="bxw_drip")
+                st.session_state["bx_drip_enabled"] = _drip_enabled
+                if _drip_enabled:
+                    _dsc1, _dsc2 = st.columns(2)
+                    st.session_state["bx_drip_spread_hours"] = _dsc1.number_input(
+                        "Spread over (hours)", min_value=1, max_value=48,
+                        value=st.session_state.get("bx_drip_spread_hours", 8),
+                        key="bxw_drip_hrs",
+                        help="App auto-calculates cards per hour. 40 cards over 8 hrs = 5/hr.")
+                    st.session_state["bx_drip_start"] = _dsc2.text_input(
+                        "Start time (YYYY-MM-DD HH:MM, 24h local)",
+                        value=st.session_state.get("bx_drip_start", ""),
+                        placeholder="e.g. 2026-08-10 09:00",
+                        key="bxw_drip_start",
+                        help="Leave blank to start from the next full hour.")
+                    # Live schedule preview based on current batch
+                    import datetime as _dtp
+                    _n_est = sum(1 for _r in st.session_state.get("raw_batch", []) if _r.get("status") != "listed")
+                    _hrs = int(st.session_state.get("bx_drip_spread_hours", 8))
+                    if _n_est > 0 and _hrs > 0:
+                        _cph_est = max(1, -(-_n_est // _hrs))
+                        _slots_est = -(-_n_est // _cph_est)
+                        _drip_start_str = st.session_state.get("bx_drip_start", "").strip()
+                        if _drip_start_str:
+                            try:
+                                _drip_base_p = _dtp.datetime.strptime(_drip_start_str, "%Y-%m-%d %H:%M")
+                            except ValueError:
+                                _drip_base_p = (_dtp.datetime.now() + _dtp.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+                        else:
+                            _drip_base_p = (_dtp.datetime.now() + _dtp.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+                        _drip_end_p = _drip_base_p + _dtp.timedelta(hours=_slots_est - 1)
+                        st.info(f"📅 **{_n_est} cards · {_cph_est}/hr · {_slots_est} slots** — {_drip_base_p.strftime('%-I:%M %p')} → {_drip_end_p.strftime('%-I:%M %p on %b %-d')}")
 
                 st.markdown("---")
                 st.markdown("**Description Template**")
@@ -4816,6 +4856,23 @@ alter table scan_cards disable row level security;"""
                             _sx_sport  = st.session_state.get("bx_sport", "BASEBALL")
                             _sx_bo     = "1" if st.session_state.get("bx_best_offer", True) else "0"
                             _sx_tmpl   = st.session_state.get("bx_desc_template", "")
+
+                            # Drip schedule setup — compute once before loop
+                            import datetime as _dt_drip
+                            _drip_on   = st.session_state.get("bx_drip_enabled", False)
+                            _drip_hrs  = int(st.session_state.get("bx_drip_spread_hours", 8))
+                            _drip_start_str = st.session_state.get("bx_drip_start", "").strip()
+                            if _drip_start_str:
+                                try:
+                                    _drip_base = _dt_drip.datetime.strptime(_drip_start_str, "%Y-%m-%d %H:%M")
+                                except ValueError:
+                                    _drip_base = (_dt_drip.datetime.now() + _dt_drip.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+                            else:
+                                _drip_base = (_dt_drip.datetime.now() + _dt_drip.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+                            # Count how many cards will actually be included
+                            _drip_total = sum(1 for _r, _o in zip(edited_records, identified) if _r.get("✓"))
+                            # Cards per hour = ceil(total / spread_hours), minimum 1
+                            _drip_cph = max(1, -(-_drip_total // max(1, _drip_hrs)))
                             _sport_cats = {
                                 "BASEBALL":   st.session_state.get("bx_store_cat_baseball",  "44411116016"),
                                 "BASKETBALL": st.session_state.get("bx_store_cat_basketball","44411138016"),
@@ -4887,6 +4944,14 @@ alter table scan_cards disable row level security;"""
                                 else:
                                     desc = _scan_description(title, front_u)
 
+                                # Drip: assign each card its scheduled slot (export_idx is 1-based count of included cards)
+                                _schedule_time = ""
+                                if _drip_on and _drip_total > 0:
+                                    _slot = (export_idx - 1) // _drip_cph
+                                    _card_dt = _drip_base + _dt_drip.timedelta(hours=_slot)
+                                    # eBay ScheduleTime: ISO 8601 format (seller account timezone, not UTC-stamped)
+                                    _schedule_time = _card_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
                                 # SEO title: YEAR SET PLAYER #NUMBER PARALLEL — player always in CAPS
                                 _seo_parts = [p for p in [year, set_n, player.upper() if player else "",
                                                            f"#{number}" if number else "", par] if p]
@@ -4899,6 +4964,7 @@ alter table scan_cards disable row level security;"""
                                     "Custom label (SKU)":                     sku,
                                     "Category ID":                            "261328",
                                     "Title":                                  final_title,
+                                    "Schedule Time":                          _schedule_time,
                                     "Condition ID":                           cond_id,
                                     "CD:Card Condition - (ID: 40001)":        cond_sp,
                                     "Item photo URL":                         pic_url,
