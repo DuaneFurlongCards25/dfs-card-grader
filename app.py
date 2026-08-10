@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.34"
+APP_VERSION = "1.5.35"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -4175,6 +4175,20 @@ with tab8:
                     st.session_state["bx_store_cat_other"]      = st.text_input("Other/Default", value=st.session_state["bx_store_cat_other"],    key="bxw_so")
 
                 st.markdown("---")
+                st.markdown("**Business Policies** *(optional — leave blank to use manual shipping/return/payment settings)*")
+                st.caption("Use eBay Seller Hub → Account → Business Policies to find your policy names exactly as shown.")
+                _bp1, _bp2, _bp3 = st.columns(3)
+                st.session_state["bx_shipping_profile"] = _bp1.text_input(
+                    "Shipping policy name", value=st.session_state.get("bx_shipping_profile", ""),
+                    placeholder="e.g. Standard Shipping", key="bxw_ship_prof")
+                st.session_state["bx_return_profile"] = _bp2.text_input(
+                    "Return policy name", value=st.session_state.get("bx_return_profile", ""),
+                    placeholder="e.g. No Returns", key="bxw_ret_prof")
+                st.session_state["bx_payment_profile"] = _bp3.text_input(
+                    "Payment policy name", value=st.session_state.get("bx_payment_profile", ""),
+                    placeholder="e.g. Immediate Pay", key="bxw_pay_prof")
+
+                st.markdown("---")
                 st.markdown("**Description Template**")
                 st.caption("Use `[LISTING_TITLE]` and `[FRONT_IMAGE_URL]` as placeholders — they'll be replaced per card on export.")
                 new_tmpl = st.text_area(
@@ -4756,36 +4770,39 @@ alter table scan_cards disable row level security;"""
                             "6000": "400050",  # Poor
                         }
     
-                        ACTION_COL = "*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)"
+                        ACTION_COL = "*Action(SiteID=US|Country=US|Currency=USD|Version=1193)"
+                        # Exact 82-column eBay File Exchange template (category 261328 — Sports Trading Cards)
                         COLS = [
-                            ACTION_COL, "CustomLabel", "*Category", "StoreCategory",
-                            "*Title", "Subtitle", "Relationship", "*ConditionID",
-                            "*C:Graded", "*C:Sport", "*C:Player/Athlete", "*C:Parallel/Variety",
-                            "*C:Manufacturer", "C:Season", "*C:Features", "*C:Set",
-                            "CD:Grade - (ID: 27502)", "*C:League", "CD:Professional Grader - (ID: 27501)",
-                            "*C:Team", "*C:Autographed", "CD:Card Condition - (ID: 40001)",
-                            "*C:Card Name", "*C:Card Number", "CDA:Certification Number - (ID: 27503)",
-                            "*C:Type", "C:Signed By", "C:Autograph Authentication",
-                            "C:Year Manufactured", "C:Card Size", "C:Country/Region of Manufacturer",
-                            "C:Material", "C:Autograph Format", "C:Vintage", "C:Original/Licensed Reprint",
-                            "C:Event/Tournament", "C:Language", "C:Autograph Authentication Number",
-                            "C:Bundle Description", "C:California Prop 65 Warning", "C:Card Thickness",
-                            "C:Custom Bundle", "C:Insert Set", "C:Print Run",
-                            "PicURL", "GalleryType", "*Description", "*Format", "*Duration",
-                            "*StartPrice", "BuyItNowPrice", "*Quantity",
-                            "PayPalAccepted", "PayPalEmailAddress", "ImmediatePayRequired",
-                            "PaymentInstructions", "*Location", "PostalCode",
-                            "ShippingType", "ShippingService-1:Option", "ShippingService-1:FreeShipping",
-                            "ShippingService-1:Cost", "ShippingService-1:AdditionalCost",
-                            "ShippingService-2:Option", "ShippingService-2:Cost",
-                            "*DispatchTimeMax", "PromotionalShippingDiscount", "ShippingDiscountProfileID",
-                            "*ReturnsAcceptedOption", "ReturnsWithinOption", "RefundOption",
-                            "ShippingCostPaidByOption", "AdditionalDetails",
-                            "ShippingProfileName", "ReturnProfileName", "PaymentProfileName",
-                            "TakeBackPolicyID", "ProductCompliancePolicyID", "ScheduleTime",
-                            "BestOfferEnabled", "MinimumBestOfferPrice", "BestOfferAutoAcceptPrice",
-                            "*C:Rookie", "*C:Memorabilia", "ActiveListings", "SoldListings",
-                            "Confidence", "PricingPulledFrom",
+                            ACTION_COL, "Custom label (SKU)", "Category ID", "Category name",
+                            "Title", "Relationship", "Relationship details", "Schedule Time",
+                            "P:UPC", "P:EPID", "Start price", "Quantity", "Item photo URL",
+                            "VideoID", "Condition ID",
+                            "CD:Professional Grader - (ID: 27501)", "CD:Grade - (ID: 27502)",
+                            "CDA:Certification Number - (ID: 27503)", "CD:Card Condition - (ID: 40001)",
+                            "Description", "Format", "Duration", "Buy It Now price",
+                            "Best Offer Enabled", "Best Offer Auto Accept Price", "Minimum Best Offer Price",
+                            "Immediate pay required", "Location",
+                            "Shipping service 1 option", "Shipping service 1 cost", "Shipping service 1 priority",
+                            "Shipping service 2 option", "Shipping service 2 cost", "Shipping service 2 priority",
+                            "Max dispatch time", "Returns accepted option", "Returns within option",
+                            "Refund option", "Return shipping cost paid by",
+                            "Shipping profile name", "Return profile name", "Payment profile name",
+                            "ProductCompliancePolicyID", "Regional ProductCompliancePolicies",
+                            "C:Sport", "C:Player/Athlete", "C:Manufacturer", "C:Season",
+                            "C:Parallel/Variety", "C:Features", "C:Set", "C:Team", "C:League",
+                            "C:Autographed", "C:Card Name", "C:Card Number", "C:Type",
+                            "Product Safety Pictograms", "Product Safety Statements", "Product Safety Component",
+                            "Regulatory Document Ids",
+                            "Manufacturer Name", "Manufacturer AddressLine1", "Manufacturer AddressLine2",
+                            "Manufacturer City", "Manufacturer Country", "Manufacturer PostalCode",
+                            "Manufacturer StateOrProvince", "Manufacturer Phone", "Manufacturer Email",
+                            "Manufacturer ContactURL",
+                            "Responsible Person 1", "Responsible Person 1 Type",
+                            "Responsible Person 1 AddressLine1", "Responsible Person 1 AddressLine2",
+                            "Responsible Person 1 City", "Responsible Person 1 Country",
+                            "Responsible Person 1 PostalCode", "Responsible Person 1 StateOrProvince",
+                            "Responsible Person 1 Phone", "Responsible Person 1 Email",
+                            "Responsible Person 1 ContactURL",
                         ]
     
                         ex_c1, ex_c2 = st.columns([2, 1])
@@ -4809,10 +4826,12 @@ alter table scan_cards disable row level security;"""
                             _league_map = {"BASEBALL":"MLB","BASKETBALL":"NBA","FOOTBALL":"NFL","SOCCER":"MLS","OTHER":""}
     
                             buf = io.StringIO()
-                            # Row 1: Info header (eBay File Exchange requirement)
-                            info_row = ["Info", "Version=1.0.0", "Template=fx_category_template_EBAY_US"] + [""] * (len(COLS) - 3)
-                            buf.write(",".join(info_row) + "\n")
-                            # Row 2: Column headers
+                            # 3 INFO rows required by eBay File Exchange before the header
+                            blank = [""] * (len(COLS) - 3)
+                            buf.write(",".join(["#INFO", f"Created={int(__import__('time').time()*1000)}", " Indicates missing required fields"] + blank) + "\n")
+                            buf.write(",".join(["#INFO", "Version=1.0", "Template=fx_category_template_EBAY_US", " Indicates missing recommended field"] + [""] * (len(COLS) - 4)) + "\n")
+                            buf.write(",".join(["#INFO"] + [""] * (len(COLS) - 1)) + "\n")
+                            # Row 4: Column headers
                             writer = csv.DictWriter(buf, fieldnames=COLS, extrasaction="ignore")
                             writer.writeheader()
     
@@ -4868,56 +4887,52 @@ alter table scan_cards disable row level security;"""
                                 else:
                                     desc = _scan_description(title, front_u)
 
+                                # SEO title: YEAR SET PLAYER #NUMBER PARALLEL — player always in CAPS
+                                _seo_parts = [p for p in [year, set_n, player.upper() if player else "",
+                                                           f"#{number}" if number else "", par] if p]
+                                seo_title = " ".join(_seo_parts)[:80]
+                                # Use pre-built title from table if set, otherwise use SEO format
+                                final_title = title if title else seo_title
+
                                 writer.writerow({
-                                    ACTION_COL:                           "Add",
-                                    "CustomLabel":                        sku,
-                                    "*Category":                          "261328",
-                                    "StoreCategory":                      store_cat,
-                                    "*Title":                             title,
-                                    "*ConditionID":                       cond_id,
-                                    "*C:Graded":                          "No",
-                                    "*C:Sport":                           row_sport,
-                                    "*C:Player/Athlete":                  player,
-                                    "*C:Card Name":                       player,
-                                    "*C:Parallel/Variety":                par,
-                                    "*C:Manufacturer":                    mfr,
-                                    "C:Season":                           year,
-                                    "*C:Features":                        features,
-                                    "*C:Set":                             set_n,
-                                    "*C:League":                          league,
-                                    "*C:Team":                            team,
-                                    "*C:Autographed":                     "No",
-                                    "CD:Card Condition - (ID: 40001)":    cond_sp,
-                                    "*C:Card Number":                     number,
-                                    "*C:Type":                            "Sports Trading Card",
-                                    "C:Year Manufactured":                year,
-                                    "C:Insert Set":                       par,
-                                    "PicURL":                             pic_url,
-                                    "*Description":                       desc,
-                                    "*Format":                            "FixedPrice",
-                                    "*Duration":                          "GTC",
-                                    "*StartPrice":                        f"{price:.2f}",
-                                    "*Quantity":                          "1",
-                                    "PayPalAccepted":                     "1",
-                                    "ImmediatePayRequired":               "1",
-                                    "*Location":                          "Scottsdale,AZ",
-                                    "PostalCode":                         "85250-6312",
-                                    "ShippingType":                       "Flat",
-                                    "ShippingService-1:Option":           "US_eBayStandardEnvelope",
-                                    "ShippingService-1:FreeShipping":     _exp_ship_free,
-                                    "ShippingService-1:Cost":             _exp_ship_cost,
-                                    "ShippingService-1:AdditionalCost":   "0",
-                                    "*DispatchTimeMax":                   "2",
-                                    "*ReturnsAcceptedOption":             "ReturnsNotAccepted",
-                                    "BestOfferEnabled":                   _sx_bo,
-                                    "MinimumBestOfferPrice":              _sx_bo_min if _sx_bo == "1" else "",
-                                    "BestOfferAutoAcceptPrice":           _sx_bo_aa  if _sx_bo == "1" else "",
-                                    "*C:Rookie":                          "No",
-                                    "*C:Memorabilia":                     "No",
-                                    "ActiveListings":                     "Active",
-                                    "SoldListings":                       "Completed",
-                                    "Confidence":                         f"{sim:.0f}%",
-                                    "PricingPulledFrom":                  set_n + " " + player,
+                                    ACTION_COL:                               "Add",
+                                    "Custom label (SKU)":                     sku,
+                                    "Category ID":                            "261328",
+                                    "Title":                                  final_title,
+                                    "Condition ID":                           cond_id,
+                                    "CD:Card Condition - (ID: 40001)":        cond_sp,
+                                    "Item photo URL":                         pic_url,
+                                    "Description":                            desc,
+                                    "Format":                                 "FixedPrice",
+                                    "Duration":                               "GTC",
+                                    "Start price":                            f"{price:.2f}",
+                                    "Quantity":                               "1",
+                                    "Immediate pay required":                 "1",
+                                    "Location":                               "Scottsdale,AZ",
+                                    "Shipping service 1 option":              "US_eBayStandardEnvelope",
+                                    "Shipping service 1 cost":                _exp_ship_cost,
+                                    "Shipping service 1 priority":            "1",
+                                    "Max dispatch time":                      "2",
+                                    "Returns accepted option":                "ReturnsNotAccepted",
+                                    "Best Offer Enabled":                     _sx_bo,
+                                    "Minimum Best Offer Price":               _sx_bo_min if _sx_bo == "1" else "",
+                                    "Best Offer Auto Accept Price":           _sx_bo_aa  if _sx_bo == "1" else "",
+                                    "Shipping profile name":                  st.session_state.get("bx_shipping_profile", ""),
+                                    "Return profile name":                    st.session_state.get("bx_return_profile", ""),
+                                    "Payment profile name":                   st.session_state.get("bx_payment_profile", ""),
+                                    "C:Sport":                                row_sport.capitalize(),
+                                    "C:Player/Athlete":                       player,
+                                    "C:Manufacturer":                         mfr,
+                                    "C:Season":                               year,
+                                    "C:Parallel/Variety":                     par,
+                                    "C:Features":                             features,
+                                    "C:Set":                                  set_n,
+                                    "C:Team":                                 team,
+                                    "C:League":                               league,
+                                    "C:Autographed":                          "No",
+                                    "C:Card Name":                            player,
+                                    "C:Card Number":                          number,
+                                    "C:Type":                                 "Sports Trading Card",
                                 })
                                 export_idx += 1
                             csv_bytes = buf.getvalue().encode("utf-8")
