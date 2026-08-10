@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.31"
+APP_VERSION = "1.5.32"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -2416,7 +2416,7 @@ if not is_beta and SUPABASE_URL:
 if is_beta:
     st.info("🔓 **Beta Preview** — You have access to Card Research and Inventory Check. Submission Tracker and Downloads unlock with a full membership.", icon="💎")
 
-tab1, tab7, tab8, tab2, tab6, tab3, tab4, tab5, tab9, tab11, tab10 = st.tabs(["🔍 Card Research", "🔥 Hot Movers", "📷 Scan", "📦 Inventory Check", "🧰 Operations", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake", "🏷️ Consignments", "📦 Purchases", "💰 Sales & P&L"])
+tab1, tab7, tab8, tab2, tab6, tab3, tab4, tab5, tab9, tab11, tab10, tab12 = st.tabs(["🔍 Card Research", "🔥 Hot Movers", "📷 Scan", "📦 Inventory Check", "🧰 Operations", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake", "🏷️ Consignments", "📦 Purchases", "💰 Sales & P&L", "📸 Image Prep"])
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — Card Research
@@ -8479,6 +8479,115 @@ with tab10:
 create index if not exists idx_sr_date on sales_records(sale_date);
 create index if not exists idx_sr_source on sales_records(source);""",
             language="sql",
+        )
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 12 — Image Prep (eBay corner crops)
+# ══════════════════════════════════════════════════════════════════════════════
+with tab12:
+    st.markdown("## 📸 Image Prep")
+    st.markdown(
+        "Upload a front and back photo — get 8 eBay-ready images automatically: "
+        "front, back, 4 front corners, 2 back corners. Download as a ZIP and drag straight into eBay."
+    )
+
+    import io as _ip_io
+    import zipfile as _ip_zip
+    from PIL import Image as _ip_PIL
+
+    _IP_CORNER_PCT  = 0.28   # fraction of card dimension to crop per corner
+    _IP_JPEG_Q      = 92     # JPEG quality for output images
+
+    def _ip_corner_crops(img, prefix, corners=4):
+        """Return list of (filename, PIL.Image) for corner crops of img."""
+        w, h = img.size
+        cx = int(w * _IP_CORNER_PCT)
+        cy = int(h * _IP_CORNER_PCT)
+        regions = [
+            ("top_left",     (0,     0,      cx,   cy)),
+            ("top_right",    (w-cx,  0,      w,    cy)),
+            ("bot_left",     (0,     h-cy,   cx,   h)),
+            ("bot_right",    (w-cx,  h-cy,   w,    h)),
+        ]
+        return [(f"{prefix}_{name}.jpg", img.crop(box)) for name, box in regions[:corners]]
+
+    def _ip_to_bytes(img):
+        buf = _ip_io.BytesIO()
+        img.convert("RGB").save(buf, format="JPEG", quality=_IP_JPEG_Q)
+        return buf.getvalue()
+
+    # ── Upload ────────────────────────────────────────────────────────────────
+    _ipc1, _ipc2 = st.columns(2)
+    with _ipc1:
+        st.markdown("**Front of card**")
+        _ip_front_file = st.file_uploader("Upload front", type=["jpg","jpeg","png","webp"], key="ip_front", label_visibility="collapsed")
+    with _ipc2:
+        st.markdown("**Back of card**")
+        _ip_back_file  = st.file_uploader("Upload back",  type=["jpg","jpeg","png","webp"], key="ip_back",  label_visibility="collapsed")
+
+    # ── Optional card label (used in filenames) ────────────────────────────────
+    _ip_label = st.text_input("Card label (optional — used in filenames)", placeholder="e.g. 2023 Topps Chrome Acuna PSA10", key="ip_label")
+    _ip_slug  = re.sub(r"[^\w]+", "_", _ip_label.strip()).strip("_") if _ip_label.strip() else "card"
+
+    # ── Corner crop size slider ────────────────────────────────────────────────
+    _ip_pct = st.slider("Corner crop size (% of card)", min_value=15, max_value=40, value=28, step=1, key="ip_pct",
+                        help="28% matches typical grading-quality corner shots. Increase for more detail, decrease for wider view.")
+    _IP_CORNER_PCT = _ip_pct / 100
+
+    if _ip_front_file and _ip_back_file:
+        _ip_front_img = _ip_PIL.open(_ip_io.BytesIO(_ip_front_file.getvalue()))
+        _ip_back_img  = _ip_PIL.open(_ip_io.BytesIO(_ip_back_file.getvalue()))
+
+        # Generate all images
+        _ip_all = [
+            (f"{_ip_slug}_1_front.jpg",    _ip_front_img),
+            (f"{_ip_slug}_2_back.jpg",     _ip_back_img),
+        ]
+        _ip_all += _ip_corner_crops(_ip_front_img, f"{_ip_slug}_front", corners=4)
+        _ip_all += _ip_corner_crops(_ip_back_img,  f"{_ip_slug}_back",  corners=2)
+
+        # ── Preview grid ──────────────────────────────────────────────────────
+        st.markdown(f"### Preview — {len(_ip_all)} images")
+        _ip_labels = [
+            "① Front", "② Back",
+            "③ Front — top left", "④ Front — top right",
+            "⑤ Front — bot left", "⑥ Front — bot right",
+            "⑦ Back — top left",  "⑧ Back — top right",
+        ]
+        _ip_cols = st.columns(4)
+        for _ip_i, (_ip_fname, _ip_img) in enumerate(_ip_all):
+            with _ip_cols[_ip_i % 4]:
+                st.image(_ip_img, caption=_ip_labels[_ip_i], use_container_width=True)
+
+        # ── Build ZIP ─────────────────────────────────────────────────────────
+        _ip_zip_buf = _ip_io.BytesIO()
+        with _ip_zip.ZipFile(_ip_zip_buf, "w", _ip_zip.ZIP_DEFLATED) as _ip_zf:
+            for _ip_fname, _ip_img in _ip_all:
+                _ip_zf.writestr(_ip_fname, _ip_to_bytes(_ip_img))
+        _ip_zip_buf.seek(0)
+
+        st.download_button(
+            label=f"📥 Download all {len(_ip_all)} images (.zip)",
+            data=_ip_zip_buf.getvalue(),
+            file_name=f"{_ip_slug}_ebay_images.zip",
+            mime="application/zip",
+            type="primary",
+            key="ip_dl",
+        )
+        st.caption("Unzip → select all 8 files → drag into eBay listing image uploader. eBay requires a minimum of 2; 8 is the sweet spot.")
+
+    elif _ip_front_file or _ip_back_file:
+        st.info("Upload both front and back to generate corner crops.", icon="📷")
+    else:
+        st.markdown(
+            """
+            <div style="background:#1a1a2e;border-radius:12px;padding:2rem;text-align:center;color:#aaa;margin-top:1rem;">
+            <div style="font-size:3rem;">📷</div>
+            <div style="font-size:1.1rem;font-weight:600;color:#e2e8f0;margin:.5rem 0;">Upload front + back to get started</div>
+            <div style="font-size:.85rem;">You'll get 8 eBay-ready images: front, back, 4 front corners, 2 back corners</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
 # ─── Footer ───────────────────────────────────────────────────────────────────
