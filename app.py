@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.30"
+APP_VERSION = "1.5.31"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -3792,7 +3792,8 @@ with tab8:
                 key="ai_batch_files",
             )
 
-            _ab_run_comps = st.checkbox("Pull eBay comps for each card after scan", value=True, key="ai_batch_comps_chk")
+            _ab_grade = st.radio("Grade for comps", ["Raw", "PSA 10", "PSA 9", "PSA 8"], horizontal=True, key="ai_batch_grade")
+            _ab_run_comps = st.checkbox("Pull CardHedger comps + trend after scan", value=True, key="ai_batch_comps_chk")
 
             if _ab_files:
                 _ab_n = len(_ab_files)
@@ -3800,8 +3801,7 @@ with tab8:
                 _ab_cost_hi = _ab_n * 0.014
                 st.info(
                     f"**{_ab_n} card{'s' if _ab_n != 1 else ''} selected.** "
-                    f"Estimated cost: ${_ab_cost_lo:.2f}–${_ab_cost_hi:.2f} "
-                    f"(intro through Aug 31: ${_ab_cost_lo:.2f} · regular: ${_ab_cost_hi:.2f})"
+                    f"Claude Vision cost: ~${_ab_cost_lo:.2f}–${_ab_cost_hi:.2f}"
                 )
 
                 if ANTHROPIC_KEY and st.button("🤖 Scan All Cards", type="primary", key="ai_batch_go"):
@@ -3815,7 +3815,7 @@ with tab8:
                     for _abi, _abf in enumerate(_ab_files):
                         _ab_status.markdown(f"Scanning **{_abi + 1}/{_ab_n}**: `{_abf.name}`")
 
-                        # Resize to 1600px max (keeps tokens and payload small)
+                        # Resize to 1600px max
                         try:
                             _abimg = _PILB.open(_aio.BytesIO(_abf.getvalue()))
                             _abimg.thumbnail((1600, 1600), _PILB.LANCZOS)
@@ -3827,39 +3827,64 @@ with tab8:
                             _abb64  = base64.b64encode(_abf.getvalue()).decode()
                             _abmime = "image/jpeg"
 
+                        # Step 1: Claude Vision identification
                         _abcv = claude_identify_card(_abb64, _abmime)
-
                         _ab_query = build_card_query(_abcv) if not _abcv.get("_error") else ""
-                        _ab_avg   = ""
-                        _ab_query_used = _ab_query
 
-                        if not _abcv.get("_error") and _ab_run_comps and _ab_query:
-                            # Try specific query first, then broaden progressively if no results
-                            _ab_sold = fetch_ebay_sold(_ab_query, DEFAULT_EBAY_KEY, max_results=15)
-                            if not _ab_sold and _abcv.get("numbered"):
-                                # Drop print run — find any copy of this parallel
-                                _ab_query_used = build_card_query({**_abcv, "numbered": ""})
-                                _ab_sold = fetch_ebay_sold(_ab_query_used, DEFAULT_EBAY_KEY, max_results=15)
-                            if not _ab_sold and _abcv.get("parallel"):
-                                # Drop parallel too — find base card comps
-                                _ab_query_used = build_card_query({**_abcv, "numbered": "", "parallel": ""})
-                                _ab_sold = fetch_ebay_sold(_ab_query_used, DEFAULT_EBAY_KEY, max_results=15)
-                            _ab_avg_val = ebay_avg(_ab_sold)
-                            _ab_avg = f"${_ab_avg_val:,.2f}" if _ab_avg_val else "no data"
+                        # Step 2: CardHedger comps + trend
+                        _ab_ch_match = ""
+                        _ab_fmv = ""
+                        _ab_comp_avg = ""
+                        _ab_low = ""
+                        _ab_high = ""
+                        _ab_trend = ""
+
+                        if not _abcv.get("_error") and _ab_run_comps and _ab_query and CARDHEDGER_KEY:
+                            _ab_status.markdown(f"Pricing **{_abi + 1}/{_ab_n}**: `{_abf.name}`")
+                            _abm = ch_card_match(_ab_query)
+                            if _abm:
+                                _ab_ch_id  = _abm.get("card_id") or _abm.get("id") or ""
+                                _ab_ch_match = (_abm.get("description") or _abm.get("name") or _abm.get("title") or "")[:50]
+                                if _ab_ch_id:
+                                    _ab_fmv_r  = ch_fmv(_ab_ch_id, _ab_grade)
+                                    _ab_comp_r = ch_comps(_ab_ch_id, _ab_grade)
+                                    _ab_hist_r = ch_price_history(_ab_ch_id, _ab_grade, 90)
+
+                                    _ab_fmv_v = fmv_price(_ab_fmv_r)
+                                    _ab_fmv   = f"${_ab_fmv_v:,.2f}" if _ab_fmv_v else ""
+
+                                    _ab_avg_v = _ab_comp_r.get("comp_price") or _ab_comp_r.get("average")
+                                    _ab_comp_avg = f"${float(_ab_avg_v):,.2f}" if _ab_avg_v else ""
+
+                                    _ab_prices = [x.get("price") or x.get("sale_price") for x in (_ab_comp_r.get("raw_prices") or _ab_comp_r.get("sales") or [])]
+                                    _ab_prices = [float(p) for p in _ab_prices if p]
+                                    _ab_low  = f"${min(_ab_prices):,.2f}" if _ab_prices else ""
+                                    _ab_high = f"${max(_ab_prices):,.2f}" if _ab_prices else ""
+
+                                    _ab_dir, _ab_pct = calculate_trend(_ab_hist_r)
+                                    if _ab_dir == "up":
+                                        _ab_trend = f"↑ {_ab_pct:+.0f}%"
+                                    elif _ab_dir == "down":
+                                        _ab_trend = f"↓ {_ab_pct:.0f}%"
+                                    elif _ab_dir is not None:
+                                        _ab_trend = f"→ {_ab_pct:+.0f}%"
 
                         _ab_results.append({
-                            "#":          _abi + 1,
-                            "File":       _abf.name,
-                            "Player":     _abcv.get("player", ""),
-                            "Year":       _abcv.get("year", ""),
-                            "Brand":      _abcv.get("brand", ""),
-                            "Set":        _abcv.get("set", ""),
-                            "Card #":     _abcv.get("card_number", ""),
-                            "Parallel":   _abcv.get("parallel", ""),
-                            "Sport":      _abcv.get("sport", ""),
-                            "eBay Avg":   _ab_avg,
-                            "eBay Query": _ab_query_used,
-                            "Status":     ("Error: " + _abcv["_error"]) if _abcv.get("_error") else "OK",
+                            "#":           _abi + 1,
+                            "Player":      _abcv.get("player", ""),
+                            "Year":        _abcv.get("year", ""),
+                            "Set":         _abcv.get("set", ""),
+                            "Card #":      _abcv.get("card_number", ""),
+                            "Parallel":    _abcv.get("parallel", ""),
+                            "Sport":       _abcv.get("sport", ""),
+                            "CH Match":    _ab_ch_match,
+                            "FMV":         _ab_fmv,
+                            "Comp Avg":    _ab_comp_avg,
+                            "Low":         _ab_low,
+                            "High":        _ab_high,
+                            "Trend (90d)": _ab_trend,
+                            "Query":       _ab_query,
+                            "Status":      ("Error: " + _abcv["_error"]) if _abcv.get("_error") else "OK",
                         })
 
                         _ab_bar.progress((_abi + 1) / _ab_n, text=f"Done {_abi + 1}/{_ab_n}")
@@ -3873,25 +3898,28 @@ with tab8:
             if st.session_state.get("ai_batch_results"):
                 _ab_res = st.session_state["ai_batch_results"]
                 _ab_df  = pd.DataFrame(_ab_res)
-                st.markdown(f"### Results — {len(_ab_res)} cards")
+                st.markdown(f"### Results — {len(_ab_res)} cards · grade: {_ab_grade}")
                 st.dataframe(
                     _ab_df,
                     hide_index=True,
                     use_container_width=True,
-                    height=min(500, 45 + len(_ab_res) * 36),
+                    height=min(600, 45 + len(_ab_res) * 36),
                     column_config={
-                        "#":          st.column_config.NumberColumn("#",        width="small"),
-                        "File":       st.column_config.TextColumn("File",       width="medium"),
-                        "Player":     st.column_config.TextColumn("Player",     width="medium"),
-                        "Year":       st.column_config.TextColumn("Year",       width="small"),
-                        "Brand":      st.column_config.TextColumn("Brand",      width="small"),
-                        "Set":        st.column_config.TextColumn("Set",        width="medium"),
-                        "Card #":     st.column_config.TextColumn("Card #",     width="small"),
-                        "Parallel":   st.column_config.TextColumn("Parallel",   width="medium"),
-                        "Sport":      st.column_config.TextColumn("Sport",      width="small"),
-                        "eBay Avg":   st.column_config.TextColumn("eBay Avg",   width="small"),
-                        "eBay Query": st.column_config.TextColumn("eBay Query", width="large"),
-                        "Status":     st.column_config.TextColumn("Status",     width="small"),
+                        "#":           st.column_config.NumberColumn("#",           width="small"),
+                        "Player":      st.column_config.TextColumn("Player",        width="medium"),
+                        "Year":        st.column_config.TextColumn("Year",          width="small"),
+                        "Set":         st.column_config.TextColumn("Set",           width="medium"),
+                        "Card #":      st.column_config.TextColumn("Card #",        width="small"),
+                        "Parallel":    st.column_config.TextColumn("Parallel",      width="medium"),
+                        "Sport":       st.column_config.TextColumn("Sport",         width="small"),
+                        "CH Match":    st.column_config.TextColumn("CH Match",      width="large"),
+                        "FMV":         st.column_config.TextColumn("FMV",           width="small"),
+                        "Comp Avg":    st.column_config.TextColumn("Comp Avg",      width="small"),
+                        "Low":         st.column_config.TextColumn("Low",           width="small"),
+                        "High":        st.column_config.TextColumn("High",          width="small"),
+                        "Trend (90d)": st.column_config.TextColumn("Trend (90d)",   width="small"),
+                        "Query":       st.column_config.TextColumn("Query",         width="large"),
+                        "Status":      st.column_config.TextColumn("Status",        width="small"),
                     },
                 )
                 _ab_csv = _ab_df.to_csv(index=False)
