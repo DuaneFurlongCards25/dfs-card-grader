@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.36"
+APP_VERSION = "1.5.37"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -4665,6 +4665,10 @@ alter table scan_cards disable row level security;"""
                                 "FMV Conf":   c.get("fmv_conf", ""),
                                 "Price ($)":  float(c.get("price") or 2.49),
                                 "Condition":  cond_label,
+                                "Graded":     c.get("graded", False),
+                                "Grader":     c.get("grader", "PSA"),
+                                "Grade":      c.get("grade", ""),
+                                "Cert #":     c.get("cert_number", ""),
                                 "🔍 eBay":    ebay_url,
                             })
     
@@ -4693,6 +4697,14 @@ alter table scan_cards disable row level security;"""
                                 "Price ($)":  st.column_config.NumberColumn("Your Price", min_value=0.01, format="$%.2f"),
                                 "Condition":  st.column_config.SelectboxColumn(
                                                   "Condition", options=list(_RAW_CONDITIONS.keys()), width="medium"),
+                                "Graded":     st.column_config.CheckboxColumn("Graded?", width="small",
+                                                  help="Check if this card is in a graded slab (PSA/BGS/SGC/CGC)"),
+                                "Grader":     st.column_config.SelectboxColumn(
+                                                  "Grader", options=["PSA","BGS","SGC","CGC"], width="small"),
+                                "Grade":      st.column_config.TextColumn("Grade ✏️", width="small",
+                                                  help="e.g. 10, 9.5, 9 — added to title and CD: fields"),
+                                "Cert #":     st.column_config.TextColumn("Cert # ✏️", width="medium",
+                                                  help="PSA/BGS/SGC cert number from the label"),
                                 "🔍 eBay":    st.column_config.LinkColumn("🔍 eBay", display_text="View Sold", width="small"),
                             },
                         )
@@ -4903,6 +4915,20 @@ alter table scan_cards disable row level security;"""
                                 cond_lbl = row.get("Condition", st.session_state.get("bx_default_condition","Near Mint (NM)"))
                                 cond_id  = _RAW_CONDITIONS.get(cond_lbl, "2750")
                                 cond_sp  = _COND_SPECIFIC.get(cond_id, "400010")
+                                # Graded card fields
+                                _is_graded  = bool(row.get("Graded", False))
+                                _grader_key = (row.get("Grader") or "PSA").strip()
+                                _grade_val  = (row.get("Grade") or "").strip()
+                                _cert_num   = (row.get("Cert #") or "").strip()
+                                _GRADER_FULL = {
+                                    "PSA": "Professional Sports Authenticator (PSA)",
+                                    "BGS": "Beckett Grading Services (BGS)",
+                                    "SGC": "Sportscard Guaranty (SGC)",
+                                    "CGC": "Certified Guaranty Company (CGC)",
+                                }
+                                _grader_full = _GRADER_FULL.get(_grader_key, _grader_key) if _is_graded else ""
+                                _grade_export = _grade_val if _is_graded else ""
+                                _cert_export  = _cert_num  if _is_graded else ""
                                 # Custom SKU: use what's in the table (user may have edited it)
                                 sku      = (row.get("Custom SKU") or "").strip() or f"{_sx_sku}-{date_str}-{export_idx:04d}"
                                 front_u  = orig.get("front_url", "")
@@ -4958,6 +4984,10 @@ alter table scan_cards disable row level security;"""
                                 seo_title = " ".join(_seo_parts)[:80]
                                 # Use pre-built title from table if set, otherwise use SEO format
                                 final_title = title if title else seo_title
+                                # Graded: append "PSA 10" / "BGS 9.5" etc. to title
+                                if _is_graded and _grader_key and _grade_val:
+                                    _grade_suffix = f"{_grader_key} {_grade_val}"
+                                    final_title = f"{final_title[:80 - len(_grade_suffix) - 1]} {_grade_suffix}"[:80]
 
                                 writer.writerow({
                                     ACTION_COL:                               "Add",
@@ -4966,6 +4996,9 @@ alter table scan_cards disable row level security;"""
                                     "Title":                                  final_title,
                                     "Schedule Time":                          _schedule_time,
                                     "Condition ID":                           cond_id,
+                                    "CD:Professional Grader - (ID: 27501)":   _grader_full,
+                                    "CD:Grade - (ID: 27502)":                 _grade_export,
+                                    "CDA:Certification Number - (ID: 27503)": _cert_export,
                                     "CD:Card Condition - (ID: 40001)":        cond_sp,
                                     "Item photo URL":                         pic_url,
                                     "Description":                            desc,
