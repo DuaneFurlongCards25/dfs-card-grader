@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.46"
+APP_VERSION = "1.5.47"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -5026,7 +5026,52 @@ alter table scan_cards disable row level security;"""
                                 "🔍 eBay":    st.column_config.LinkColumn("🔍 eBay", display_text="View Sold", width="small"),
                             },
                         )
-    
+
+                        # ── Upload card images ────────────────────────────────────
+                        _missing_img = [c for c in identified if not c.get("front_url")]
+                        _has_img     = [c for c in identified if c.get("front_url")]
+                        if _missing_img or True:  # always show so user can replace images too
+                            with st.expander(
+                                f"📷 Upload card images ({len(_has_img)}/{len(identified)} have photos)",
+                                expanded=bool(_missing_img),
+                            ):
+                                _img_card_opts = {
+                                    f"Card {c['idx']+1} — {c.get('player','?')} {('✅' if c.get('front_url') else '⚠️ no image')}": c
+                                    for c in identified
+                                }
+                                _img_sel_label = st.selectbox(
+                                    "Which card?", list(_img_card_opts.keys()), key="img_upload_card_sel"
+                                )
+                                _img_target = _img_card_opts[_img_sel_label]
+                                _iu_c1, _iu_c2 = st.columns(2)
+                                _iu_front = _iu_c1.file_uploader(
+                                    "Front image", type=["jpg","jpeg","png"], key="iu_front"
+                                )
+                                _iu_back = _iu_c2.file_uploader(
+                                    "Back image (optional)", type=["jpg","jpeg","png"], key="iu_back"
+                                )
+                                if _iu_front and st.button("⬆️ Upload & attach", key="iu_upload_btn", type="primary"):
+                                    with st.spinner("Uploading…"):
+                                        try:
+                                            _f_url, _ = _scan_upload_to_supabase(
+                                                _iu_front.getvalue(), f"front_{_img_target['idx']}_{_iu_front.name}"
+                                            )
+                                            _b_url = ""
+                                            if _iu_back:
+                                                _b_url, _ = _scan_upload_to_supabase(
+                                                    _iu_back.getvalue(), f"back_{_img_target['idx']}_{_iu_back.name}"
+                                                )
+                                            for _bc in st.session_state.raw_batch:
+                                                if _bc.get("idx") == _img_target["idx"]:
+                                                    _bc["front_url"] = _f_url
+                                                    if _b_url:
+                                                        _bc["back_url"] = _b_url
+                                                    break
+                                            st.success(f"✅ Images attached to Card {_img_target['idx']+1} — {_img_target.get('player','')}")
+                                            st.rerun()
+                                        except Exception as _iu_e:
+                                            st.error(f"Upload failed: {_iu_e}")
+
                         # ── Re-identify low-confidence cards ──────────────────────
                         low_conf_cards = [c for c in identified if c.get("low_conf")]
                         if low_conf_cards:
