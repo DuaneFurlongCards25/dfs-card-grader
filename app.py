@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.39"
+APP_VERSION = "1.5.40"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -4099,6 +4099,88 @@ with tab8:
                 else:
                     st.warning("No card found for that cert / grader. Double-check the number and grader.")
 
+            # ── Add to eBay Batch ─────────────────────────────────────────────
+            if info.get("description"):
+                st.markdown("---")
+                if st.button("➕ Add to eBay Batch", key="cert_add_to_batch", type="primary",
+                             help="Adds this graded card to the Batch → eBay tab for export, pulling its image from PSA"):
+                    import urllib.request as _ur_cb, json as _json_cb
+                    _cb_cert   = cert.strip()
+                    _cb_player = info.get("description", "")
+                    _cb_grade  = info.get("grade", "")
+                    _cb_grader = grader
+                    # Build set name from description if possible (CardHedger gives full card description)
+                    _cb_set    = ""
+                    _cb_number = ""
+                    # Try to fetch PSA image
+                    _cb_image  = ""
+                    if grader == "PSA":
+                        try:
+                            _cb_req = _ur_cb.Request(
+                                f"https://api.psacard.com/publicapi/cert/GetByCertNumber/{_cb_cert}",
+                                headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
+                            )
+                            with _ur_cb.urlopen(_cb_req, timeout=8) as _cb_resp:
+                                _cb_psa = _json_cb.loads(_cb_resp.read().decode())
+                            _cb_ci = _cb_psa.get("PSACert") or {}
+                            _cb_image   = (_cb_ci.get("ImageURL") or "").strip()
+                            _cb_player  = (_cb_ci.get("Subject") or _cb_player).strip()
+                            _cb_year    = str(_cb_ci.get("Year") or "").strip()
+                            _cb_brand   = (_cb_ci.get("Brand") or "").strip()
+                            _cb_set     = f"{_cb_year} {_cb_brand}".strip()
+                            _cb_number  = str(_cb_ci.get("CardNumber") or "").strip()
+                            _cb_variety = (_cb_ci.get("Variety") or "").strip()
+                            _cb_team    = (_cb_ci.get("Team") or "").strip()
+                            _cb_grade   = str(_cb_ci.get("PSAGrade") or _cb_grade).strip()
+                        except Exception as _cb_err:
+                            _cb_variety = ""
+                            _cb_team    = ""
+                            st.caption(f"PSA image fetch failed: {_cb_err} — will use placeholder image")
+                    else:
+                        _cb_variety = ""
+                        _cb_team    = ""
+                    # Cache PSA image
+                    if _cb_image:
+                        if "psa_image_cache" not in st.session_state:
+                            st.session_state["psa_image_cache"] = {}
+                        st.session_state["psa_image_cache"][_cb_cert] = _cb_image
+                    # Build batch entry
+                    _eb2 = st.session_state.get("raw_batch", [])
+                    _ni2 = max((x.get("idx", -1) for x in _eb2), default=-1) + 1
+                    _cb_fmv = None
+                    if vals:
+                        import statistics as _stats
+                        _cb_fmv = round(_stats.median([v["price"] for v in vals[:5]]), 2)
+                    _new_c2 = {
+                        "idx":         _ni2,
+                        "front_file":  "",
+                        "front_url":   _cb_image,
+                        "back_url":    "",
+                        "card_id":     "",
+                        "player":      _cb_player,
+                        "set_name":    _cb_set,
+                        "number":      _cb_number,
+                        "variant":     _cb_variety,
+                        "team":        _cb_team,
+                        "similarity":  100,
+                        "candidates":  [],
+                        "status":      "identified",
+                        "low_conf":    False,
+                        "title":       _raw_title(_cb_player, _cb_set, _cb_number, _cb_variety),
+                        "fmv":         _cb_fmv,
+                        "fmv_low":     None,
+                        "fmv_high":    None,
+                        "fmv_conf":    "",
+                        "price":       _cb_fmv or 2.49,
+                        "graded":      True,
+                        "grader":      _cb_grader,
+                        "grade":       _cb_grade,
+                        "cert_number": _cb_cert,
+                    }
+                    _eb2.append(_new_c2)
+                    st.session_state.raw_batch = _eb2
+                    st.success(f"✅ Added to batch: {_cb_player} — {_cb_grader} {_cb_grade}. Switch to **📦 Batch → eBay** to export.")
+
         # ── BATCH → EBAY ──────────────────────────────────────────────────────
         with scan_batch:
             import subprocess as _sp
@@ -4412,95 +4494,6 @@ alter table scan_cards disable row level security;"""
                             st.rerun()
                     else:
                         st.components.v1.iframe("http://localhost:5100", height=860, scrolling=True)
-
-                # ── Add Graded Card by Cert # (no scanning needed) ─────────
-                with st.expander("🏆 Add PSA Graded Card by Cert #", expanded=False):
-                    st.caption("Enter your PSA cert number and we'll pull the card details + image directly from PSA — no scanning required.")
-                    _psa_ci_col1, _psa_ci_col2 = st.columns([2, 1])
-                    _psa_cert_in = _psa_ci_col1.text_input("PSA Cert Number", placeholder="e.g. 12345678", key="psa_cert_add_input", label_visibility="collapsed")
-                    _psa_add_btn = _psa_ci_col2.button("📸 Fetch from PSA", key="psa_cert_add_btn", disabled=not (_psa_cert_in or "").strip(), use_container_width=True)
-                    if _psa_add_btn and _psa_cert_in.strip():
-                        import urllib.request as _ur_psa, json as _json_psa2
-                        _cert_in = _psa_cert_in.strip()
-                        _psa_ok = False
-                        try:
-                            _req_psa = _ur_psa.Request(
-                                f"https://api.psacard.com/publicapi/cert/GetByCertNumber/{_cert_in}",
-                                headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
-                            )
-                            with _ur_psa.urlopen(_req_psa, timeout=10) as _resp_psa:
-                                _psa_resp = _json_psa2.loads(_resp_psa.read().decode())
-                            _ci = _psa_resp.get("PSACert") or {}
-                            if not _ci:
-                                st.error("PSA returned no data for that cert. Double-check the number.")
-                            else:
-                                _ci_player  = (_ci.get("Subject") or "").strip()
-                                _ci_year    = str(_ci.get("Year") or _ci.get("CardYear") or "").strip()
-                                _ci_brand   = (_ci.get("Brand") or _ci.get("CardBrand") or "Topps").strip()
-                                _ci_number  = str(_ci.get("CardNumber") or "").strip()
-                                _ci_variety = (_ci.get("Variety") or "").strip()
-                                _ci_team    = (_ci.get("Team") or "").strip()
-                                _ci_grade   = str(_ci.get("PSAGrade") or _ci.get("CardGrade") or "").strip()
-                                _ci_image   = (_ci.get("ImageURL") or "").strip()
-                                _ci_set     = f"{_ci_year} {_ci_brand}".strip()
-                                # Cache PSA image so export picks it up automatically
-                                if _ci_image:
-                                    if "psa_image_cache" not in st.session_state:
-                                        st.session_state["psa_image_cache"] = {}
-                                    st.session_state["psa_image_cache"][_cert_in] = _ci_image
-                                # Next available idx
-                                _eb = st.session_state.get("raw_batch", [])
-                                _ni = max((x.get("idx", -1) for x in _eb), default=-1) + 1
-                                _new_c = {
-                                    "idx":         _ni,
-                                    "front_file":  "",
-                                    "front_url":   _ci_image,
-                                    "back_url":    "",
-                                    "card_id":     "",
-                                    "player":      _ci_player,
-                                    "set_name":    _ci_set,
-                                    "number":      _ci_number,
-                                    "variant":     _ci_variety,
-                                    "team":        _ci_team,
-                                    "similarity":  100,
-                                    "candidates":  [],
-                                    "status":      "identified",
-                                    "low_conf":    False,
-                                    "title":       _raw_title(_ci_player, _ci_set, _ci_number, _ci_variety),
-                                    "fmv":         None,
-                                    "fmv_low":     None,
-                                    "fmv_high":    None,
-                                    "fmv_conf":    "",
-                                    "price":       2.49,
-                                    "graded":      True,
-                                    "grader":      "PSA",
-                                    "grade":       _ci_grade,
-                                    "cert_number": _cert_in,
-                                }
-                                # Try CardHedger FMV by player name search
-                                try:
-                                    _ch_search = _ch_post("/v1/cards/search", {"query": f"{_ci_player} {_ci_set}", "limit": 1}) or {}
-                                    _ch_hit = ((_ch_search.get("results") or _ch_search.get("cards") or [None])[0]) or {}
-                                    if _ch_hit.get("card_id"):
-                                        _new_c["card_id"] = _ch_hit["card_id"]
-                                        _fmv_r = ch_fmv(_ch_hit["card_id"], "PSA", _ci_grade or "10")
-                                        _fmv_p = _fmv_r.get("price") if _fmv_r else None
-                                        if _fmv_p:
-                                            _new_c["fmv"]      = round(float(_fmv_p), 2)
-                                            _new_c["fmv_low"]  = _fmv_r.get("price_low")
-                                            _new_c["fmv_high"] = _fmv_r.get("price_high")
-                                            _new_c["fmv_conf"] = _fmv_r.get("confidence_grade", "")
-                                            _new_c["price"]    = _new_c["fmv"]
-                                except Exception:
-                                    pass
-                                _eb.append(_new_c)
-                                st.session_state.raw_batch = _eb
-                                st.success(f"✅ Added: {_ci_player} — {_ci_set} #{_ci_number} — PSA {_ci_grade}")
-                                _psa_ok = True
-                        except Exception as _psa_err:
-                            st.error(f"PSA fetch failed: {_psa_err}. Check the cert number or try again in a moment.")
-                        if _psa_ok:
-                            st.rerun()
 
                 # ── Step 1: Upload ─────────────────────────────────────────
                 all_files = st.file_uploader(
