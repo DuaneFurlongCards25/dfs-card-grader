@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.44"
+APP_VERSION = "1.5.45"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4316,8 +4316,14 @@ with tab8:
                     import urllib.request as _ur_cb, json as _json_cb
                     _cb_cert   = cert.strip()
                     _cb_player = info.get("description", "")
-                    _cb_grade  = info.get("grade", "")
                     _cb_grader = grader
+                    _raw_grade = str(info.get("grade", "") or "").strip()
+                    # Strip grader prefix if API returns e.g. "PSA 10" instead of "10"
+                    for _pfx in ("PSA ", "BGS ", "SGC ", "CGC "):
+                        if _raw_grade.upper().startswith(_pfx):
+                            _raw_grade = _raw_grade[len(_pfx):]
+                            break
+                    _cb_grade  = _raw_grade
                     # Build set name from description if possible (CardHedger gives full card description)
                     _cb_set    = ""
                     _cb_number = ""
@@ -4340,7 +4346,12 @@ with tab8:
                             _cb_number  = str(_cb_ci.get("CardNumber") or "").strip()
                             _cb_variety = (_cb_ci.get("Variety") or "").strip()
                             _cb_team    = (_cb_ci.get("Team") or "").strip()
-                            _cb_grade   = str(_cb_ci.get("PSAGrade") or _cb_grade).strip()
+                            _cb_grade_raw = str(_cb_ci.get("PSAGrade") or _cb_grade).strip()
+                            for _pfx2 in ("PSA ", "BGS ", "SGC ", "CGC "):
+                                if _cb_grade_raw.upper().startswith(_pfx2):
+                                    _cb_grade_raw = _cb_grade_raw[len(_pfx2):]
+                                    break
+                            _cb_grade = _cb_grade_raw
                         except Exception as _cb_err:
                             _cb_variety = ""
                             _cb_team    = ""
@@ -4705,6 +4716,13 @@ alter table scan_cards disable row level security;"""
                             st.rerun()
                     else:
                         st.components.v1.iframe("http://localhost:5100", height=860, scrolling=True)
+
+                # ── Batch ready banner ─────────────────────────────────────
+                _pre_batch = st.session_state.raw_batch
+                if _pre_batch:
+                    _pre_identified = [c for c in _pre_batch if c.get("status") == "identified"]
+                    if _pre_identified:
+                        st.info(f"📦 **{len(_pre_identified)} card{'s' if len(_pre_identified) != 1 else ''} in your batch** — scroll down past the uploader to review, price, and export.")
 
                 # ── Step 1: Upload ─────────────────────────────────────────
                 all_files = st.file_uploader(
