@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.49"
+APP_VERSION = "1.5.50"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -449,7 +449,7 @@ def admin_get_codes():
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     req = urllib.request.Request(
-        f"{SUPABASE_URL}/rest/v1/access_codes?select=id,code,name,active,usage_count,last_used,created_at&order=id.asc",
+        f"{SUPABASE_URL}/rest/v1/access_codes?select=id,code,name,active,usage_count,last_used,created_at,daily_limit&order=id.asc",
         headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
     )
     try:
@@ -478,6 +478,29 @@ def admin_insert_code(code, name, trial_days=None):
             "Prefer": "return=minimal",
         },
         method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=10):
+            return True
+    except Exception:
+        return False
+
+def admin_set_daily_limit(code_id, limit):
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    payload = {"daily_limit": limit if limit and limit > 0 else None}
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/rest/v1/access_codes?id=eq.{code_id}",
+        data=data,
+        headers={
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        },
+        method="PATCH",
     )
     try:
         with urllib.request.urlopen(req, context=ctx, timeout=10):
@@ -611,7 +634,7 @@ def validate_code(code: str):
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     url = (f"{SUPABASE_URL}/rest/v1/access_codes"
-           f"?code=eq.{urllib.parse.quote(code.strip().upper())}&active=eq.true&select=id,name,usage_count,expires_at")
+           f"?code=eq.{urllib.parse.quote(code.strip().upper())}&active=eq.true&select=id,name,usage_count,expires_at,daily_limit")
     req = urllib.request.Request(url, headers={
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -630,8 +653,8 @@ def validate_code(code: str):
                         return None, False, "expired"
                 except Exception:
                     pass
-            return row["name"], row["id"], None
-        return None, False, "invalid"
+            return row["name"], row["id"], None, row.get("daily_limit")
+        return None, False, "invalid", None
     except Exception:
         return None, False, "invalid"
 
@@ -726,12 +749,13 @@ if not st.session_state.get("access_granted"):
                 st.session_state.is_beta = False
                 st.rerun()
             else:
-                name, code_id, err = validate_code(entered_code)
+                name, code_id, err, daily_limit = validate_code(entered_code)
                 if name and code_id:
                     st.query_params["k"] = clean_code
                     st.session_state.access_granted = True
                     st.session_state.access_name = name
                     st.session_state.access_code_id = code_id
+                    st.session_state.access_daily_limit = daily_limit
                     # BETA- prefix = limited preview access
                     st.session_state.is_beta = clean_code.startswith("BETA-")
                     # Store expiry label for sidebar display
@@ -1051,7 +1075,8 @@ def pricing_used_today():
 def pricing_remaining():
     if pricing_unlimited():
         return 10 ** 9
-    return max(0, DAILY_PRICING_CAP - pricing_used_today())
+    cap = st.session_state.get("access_daily_limit") or DAILY_PRICING_CAP
+    return max(0, cap - pricing_used_today())
 
 def pricing_bump(n):
     """Record n live look-ups against today's budget (session + Supabase)."""
@@ -2475,6 +2500,10 @@ def _show_guide():
 def _show_admin():
     import datetime as _dt_adm
     st.caption(f"v{APP_VERSION} · Access code management")
+
+    with st.expander("🛠 First-time setup SQL (run once in Supabase if daily limits aren't saving)", expanded=False):
+        st.code("alter table access_codes add column if not exists daily_limit integer;", language="sql")
+
     codes = admin_get_codes()
     now_utc = _dt_adm.datetime.utcnow().replace(tzinfo=_dt_adm.timezone.utc)
 
@@ -2501,6 +2530,21 @@ def _show_admin():
                 c6.markdown(exp_raw[:10])
         else:
             c6.markdown("♾️ No expiry")
+
+        # Daily limit row
+        _dl_cur = row.get("daily_limit") or 0
+        _dl_c1, _dl_c2, _dl_c3 = st.columns([2, 1, 1])
+        _dl_c1.caption(f"Daily lookup limit: {'**' + str(_dl_cur) + '**/day**' if _dl_cur else 'Global default (' + str(DAILY_PRICING_CAP) + '/day)'}")
+        _new_limit = _dl_c2.number_input(
+            "Set limit", min_value=0, max_value=500, value=_dl_cur,
+            key=f"adm_lim_{row['id']}", label_visibility="collapsed",
+            help="0 = use global default. Set per-user daily lookup cap."
+        )
+        if _dl_c3.button("💾 Save", key=f"adm_lim_save_{row['id']}"):
+            admin_set_daily_limit(row["id"], int(_new_limit))
+            st.success(f"Limit set to {_new_limit}/day for {row['name']}")
+            st.rerun()
+
         if row["active"]:
             if st.button("Revoke", key=f"adm_rev_{row['id']}"):
                 admin_toggle_code(row["id"], False)
