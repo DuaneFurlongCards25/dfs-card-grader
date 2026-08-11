@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.41"
+APP_VERSION = "1.5.42"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4045,12 +4045,25 @@ with tab8:
             if st.button("🎫 Look up cert", key="cert_go") and cert.strip():
                 with st.spinner("Looking up cert…"):
                     cres = ch_prices_by_cert(cert.strip(), grader, days)
-                info = (cres or {}).get("cert_info") or {}
-                if info.get("description"):
+                # Persist results so Add to Batch button works on next rerun
+                st.session_state["cert_lookup_result"] = cres
+                st.session_state["cert_lookup_cert"]   = cert.strip()
+                st.session_state["cert_lookup_grader"] = grader
+
+            # Read persisted results (survives reruns)
+            _clr   = st.session_state.get("cert_lookup_result")
+            info   = (_clr or {}).get("cert_info") or {}
+            _cl_cert   = st.session_state.get("cert_lookup_cert", "")
+            _cl_grader = st.session_state.get("cert_lookup_grader", "PSA")
+            # Clear if user changed cert number
+            if cert.strip() and cert.strip() != _cl_cert:
+                info = {}
+
+            if info.get("description"):
                     st.markdown(f"**{info.get('description', '')}**")
                     st.caption(f"{info.get('grader','').upper()} {info.get('grade','')} · cert {info.get('cert','')}")
 
-                    pr = (cres or {}).get("prices") or []
+                    pr = (_clr or {}).get("prices") or []
                     vals = []
                     for p in pr:
                         try:
@@ -4095,8 +4108,9 @@ with tab8:
                         st.line_chart(dfp.set_index("date")["price"], height=240)
                         st.caption(f"Each point = one sold transaction (CardHedger). Showing last {days} days.")
                     else:
+                        vals = []
                         st.info("Cert matched, but no recent sold-price history for this exact card.")
-                else:
+            elif _cl_cert:
                     st.warning("No card found for that cert / grader. Double-check the number and grader.")
 
             # ── Add to eBay Batch ─────────────────────────────────────────────
@@ -4148,9 +4162,11 @@ with tab8:
                     _eb2 = st.session_state.get("raw_batch", [])
                     _ni2 = max((x.get("idx", -1) for x in _eb2), default=-1) + 1
                     _cb_fmv = None
-                    if vals:
+                    _cb_vals = [{"date": (p.get("closing_date") or "")[:10], "price": float(p.get("price"))}
+                                for p in ((_clr or {}).get("prices") or []) if p.get("price")]
+                    if _cb_vals:
                         import statistics as _stats
-                        _cb_fmv = round(_stats.median([v["price"] for v in vals[:5]]), 2)
+                        _cb_fmv = round(_stats.median([v["price"] for v in _cb_vals[:5]]), 2)
                     _new_c2 = {
                         "idx":         _ni2,
                         "front_file":  "",
