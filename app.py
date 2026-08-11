@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.43"
+APP_VERSION = "1.5.44"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -2351,6 +2351,12 @@ with st.sidebar:
     if st.button("📖 How to Maximize This App", use_container_width=True, key="open_guide_btn"):
         st.session_state["show_guide"] = True
 
+    # ── Admin (Duane only) ────────────────────────────────────────────────────
+    if st.session_state.get("access_name") == "Duane":
+        st.markdown("---")
+        if st.button("🔐 Admin Panel", use_container_width=True, key="open_admin_btn"):
+            st.session_state["show_admin"] = True
+
     st.markdown("---")
 
     # ── Settings (collapsible) ────────────────────────────────────────────────
@@ -2464,6 +2470,64 @@ def _show_guide():
             unsafe_allow_html=True,
         )
 
+# ─── Admin dialog (Duane only) ────────────────────────────────────────────────
+@st.dialog(f"🔐 {APP_NAME} — Admin", width="large")
+def _show_admin():
+    import datetime as _dt_adm
+    st.caption(f"v{APP_VERSION} · Access code management")
+    codes = admin_get_codes()
+    now_utc = _dt_adm.datetime.utcnow().replace(tzinfo=_dt_adm.timezone.utc)
+
+    st.markdown(f"### 👥 Access Codes ({len(codes)} total)")
+    for row in codes:
+        c1, c2, c3, c4, c5, c6 = st.columns([2, 2, 1, 1, 1, 2])
+        c1.markdown(f"**{row['name']}**")
+        c2.code(row["code"])
+        c3.markdown("🟢" if row["active"] else "🔴")
+        c4.markdown(f"Uses: **{row['usage_count']}**")
+        c5.markdown(f"{(row.get('last_used') or 'Never')[:10]}")
+        exp_raw = row.get("expires_at")
+        if exp_raw:
+            try:
+                exp_dt   = _dt_adm.datetime.fromisoformat(exp_raw.replace("Z", "+00:00"))
+                days_left = (exp_dt - now_utc).days
+                if days_left < 0:
+                    c6.markdown("🔴 **Expired**")
+                elif days_left == 0:
+                    c6.markdown("🟡 **Expires today**")
+                else:
+                    c6.markdown(f"⏳ {days_left}d left ({exp_dt.strftime('%b %d')})")
+            except Exception:
+                c6.markdown(exp_raw[:10])
+        else:
+            c6.markdown("♾️ No expiry")
+        if row["active"]:
+            if st.button("Revoke", key=f"adm_rev_{row['id']}"):
+                admin_toggle_code(row["id"], False)
+                st.rerun()
+        else:
+            if st.button("Reinstate", key=f"adm_rei_{row['id']}"):
+                admin_toggle_code(row["id"], True)
+                st.rerun()
+        st.markdown("---")
+
+    st.markdown("### ➕ Create New Code")
+    n1, n2, n3, n4 = st.columns([2, 2, 1, 1])
+    new_name  = n1.text_input("Name", placeholder="e.g. John Smith", key="adm_new_name")
+    new_code  = n2.text_input("Code", value=gen_code(), key="adm_new_code")
+    trial_days = n3.number_input("Trial days", min_value=0, max_value=365, value=7, key="adm_trial")
+    if n4.button("Create", type="primary", use_container_width=True, key="adm_create"):
+        if new_name and new_code:
+            days = int(trial_days) if trial_days > 0 else None
+            if admin_insert_code(new_code.strip().upper(), new_name.strip(), trial_days=days):
+                exp_note = f" · expires in {days} days" if days else " · no expiry"
+                st.success(f"✅ Created `{new_code.upper()}` for **{new_name}**{exp_note}")
+                st.rerun()
+            else:
+                st.error("Failed — code may already exist.")
+        else:
+            st.warning("Enter a name and code.")
+
 # ─── What's New dialog ────────────────────────────────────────────────────────
 _WN_KEY = f"wn_seen_{APP_VERSION}"
 
@@ -2501,6 +2565,10 @@ if not st.session_state.get(_WN_KEY) and APP_VERSION in RELEASE_NOTES:
 if st.session_state.get("show_guide"):
     st.session_state["show_guide"] = False
     _show_guide()
+
+if st.session_state.get("show_admin") and st.session_state.get("access_name") == "Duane":
+    st.session_state["show_admin"] = False
+    _show_admin()
 
 # ─── Dashboard KPI tiles ──────────────────────────────────────────────────────
 if not is_beta and SUPABASE_URL:
@@ -4879,21 +4947,21 @@ alter table scan_cards disable row level security;"""
                             auto_sku = f"{_prev_sku_pfx}-{_prev_date_str}-{_ei+1:04d}"
                             edit_rows.append({
                                 "✓":          c.get("include", True),
-                                "#":          c["idx"] + 1,
-                                "Custom SKU": c.get("custom_sku", auto_sku),
                                 "Player":     c.get("player", ""),
-                                "Parallel":   par_display,
-                                "eBay Title": c.get("title", ""),
-                                "Sport":      c.get("sport", st.session_state.get("bx_sport","BASEBALL")),
-                                "Conf %":     f"{sim:.0f}" if sim else "?",
-                                "FMV":        fmv_display,
-                                "FMV Conf":   c.get("fmv_conf", ""),
                                 "Price ($)":  float(c.get("price") or 2.49),
-                                "Condition":  cond_label,
+                                "FMV":        fmv_display,
+                                "eBay Title": c.get("title", ""),
                                 "Graded":     c.get("graded", False),
                                 "Grader":     c.get("grader", "PSA"),
                                 "Grade":      c.get("grade", ""),
                                 "Cert #":     c.get("cert_number", ""),
+                                "Parallel":   par_display,
+                                "Condition":  cond_label,
+                                "Sport":      c.get("sport", st.session_state.get("bx_sport","BASEBALL")),
+                                "Conf %":     f"{sim:.0f}" if sim else "?",
+                                "FMV Conf":   c.get("fmv_conf", ""),
+                                "Custom SKU": c.get("custom_sku", auto_sku),
+                                "#":          c["idx"] + 1,
                                 "🔍 eBay":    ebay_url,
                             })
     
