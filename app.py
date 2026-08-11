@@ -5150,9 +5150,58 @@ alter table scan_cards disable row level security;"""
                     failed     = [c for c in raw_batch if c.get("status") != "identified"]
     
                     if failed:
-                        with st.expander(f"⚠️ {len(failed)} card(s) could not be identified"):
-                            for c in failed:
-                                st.error(f"Card {c['idx']+1} ({c['front_file']}): {c.get('error', 'Unknown error')}")
+                        st.markdown(f"#### ⚠️ {len(failed)} card(s) not matched — search to identify manually")
+                        for _fc in failed:
+                            _fi = _fc["idx"]
+                            with st.container(border=True):
+                                _fc1, _fc2 = st.columns([1, 3])
+                                with _fc1:
+                                    if _fc.get("front_url"):
+                                        st.image(_fc["front_url"], caption=f"Card {_fi+1}", use_container_width=True)
+                                    else:
+                                        st.caption(f"Card {_fi+1} — {_fc.get('front_file','')}")
+                                with _fc2:
+                                    st.caption(f"Error: {_fc.get('error','No match found')}")
+                                    _sq_key  = f"batch_manual_q_{_fi}"
+                                    _sr_key  = f"batch_manual_r_{_fi}"
+                                    _sq = st.text_input("Search by player / set / year", key=_sq_key, placeholder="e.g. Mike Trout 2011 Topps Update")
+                                    if _sq and st.button("🔍 Search", key=f"batch_manual_go_{_fi}"):
+                                        _sr = _ch_post("/v1/cards/card-search", {"search": _sq, "page": 1, "page_size": 6}) or {}
+                                        st.session_state[_sr_key] = _sr.get("cards") or _sr.get("results") or []
+                                    _candidates = st.session_state.get(_sr_key, [])
+                                    if _candidates:
+                                        st.markdown("**Pick the correct card:**")
+                                        for _cand in _candidates:
+                                            _clabel = f"{_cand.get('player','')} — {_cand.get('set','')} #{_cand.get('number','')} {_cand.get('variant','')}"
+                                            if st.button(_clabel.strip(" —"), key=f"batch_pick_{_fi}_{_cand.get('card_id','')}"):
+                                                # Update this card in raw_batch to identified
+                                                for _rb in st.session_state.raw_batch:
+                                                    if _rb.get("idx") == _fi:
+                                                        _rb.update({
+                                                            "card_id":    _cand.get("card_id",""),
+                                                            "player":     _cand.get("player",""),
+                                                            "set_name":   _cand.get("set",""),
+                                                            "number":     str(_cand.get("number","") or ""),
+                                                            "variant":    _cand.get("variant",""),
+                                                            "similarity": 0.0,
+                                                            "candidates": [],
+                                                            "status":     "identified",
+                                                            "low_conf":   False,
+                                                            "title":      _raw_title(_cand.get("player",""), _cand.get("set",""), str(_cand.get("number","") or ""), _cand.get("variant","")),
+                                                        })
+                                                        if st.session_state.get("bx_active_stack_id"):
+                                                            _sc_rows = stack_cards_get(st.session_state["bx_active_stack_id"])
+                                                            for _scr in _sc_rows:
+                                                                if _scr.get("idx") == _fi:
+                                                                    stack_card_update(_scr["id"], {
+                                                                        "player":  _rb["player"],
+                                                                        "title":   _rb["title"],
+                                                                        "status":  "identified",
+                                                                        "card_data_json": json.dumps(_rb),
+                                                                    })
+                                                        break
+                                                st.session_state.pop(_sr_key, None)
+                                                st.rerun()
     
                     if identified:
                         n_low = sum(1 for c in identified if c.get("low_conf"))
