@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.50"
+APP_VERSION = "1.5.51"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -478,6 +478,34 @@ def admin_insert_code(code, name, trial_days=None):
             "Prefer": "return=minimal",
         },
         method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=10):
+            return True
+    except Exception:
+        return False
+
+def admin_set_expiry(code_id, days):
+    import datetime as _dt_exp
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    if days and days > 0:
+        exp = _dt_exp.datetime.utcnow() + _dt_exp.timedelta(days=days)
+        payload = {"expires_at": exp.strftime("%Y-%m-%dT%H:%M:%SZ")}
+    else:
+        payload = {"expires_at": None}
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/rest/v1/access_codes?id=eq.{code_id}",
+        data=data,
+        headers={
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        },
+        method="PATCH",
     )
     try:
         with urllib.request.urlopen(req, context=ctx, timeout=10):
@@ -2530,6 +2558,20 @@ def _show_admin():
                 c6.markdown(exp_raw[:10])
         else:
             c6.markdown("♾️ No expiry")
+
+        # Expiry edit row
+        _exp_c1, _exp_c2, _exp_c3 = st.columns([2, 1, 1])
+        _exp_c1.caption("Set / extend expiry:")
+        _exp_days = _exp_c2.number_input(
+            "Days from now", min_value=0, max_value=365, value=7,
+            key=f"adm_exp_{row['id']}", label_visibility="collapsed",
+            help="0 = remove expiry (no limit)"
+        )
+        if _exp_c3.button("⏳ Set", key=f"adm_exp_save_{row['id']}"):
+            admin_set_expiry(row["id"], int(_exp_days))
+            _exp_label = f"{_exp_days} days" if _exp_days else "removed"
+            st.success(f"Expiry {_exp_label} for {row['name']}")
+            st.rerun()
 
         # Daily limit row
         _dl_cur = row.get("daily_limit") or 0
@@ -5370,15 +5412,10 @@ alter table scan_cards disable row level security;"""
                                 _grader_key = (row.get("Grader") or "PSA").strip()
                                 _grade_val  = (row.get("Grade") or "").strip()
                                 _cert_num   = (row.get("Cert #") or "").strip()
-                                _GRADER_FULL = {
-                                    "PSA": "Professional Sports Authenticator (PSA)",
-                                    "BGS": "Beckett Grading Services (BGS)",
-                                    "SGC": "Sportscard Guaranty (SGC)",
-                                    "CGC": "Certified Guaranty Company (CGC)",
-                                }
-                                _grader_full = _GRADER_FULL.get(_grader_key, _grader_key) if _is_graded else ""
-                                _grade_export = _grade_val if _is_graded else ""
-                                _cert_export  = _cert_num  if _is_graded else ""
+                                # eBay descriptor 27501 wants short codes, not full names
+                                _grader_full  = _grader_key if _is_graded else ""
+                                _grade_export = _grade_val  if _is_graded else ""
+                                _cert_export  = _cert_num   if _is_graded else ""
                                 # Custom SKU: use what's in the table (user may have edited it)
                                 _sx_sku_name = _sx_sku.split("-")[0] if _sx_sku else "DFS"
                                 sku      = (row.get("Custom SKU") or "").strip() or f"{_sx_sku_name}-{date_str}-{export_idx:04d}"
@@ -5446,6 +5483,11 @@ alter table scan_cards disable row level security;"""
                                     _grade_suffix = f"{_grader_key} {_grade_val}"
                                     final_title = f"{final_title[:80 - len(_grade_suffix) - 1]} {_grade_suffix}"[:80]
 
+                                # Graded cards use condition 3000; Card Condition descriptor
+                                # (40001) must be blank — it conflicts with grader/grade fields.
+                                _export_cond_id = "3000" if _is_graded else cond_id
+                                _export_cond_sp = ""     if _is_graded else cond_sp
+
                                 writer.writerow({
                                     ACTION_COL:                               "Add",
                                     "Custom label (SKU)":                     sku,
@@ -5453,11 +5495,11 @@ alter table scan_cards disable row level security;"""
                                     "Category name":                          "Sports Trading Cards",
                                     "Title":                                  final_title,
                                     "Schedule Time":                          _schedule_time,
-                                    "Condition ID":                           cond_id,
+                                    "Condition ID":                           _export_cond_id,
                                     "CD:Professional Grader - (ID: 27501)":   _grader_full,
                                     "CD:Grade - (ID: 27502)":                 _grade_export,
                                     "CDA:Certification Number - (ID: 27503)": _cert_export,
-                                    "CD:Card Condition - (ID: 40001)":        cond_sp,
+                                    "CD:Card Condition - (ID: 40001)":        _export_cond_sp,
                                     "Item photo URL":                         pic_url,
                                     "Description":                            desc,
                                     "Format":                                 "FixedPrice",
