@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.53"
+APP_VERSION = "1.5.54"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -23,6 +23,37 @@ APP_TAGLINE = "Real-time market intelligence for card sellers."
 
 # Daily cap on live CardHedger look-ups per member (protects the API budget).
 DAILY_PRICING_CAP = 50
+
+# eBay File Exchange condition descriptor option IDs for category 261328 (Sports Trading Cards).
+# Values MUST be in the format "Display Name - (ID: XXXXXX)" — eBay rejects bare strings.
+# Source: Card Dealer Pro export (verified working Aug 2026). Add graders/grades as needed.
+EBAY_GRADER_VALUES = {
+    "PSA":  "Professional Sports Authenticator (PSA) - (ID: 275010)",
+    "BGS":  "Beckett Grading Services (BGS) - (ID: 275011)",
+    "SGC":  "SGC - (ID: 275012)",
+    "CGC":  "CGC Cards - (ID: 275013)",
+    "CSG":  "CSG - (ID: 275014)",
+    "HGA":  "Hybrid Grading Approach (HGA) - (ID: 275015)",
+}
+# Grade option IDs — 10 confirmed from Card Dealer Pro; others follow sequential pattern.
+# If a grade upload errors with 21920352, find its ID in eBay's GetItemConditionDescriptors.
+EBAY_GRADE_VALUES = {
+    "10":   "10 - (ID: 275020)",
+    "9.5":  "9.5 - (ID: 275021)",
+    "9":    "9 - (ID: 275022)",
+    "8.5":  "8.5 - (ID: 275023)",
+    "8":    "8 - (ID: 275024)",
+    "7.5":  "7.5 - (ID: 275025)",
+    "7":    "7 - (ID: 275026)",
+    "6":    "6 - (ID: 275027)",
+    "5":    "5 - (ID: 275028)",
+    "4":    "4 - (ID: 275029)",
+    "3":    "3 - (ID: 275030)",
+    "2":    "2 - (ID: 275031)",
+    "1.5":  "1.5 - (ID: 275032)",
+    "1":    "1 - (ID: 275033)",
+    "A":    "Authentic - (ID: 275034)",
+}
 
 RELEASE_NOTES = {
     "1.5.30": {
@@ -1510,6 +1541,8 @@ def ch_image_match(image_b64):
 
 _CLAUDE_CARD_PROMPT = """You are a professional trading card expert. Identify this trading card from the image.
 
+IMPORTANT: If the card is inside a graded slab (PSA, BGS, SGC, CGC, etc.), read the label carefully for the grader name, grade number, and certification/serial number.
+
 Return ONLY a valid JSON object with these exact fields — no prose, no markdown fences:
 {
   "player": "Full player/subject name exactly as printed on the card",
@@ -1522,10 +1555,15 @@ Return ONLY a valid JSON object with these exact fields — no prose, no markdow
   "numbered": "Print run if visible on card (e.g. /99, /250). Empty string if not visible.",
   "rookie": true or false,
   "team": "Team name as shown on card",
-  "notes": "Any other notable details: RC, 1st Bowman, autograph, relic, etc."
+  "notes": "Any other notable details: RC, 1st Bowman, autograph, relic, etc.",
+  "graded": true or false,
+  "grader": "PSA, BGS, SGC, CGC, or empty string if not in a graded slab",
+  "grade": "Numeric grade from slab label (e.g. 10, 9.5, 9) — just the number, no grader prefix. Empty string if not graded.",
+  "cert_number": "Certification/serial number printed on the slab label. Empty string if not graded or not visible."
 }
 
 Read the card carefully — player name, year, set name, card number are usually printed directly on the card.
+For graded slabs: the grader logo (PSA/BGS/SGC/CGC) and grade number appear prominently on the label; the cert number is a long numeric code (e.g. 12345678).
 Only report what you can actually see. Use empty string for anything you cannot read clearly."""
 
 def claude_identify_card(image_b64: str, media_type: str = "image/jpeg") -> dict:
@@ -4817,26 +4855,66 @@ alter table scan_cards disable row level security;"""
                     if _pre_identified:
                         st.info(f"📦 **{len(_pre_identified)} card{'s' if len(_pre_identified) != 1 else ''} in your batch** — scroll down past the uploader to review, price, and export.")
 
-                # ── Step 1: Upload ─────────────────────────────────────────
+                # ── Step 1: Select cards to scan ───────────────────────────
+                st.markdown("### Select cards to scan")
+
+                # Card Type selection
+                st.markdown("**Card Type**")
+                _batch_card_type = st.session_state.get("batch_card_type", "raw")
+                _ct_col1, _ct_col2 = st.columns(2)
+                with _ct_col1:
+                    _ct_raw_border = "2px solid #1a73e8" if _batch_card_type == "raw" else "2px solid #ddd"
+                    _ct_raw_bg     = "#f0f4ff" if _batch_card_type == "raw" else "transparent"
+                    st.markdown(f'<div style="border:{_ct_raw_border};border-radius:8px;padding:14px 16px;background:{_ct_raw_bg};margin-bottom:8px;"><strong>● RAW (Not Graded)</strong></div>', unsafe_allow_html=True)
+                    if st.button("Select RAW", key="ct_raw_btn", use_container_width=True, type="primary" if _batch_card_type == "raw" else "secondary"):
+                        st.session_state["batch_card_type"] = "raw"
+                        st.rerun()
+                with _ct_col2:
+                    _ct_gr_border = "2px solid #1a73e8" if _batch_card_type == "graded" else "2px solid #ddd"
+                    _ct_gr_bg     = "#f0f4ff" if _batch_card_type == "graded" else "transparent"
+                    st.markdown(f'<div style="border:{_ct_gr_border};border-radius:8px;padding:14px 16px;background:{_ct_gr_bg};margin-bottom:8px;"><strong>○ Graded</strong></div>', unsafe_allow_html=True)
+                    if st.button("Select Graded", key="ct_graded_btn", use_container_width=True, type="primary" if _batch_card_type == "graded" else "secondary"):
+                        st.session_state["batch_card_type"] = "graded"
+                        st.rerun()
+                _batch_card_type = st.session_state.get("batch_card_type", "raw")
+
+                st.markdown("---")
+
+                # ── Step 2: Upload files ────────────────────────────────────
+                st.markdown("### Upload your cards")
+                st.markdown("""
+                <div style="border:1px solid #ddd;border-radius:10px;padding:14px 16px;margin-bottom:12px;background:#fafafa;">
+                <p style="font-size:0.9em;margin:0 0 6px 0;font-weight:600;">📋 How to upload</p>
+                <p style="font-size:0.85em;color:#555;margin:0 0 4px 0;">Select all images at once — fronts and backs interleaved in order:</p>
+                <code style="font-size:0.8em;background:#f0f0f0;padding:2px 6px;border-radius:4px;margin-right:4px;">card-01-front.jpg</code>
+                <code style="font-size:0.8em;background:#f0f0f0;padding:2px 6px;border-radius:4px;margin-right:4px;">card-01-back.jpg</code>
+                <code style="font-size:0.8em;background:#f0f0f0;padding:2px 6px;border-radius:4px;margin-right:4px;">card-02-front.jpg</code>
+                <code style="font-size:0.8em;background:#f0f0f0;padding:2px 6px;border-radius:4px;">card-02-back.jpg</code>
+                <p style="font-size:0.8em;color:#888;margin:8px 0 0 0;">Up to 50 cards (100 images) recommended per batch. Front &amp; back required for eBay listings.</p>
+                </div>""", unsafe_allow_html=True)
+
                 all_files = st.file_uploader(
-                    "📷 Drop all card scans here (front + back interleaved: front1, back1, front2, back2…)",
+                    "📷 Drop all card images here",
                     type=["jpg", "jpeg", "png", "tif", "tiff"],
                     accept_multiple_files=True,
                     key="raw_all_files",
-                    help="Select all images at once — Cmd+A in Finder or drag the whole folder. Odd files = fronts, even files = backs.",
+                    help="Select all images at once in front/back order. Cmd+A in Finder or drag the whole folder.",
                 )
-    
+
                 n_files = len(all_files) if all_files else 0
-    
+
                 if n_files > 0:
                     if n_files % 2 != 0:
-                        st.warning(f"⚠️ {n_files} images selected — need an even number (one front + one back per card). Got {n_files // 2} pairs + 1 leftover.")
-    
-                    n_pairs = n_files // 2
-                    front_files = all_files[0::2]   # indices 0, 2, 4 …
-                    back_files  = all_files[1::2]   # indices 1, 3, 5 …
-    
-                    st.success(f"✅ {n_pairs} card pair{'s' if n_pairs != 1 else ''} detected")
+                        st.warning(f"⚠️ {n_files} images selected — need an even number (one front + one back per card). Got {n_files // 2} complete pairs + 1 leftover.")
+
+                    n_pairs     = n_files // 2
+                    front_files = all_files[0::2]
+                    back_files  = all_files[1::2]
+
+                    if n_pairs > 50:
+                        st.warning(f"⚠️ {n_pairs} cards selected — 50 per batch recommended for best results.")
+
+                    st.success(f"✅ {n_pairs} card{'s' if n_pairs != 1 else ''} ready (front + back)")
     
                     # Paired thumbnail preview — front and back side by side, compact
                     from PIL import Image as _PIL_Image
@@ -4862,10 +4940,10 @@ alter table scan_cards disable row level security;"""
                             st.session_state.raw_batch_rots[fkey] = 0
                         if bkey not in st.session_state.raw_batch_rots:
                             st.session_state.raw_batch_rots[bkey] = 0
-    
+
                         fb = _rotated_bytes(front_files[ci].getvalue(), st.session_state.raw_batch_rots[fkey])
                         bb = _rotated_bytes(back_files[ci].getvalue(), st.session_state.raw_batch_rots[bkey])
-    
+
                         col_f, col_b, col_rf, col_rb, _sp = st.columns([3, 3, 1, 1, 4])
                         with col_f:
                             st.image(fb, caption=f"#{ci+1} Front", use_container_width=True)
@@ -4883,18 +4961,20 @@ alter table scan_cards disable row level security;"""
                             if st.button("↻", key=f"rbbtn_{ci}", help="Rotate back"):
                                 st.session_state.raw_batch_rots[bkey] = (st.session_state.raw_batch_rots[bkey] + 90) % 360
                                 st.rerun()
-    
+
                     if n_pairs > 6:
                         st.caption(f"+ {n_pairs - 6} more pairs not shown")
-    
+
                     st.markdown("---")
-                    if st.button(f"🔍 Identify & Price All ({n_pairs} cards)", type="primary", key="raw_batch_go", disabled=n_pairs == 0):
+                    _scan_btn_label = f"🔍 Identify & Price All ({n_pairs} card{'s' if n_pairs != 1 else ''})"
+                    if st.button(_scan_btn_label, type="primary", key="raw_batch_go", disabled=n_pairs == 0):
                             st.session_state.raw_batch = []
                             st.session_state.raw_batch_comps = {}
                             prog    = st.progress(0.0)
                             status  = st.empty()
                             cards   = []
-    
+                            _graded_upfront = _batch_card_type == "graded"
+
                             # Phase 1: upload + image-match (one card at a time)
                             for i, (ff, bf) in enumerate(zip(front_files, back_files)):
                                 status.text(f"Identifying card {i+1}/{n_pairs}: {ff.name}…")
@@ -4906,14 +4986,14 @@ alter table scan_cards disable row level security;"""
                                     "error":        "",
                                     "include":      True,
                                     "condition_id": "2750",
+                                    "graded":       _graded_upfront,
                                 }
                                 try:
-                                    # Apply any user rotations before upload + match
                                     _frot = st.session_state.raw_batch_rots.get(f"rot_f_{i}", 0)
                                     _brot = st.session_state.raw_batch_rots.get(f"rot_b_{i}", 0)
                                     _front_bytes = _rotated_bytes(ff.getvalue(), _frot)
                                     _back_bytes  = _rotated_bytes(bf.getvalue(), _brot)
-    
+
                                     front_url, front_path = _scan_upload_to_supabase(_front_bytes, f"f_{i}_{ff.name}")
                                     back_url,  back_path  = _scan_upload_to_supabase(_back_bytes,  f"b_{i}_{bf.name}")
                                     c["front_url"]  = front_url
@@ -4923,8 +5003,41 @@ alter table scan_cards disable row level security;"""
     
                                     # Send as base64 to avoid URL accessibility issues
                                     _front_b64 = base64.b64encode(_front_bytes).decode()
-    
-                                    # Try image-match first (AI-powered)
+
+                                    # Step 1: cert OCR — auto-detects graded slabs.
+                                    # If the image has a PSA/BGS/SGC/CGC label, returns
+                                    # grader, grade, cert number, and card identity.
+                                    _cert_ocr  = ch_cert_ocr(front_url)
+                                    _cert_info = _cert_ocr.get("cert_info") or {}
+                                    if _cert_info.get("cert") or _cert_info.get("grade"):
+                                        _ocr_grade = str(_cert_info.get("grade", "") or "").strip()
+                                        for _pfx in ("PSA ", "BGS ", "SGC ", "CGC "):
+                                            if _ocr_grade.upper().startswith(_pfx):
+                                                _ocr_grade = _ocr_grade[len(_pfx):]
+                                                break
+                                        _ocr_grader = str(_cert_info.get("grader", "") or "").strip().upper() or "PSA"
+                                        c.update({
+                                            "graded":      True,
+                                            "grader":      _ocr_grader,
+                                            "grade":       _ocr_grade,
+                                            "cert_number": str(_cert_info.get("cert", "") or "").strip(),
+                                        })
+                                        _ocr_card = _cert_ocr.get("card") or {}
+                                        if _ocr_card.get("player"):
+                                            c.update({
+                                                "card_id":    _ocr_card.get("card_id", ""),
+                                                "player":     _ocr_card.get("player", ""),
+                                                "set_name":   _ocr_card.get("set", ""),
+                                                "number":     str(_ocr_card.get("number", "") or ""),
+                                                "variant":    _ocr_card.get("variant", ""),
+                                                "similarity": 95.0,
+                                                "candidates": [],
+                                                "status":     "identified",
+                                                "low_conf":   False,
+                                            })
+                                            c["title"] = _raw_title(c["player"], c["set_name"], c["number"], c.get("variant", ""))
+
+                                    # Step 2: image-match (AI-powered) for card identity
                                     match_res  = _ch_post("/v1/cards/image-match", {"image_base64": _front_b64, "k": 5}) or {}
                                     best       = match_res.get("best_match") or {}
                                     candidates = match_res.get("candidates") or []
@@ -5253,6 +5366,58 @@ alter table scan_cards disable row level security;"""
                         edited_records = edited.to_dict("records")
                         n_included = sum(1 for r in edited_records if r.get("✓"))
 
+                        # ── Auto-fill grading info from cert numbers ──────────────
+                        # Finds rows where Graded=True + Cert # filled + Grade missing,
+                        # looks up the grade via CardHedger/PSA API, and updates raw_batch.
+                        _needs_grade = [(i, r) for i, r in enumerate(edited_records)
+                                        if r.get("Graded") and (r.get("Cert #") or "").strip()
+                                        and not (r.get("Grade") or "").strip()]
+                        if _needs_grade:
+                            if st.button(f"🎫 Auto-fill grade for {len(_needs_grade)} card(s) from cert #",
+                                         key="autofill_grade_btn", type="secondary"):
+                                _fill_prog = st.progress(0.0)
+                                for _fi, (_gi, _gr) in enumerate(_needs_grade):
+                                    _fill_prog.progress((_fi + 1) / len(_needs_grade))
+                                    _fc = (_gr.get("Cert #") or "").strip()
+                                    _fg = (_gr.get("Grader") or "PSA").strip()
+                                    try:
+                                        # Try CardHedger cert lookup first
+                                        _fcr  = ch_prices_by_cert(_fc, _fg, 90)
+                                        _fci  = (_fcr or {}).get("cert_info") or {}
+                                        _fgrade = str(_fci.get("grade", "") or "").strip()
+                                        for _pfx in ("PSA ", "BGS ", "SGC ", "CGC "):
+                                            if _fgrade.upper().startswith(_pfx):
+                                                _fgrade = _fgrade[len(_pfx):]
+                                                break
+                                        # Fall back to PSA API if CardHedger didn't return grade
+                                        if not _fgrade and _fg.upper() == "PSA":
+                                            import urllib.request as _ur_fg, json as _json_fg
+                                            _psa_req = _ur_fg.Request(
+                                                f"https://api.psacard.com/publicapi/cert/GetByCertNumber/{_fc}",
+                                                headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
+                                            )
+                                            with _ur_fg.urlopen(_psa_req, timeout=8) as _pr:
+                                                _pci = _json_fg.loads(_pr.read().decode()).get("PSACert") or {}
+                                            _raw_pg = str(_pci.get("PSAGrade", "") or "").strip()
+                                            for _pfx in ("PSA ", "BGS ", "SGC ", "CGC "):
+                                                if _raw_pg.upper().startswith(_pfx):
+                                                    _raw_pg = _raw_pg[len(_pfx):]
+                                                    break
+                                            _fgrade = _raw_pg
+                                        if _fgrade:
+                                            # Update the matching raw_batch card
+                                            _card_idx = _gr.get("#", _gi + 1) - 1
+                                            for _bc in st.session_state.raw_batch:
+                                                if _bc.get("idx") == _card_idx or _bc.get("cert_number") == _fc:
+                                                    _bc["grade"]  = _fgrade
+                                                    _bc["graded"] = True
+                                                    _bc["grader"] = _fg
+                                                    break
+                                    except Exception:
+                                        pass
+                                _fill_prog.empty()
+                                st.rerun()
+
                         # PSA image fetch — only show when graded cards are in the batch
                         _graded_rows = [(i, r) for i, r in enumerate(edited_records) if r.get("✓") and r.get("Graded") and (r.get("Cert #") or "").strip()]
                         if _graded_rows:
@@ -5306,12 +5471,15 @@ alter table scan_cards disable row level security;"""
                             return m.group() if m else ""
     
                         # Condition ID → eBay item specific value
+                        # CD:Card Condition (40001) option IDs for raw (ungraded) cards.
+                        # 4000→400011 confirmed from Card Dealer Pro export Aug 2026.
+                        # Others estimated sequentially — update if eBay rejects them.
                         _COND_SPECIFIC = {
-                            "2750": "400010",  # NM
-                            "3000": "400020",  # EX
-                            "4000": "400030",  # VG
-                            "5000": "400040",  # G
-                            "6000": "400050",  # Poor
+                            "2750": "400010",  # NM or Better (estimated)
+                            "3000": "400010",  # Excellent (estimated — same tier as NM)
+                            "4000": "400011",  # Very Good — CONFIRMED
+                            "5000": "400011",  # Good (estimated)
+                            "6000": "400011",  # Poor (estimated)
                         }
     
                         ACTION_COL = "*Action(SiteID=US|Country=US|Currency=USD|Version=1193)"
@@ -5321,8 +5489,6 @@ alter table scan_cards disable row level security;"""
                             "Title", "Relationship", "Relationship details", "Schedule Time",
                             "P:UPC", "P:EPID", "Start price", "Quantity", "Item photo URL",
                             "VideoID", "Condition ID",
-                            "CD:Professional Grader - (ID: 27501)", "CD:Grade - (ID: 27502)",
-                            "CDA:Certification Number - (ID: 27503)", "CD:Card Condition - (ID: 40001)",
                             "Description", "Format", "Duration", "Buy It Now price",
                             "Best Offer Enabled", "Best Offer Auto Accept Price", "Minimum Best Offer Price",
                             "Immediate pay required", "Location",
@@ -5335,6 +5501,9 @@ alter table scan_cards disable row level security;"""
                             "C:Sport", "C:Player/Athlete", "C:Manufacturer", "C:Season",
                             "C:Parallel/Variety", "C:Features", "C:Set", "C:Team", "C:League",
                             "C:Autographed", "C:Card Name", "C:Card Number", "C:Type",
+                            "CD:Professional Grader - (ID: 27501)", "CD:Grade - (ID: 27502)",
+                            "CDA:Certification Number - (ID: 27503)", "CD:Card Condition - (ID: 40001)",
+                            "C:Graded",
                             "Product Safety Pictograms", "Product Safety Statements", "Product Safety Component",
                             "Regulatory Document Ids",
                             "Manufacturer Name", "Manufacturer AddressLine1", "Manufacturer AddressLine2",
@@ -5349,8 +5518,16 @@ alter table scan_cards disable row level security;"""
                             "Responsible Person 1 ContactURL",
                         ]
     
+                        # Block export if Duane has graded cards without Grade filled
+                        _is_duane_export = st.session_state.get("access_name") == "Duane"
+                        _grade_warnings = [r.get("Player","Card") for r in edited_records
+                                           if r.get("✓") and r.get("Graded") and not (r.get("Grade") or "").strip()] if _is_duane_export else []
+                        if _grade_warnings:
+                            st.error(f"⛔ Cannot export — {len(_grade_warnings)} graded card(s) are missing a Grade: **{', '.join(_grade_warnings)}**. Fill in the Grade column or use the 🎫 Auto-fill button above.")
+
                         ex_c1, ex_c2 = st.columns([2, 1])
-                        if ex_c1.button(f"⬇️ Export eBay CSV ({n_included} cards)", type="primary", key="raw_export_btn"):
+                        if ex_c1.button(f"⬇️ Export eBay CSV ({n_included} cards)", type="primary", key="raw_export_btn",
+                                        disabled=bool(_grade_warnings)):
                             import datetime as _dt_exp
                             date_str   = _dt_exp.date.today().strftime("%m%d%y")
                             export_idx = 1
@@ -5412,13 +5589,14 @@ alter table scan_cards disable row level security;"""
                                 _grader_key = (row.get("Grader") or "PSA").strip()
                                 _grade_val  = (row.get("Grade") or "").strip()
                                 _cert_num   = (row.get("Cert #") or "").strip()
-                                # CD:27501 (grader) and CD:27502 (grade) are NOT supported
-                                # by File Exchange for category 261328 — they cause error 21920352.
-                                # Grading info is already in the title ("PSA 10"). Cert # is a
-                                # different field type (CDA:) and is safe to include.
-                                _grader_full  = ""
-                                _grade_export = ""
-                                _cert_export  = _cert_num if _is_graded else ""
+                                # CD: graded-card fields (27501/27502) only active for Duane
+                                # until the eBay option ID mapping is fully verified.
+                                _graded_export_enabled = st.session_state.get("access_name") == "Duane"
+                                _has_grade  = bool(_is_graded and _grade_val and _graded_export_enabled)
+                                _cd_grader  = EBAY_GRADER_VALUES.get(_grader_key, _grader_key) if _has_grade else ""
+                                _cd_grade   = EBAY_GRADE_VALUES.get(str(_grade_val), f"{_grade_val} - (ID: 275020)") if _has_grade else ""
+                                _cd_cert    = _cert_num if _has_grade else ""
+                                _c_graded   = "Yes" if _is_graded else ""
                                 # Custom SKU: use what's in the table (user may have edited it)
                                 _sx_sku_name = _sx_sku.split("-")[0] if _sx_sku else "DFS"
                                 sku      = (row.get("Custom SKU") or "").strip() or f"{_sx_sku_name}-{date_str}-{export_idx:04d}"
@@ -5486,11 +5664,10 @@ alter table scan_cards disable row level security;"""
                                     _grade_suffix = f"{_grader_key} {_grade_val}"
                                     final_title = f"{final_title[:80 - len(_grade_suffix) - 1]} {_grade_suffix}"[:80]
 
-                                # Graded cards: always use 2750 (NM or Better — the only valid
-                                # condition for graded slabs in category 261328). Card Condition
-                                # descriptor (40001) must be blank — conflicts with grader/grade.
-                                _export_cond_id = "2750" if _is_graded else cond_id
-                                _export_cond_sp = ""     if _is_graded else cond_sp
+                                # Graded slabs: force condition 2750 (NM or Better) ONLY when
+                                # both grader and grade are populated — eBay requires 27501+27502
+                                # whenever condition 2750 is used in category 261328.
+                                _export_cond_id = "2750" if _has_grade else cond_id
 
                                 writer.writerow({
                                     ACTION_COL:                               "Add",
@@ -5500,10 +5677,6 @@ alter table scan_cards disable row level security;"""
                                     "Title":                                  final_title,
                                     "Schedule Time":                          _schedule_time,
                                     "Condition ID":                           _export_cond_id,
-                                    "CD:Professional Grader - (ID: 27501)":   _grader_full,
-                                    "CD:Grade - (ID: 27502)":                 _grade_export,
-                                    "CDA:Certification Number - (ID: 27503)": _cert_export,
-                                    "CD:Card Condition - (ID: 40001)":        _export_cond_sp,
                                     "Item photo URL":                         pic_url,
                                     "Description":                            desc,
                                     "Format":                                 "FixedPrice",
@@ -5536,6 +5709,11 @@ alter table scan_cards disable row level security;"""
                                     "C:Card Name":                            player,
                                     "C:Card Number":                          number,
                                     "C:Type":                                 "Sports Trading Card",
+                                    "CD:Professional Grader - (ID: 27501)":   _cd_grader,
+                                    "CD:Grade - (ID: 27502)":                 _cd_grade,
+                                    "CDA:Certification Number - (ID: 27503)": _cd_cert,
+                                    "CD:Card Condition - (ID: 40001)":        "" if _has_grade else cond_sp,
+                                    "C:Graded":                               _c_graded,
                                 })
                                 export_idx += 1
                             csv_bytes = buf.getvalue().encode("utf-8")
@@ -8767,14 +8945,16 @@ with tab10:
             # ── eBay import ───────────────────────────────────────────────────
             with imp_ebay:
                 st.markdown("### Import eBay Sales")
+                st.info(
+                    "✅ **Recommended: Orders Report** — Seller Hub → Orders → Sold → Download Report → **Orders report**\n\n"
+                    "Uses actual Final Value Fees and includes SKU/lot data for automatic lot matching. **This is the best file to upload.**"
+                )
                 st.caption(
-                    "Accepts **three formats** — auto-detected on upload:\n\n"
-                    "• **Orders Report** *(recommended)* — Seller Hub → Orders → Sold → Download → Orders report. "
-                    "Uses actual Final Value Fees — most accurate.\n\n"
+                    "Also accepts two other formats (auto-detected on upload):\n\n"
                     "• **Seller Hub Transactions Report** — Seller Hub → Reports → Downloads → Transactions report. "
-                    "Fees are estimated at 12.35% + $0.40 (sales over $10) or $0.30 (under $10).\n\n"
+                    "Fees are estimated at 12.35% + $0.40 (sales over $10) or $0.30 (under $10). No lot matching.\n\n"
                     "• **eBay Financial Ledger** — Payments → Transactions → Download (TransactionType / GrossAmount / Fees / NetAmount columns). "
-                    "Uses your actual eBay fees — more accurate."
+                    "Uses actual eBay fees but has no SKU data — no lot matching."
                 )
                 ebay_file = st.file_uploader("eBay Orders / Transactions / Ledger CSV", type=["csv"], key="sal_ebay_file")
                 if ebay_file:
