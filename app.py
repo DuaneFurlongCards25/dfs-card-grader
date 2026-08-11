@@ -5111,8 +5111,13 @@ alter table scan_cards disable row level security;"""
                             n_ok  = sum(1 for c in cards if c["status"] == "identified")
                             n_err = len(cards) - n_ok
                             status.text(f"Done — {n_ok} identified, {n_err} failed.")
-                            st.session_state.raw_batch = cards
-                            # Persist to Supabase under active stack
+                            # Append to existing batch — don't replace (lot may already have cards)
+                            existing_batch = st.session_state.raw_batch or []
+                            _idx_offset = len(existing_batch)
+                            for _c in cards:
+                                _c["idx"] = _idx_offset + _c["idx"]
+                            st.session_state.raw_batch = existing_batch + cards
+                            # Persist to Supabase under active stack (upsert on stack_id+idx — safe)
                             if st.session_state.get("bx_active_stack_id"):
                                 for _psc in cards:
                                     stack_card_upsert({
@@ -5130,7 +5135,7 @@ alter table scan_cards disable row level security;"""
                                         "card_data_json": json.dumps(_psc),
                                     })
                                 stack_update(st.session_state["bx_active_stack_id"],
-                                             {"total_cards": len(cards)})
+                                             {"total_cards": len(st.session_state.raw_batch)})
                                 st.session_state["bx_stacks_cache"] = None
                             st.rerun()
     
