@@ -15,11 +15,11 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.40"
+APP_VERSION = "1.5.41"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
-APP_NAME = "Card Grader Pro"
-APP_TAGLINE = "Gem rate research + grading ROI calculator"
+APP_NAME = "The CardPulse™"
+APP_TAGLINE = "Real-time market intelligence for card sellers."
 
 # Daily cap on live CardHedger look-ups per member (protects the API budget).
 DAILY_PRICING_CAP = 50
