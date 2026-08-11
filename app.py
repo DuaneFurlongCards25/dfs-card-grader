@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.52"
+APP_VERSION = "1.5.53"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -5412,10 +5412,13 @@ alter table scan_cards disable row level security;"""
                                 _grader_key = (row.get("Grader") or "PSA").strip()
                                 _grade_val  = (row.get("Grade") or "").strip()
                                 _cert_num   = (row.get("Cert #") or "").strip()
-                                # eBay descriptor 27501 wants short codes, not full names
-                                _grader_full  = _grader_key if _is_graded else ""
-                                _grade_export = _grade_val  if _is_graded else ""
-                                _cert_export  = _cert_num   if _is_graded else ""
+                                # CD:27501 (grader) and CD:27502 (grade) are NOT supported
+                                # by File Exchange for category 261328 — they cause error 21920352.
+                                # Grading info is already in the title ("PSA 10"). Cert # is a
+                                # different field type (CDA:) and is safe to include.
+                                _grader_full  = ""
+                                _grade_export = ""
+                                _cert_export  = _cert_num if _is_graded else ""
                                 # Custom SKU: use what's in the table (user may have edited it)
                                 _sx_sku_name = _sx_sku.split("-")[0] if _sx_sku else "DFS"
                                 sku      = (row.get("Custom SKU") or "").strip() or f"{_sx_sku_name}-{date_str}-{export_idx:04d}"
