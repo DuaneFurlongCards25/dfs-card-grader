@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.37"
+APP_VERSION = "1.5.38"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "Card Grader Pro"
@@ -4800,6 +4800,46 @@ alter table scan_cards disable row level security;"""
                         st.caption("✏️ Edit the **Your Price** column above to set your sell price per card before exporting.")
                         edited_records = edited.to_dict("records")
                         n_included = sum(1 for r in edited_records if r.get("✓"))
+
+                        # PSA image fetch — only show when graded cards are in the batch
+                        _graded_rows = [(i, r) for i, r in enumerate(edited_records) if r.get("✓") and r.get("Graded") and (r.get("Cert #") or "").strip()]
+                        if _graded_rows:
+                            _psa_img_cache = st.session_state.get("psa_image_cache", {})
+                            _psa_fetch_col1, _psa_fetch_col2 = st.columns([2, 2])
+                            if _psa_fetch_col1.button("📸 Fetch PSA Images", key="fetch_psa_images_btn",
+                                                      help="Pulls card images from PSA by cert number — uses them as eBay photo URLs"):
+                                import urllib.request as _ur
+                                import json as _json_psa
+                                _fetched = 0
+                                _failed  = []
+                                for _gi, _gr in _graded_rows:
+                                    _cert = (_gr.get("Cert #") or "").strip()
+                                    if not _cert or _cert in _psa_img_cache:
+                                        continue
+                                    try:
+                                        _req = _ur.Request(
+                                            f"https://api.psacard.com/publicapi/cert/GetByCertNumber/{_cert}",
+                                            headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
+                                        )
+                                        with _ur.urlopen(_req, timeout=8) as _resp:
+                                            _data = _json_psa.loads(_resp.read().decode())
+                                        _img = (_data.get("PSACert") or {}).get("ImageURL") or \
+                                               (_data.get("PSACert") or {}).get("FrontImageURL") or ""
+                                        if _img:
+                                            _psa_img_cache[_cert] = _img
+                                            _fetched += 1
+                                        else:
+                                            _failed.append(_cert)
+                                    except Exception as _e:
+                                        _failed.append(f"{_cert} ({_e})")
+                                st.session_state["psa_image_cache"] = _psa_img_cache
+                                if _fetched:
+                                    st.success(f"✅ Fetched images for {_fetched} cert(s)")
+                                if _failed:
+                                    st.warning(f"Could not fetch: {', '.join(_failed)}")
+                            _cached_certs = [r.get("Cert #","").strip() for _,r in _graded_rows if (r.get("Cert #","").strip() in st.session_state.get("psa_image_cache",{}))]
+                            if _cached_certs:
+                                _psa_fetch_col2.success(f"📸 PSA images ready for {len(_cached_certs)} cert(s)")
     
                         # Helper: parse manufacturer and year from set_name
                         def _mfr(set_name):
@@ -4933,7 +4973,13 @@ alter table scan_cards disable row level security;"""
                                 sku      = (row.get("Custom SKU") or "").strip() or f"{_sx_sku}-{date_str}-{export_idx:04d}"
                                 front_u  = orig.get("front_url", "")
                                 back_u   = orig.get("back_url", "")
-                                pic_url  = f"{front_u}|{back_u}" if back_u else front_u
+                                # Graded: prefer PSA image if fetched
+                                _psa_img_cache = st.session_state.get("psa_image_cache", {})
+                                _psa_img = _psa_img_cache.get(_cert_num, "") if _is_graded and _cert_num else ""
+                                if _psa_img:
+                                    pic_url = _psa_img
+                                else:
+                                    pic_url = f"{front_u}|{back_u}" if back_u else front_u
                                 player   = orig.get("player", "")
                                 set_n    = orig.get("set_name", "")
                                 number   = orig.get("number", "")
