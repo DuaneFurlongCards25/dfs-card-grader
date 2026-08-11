@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.42"
+APP_VERSION = "1.5.43"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -2281,65 +2281,188 @@ def gem_signal(g):
 is_beta = st.session_state.get("is_beta", False)
 
 with st.sidebar:
-    st.markdown(f"## 💎 {APP_NAME}")
-    st.caption(f"Gem rate research + grading ROI calculator · v{APP_VERSION}")
+    # ── Branding ──────────────────────────────────────────────────────────────
+    st.markdown(
+        f"""
+        <div style="padding:14px 4px 10px 4px;">
+          <div style="font-size:1.25rem;font-weight:800;letter-spacing:-0.5px;color:#e2e8f0;">
+            {APP_NAME}
+          </div>
+          <div style="font-size:0.72rem;color:#94a3b8;margin-top:3px;font-style:italic;">
+            {APP_TAGLINE}
+          </div>
+          <div style="font-size:0.65rem;color:#475569;margin-top:5px;">v{APP_VERSION}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     access_name = st.session_state.get("access_name", "")
     if access_name:
         if is_beta:
             st.markdown(f"👤 **{access_name}** &nbsp; `BETA`")
             _exp = st.session_state.get("trial_expires_label", "")
-            st.info(f"🔓 Beta Preview — Card Research & Inventory Check unlocked.{' ' + _exp if _exp else ''}", icon="ℹ️")
+            st.info(f"🔓 Beta Preview unlocked.{' ' + _exp if _exp else ''}", icon="ℹ️")
         else:
-            st.markdown(f"👤 **{access_name}**")
-    st.markdown("---")
-    st.markdown("### ⚙️ Settings")
-    roi_target = st.number_input("ROI target (×)", min_value=1.0, max_value=20.0, value=4.0, step=0.5)
-    min_gem = st.number_input("Min gem rate (%)", min_value=0.0, max_value=100.0, value=40.0, step=5.0)
-    default_tier = st.selectbox("Default grading tier", list(PSA_FEES.keys()), index=0)
+            st.markdown(
+                f'<div style="font-size:0.8rem;color:#94a3b8;padding:2px 0 10px 0;">👤 {access_name}</div>',
+                unsafe_allow_html=True,
+            )
 
     st.markdown("---")
-    st.markdown("**📦 Shipping Costs**")
-    st.caption("Split your total shipping cost across the cards in the submission.")
-    _sc1, _sc2 = st.columns(2)
-    with _sc1:
-        ship_to = st.number_input(
-            "To PSA ($/card)", min_value=0.0, value=0.0, step=0.50,
-            help="Your actual cost to ship to PSA including insurance, divided by number of cards in the submission"
-        )
-    with _sc2:
-        ship_return = st.number_input(
-            "Return ($/card)", min_value=0.0, value=0.0, step=0.50,
-            help="PSA return shipping cost including insurance, divided by cards in order"
-        )
-    ship_cost = round(ship_to + ship_return, 2)
-    if ship_cost > 0:
-        st.caption(f"Total shipping per card: **${ship_cost:.2f}**")
-    else:
-        st.caption("Enter your actual shipping + insurance costs above.")
 
-    st.markdown("---")
-    st.markdown("**⏳ Time Cost of Capital**")
-    st.caption(
-        "While your card sits at PSA, that cash earns nothing. "
-        "Set your expected annual return to reveal the true hidden cost."
+    # ── Features ──────────────────────────────────────────────────────────────
+    st.markdown(
+        '<div style="font-size:0.7rem;font-weight:700;letter-spacing:0.08em;'
+        'color:#64748b;text-transform:uppercase;margin-bottom:8px;">Features</div>',
+        unsafe_allow_html=True,
     )
-    opp_rate = st.slider(
-        "Opportunity cost rate (% / year)",
-        min_value=0.0, max_value=50.0, value=12.0, step=1.0,
-        help="e.g. 12%/yr: $649 locked at Express (~35 days) = $7.47 hidden cost",
-    )
-    if opp_rate > 0:
-        _ex_raw, _ex_tier = 200.0, default_tier
-        _ex_opp = calc_opp_cost(_ex_raw, _ex_tier, opp_rate, ship_cost)
-        _ex_days = int(PSA_DAYS.get(_ex_tier, 60) * 1.4)
-        st.caption(f"→ $200 card · {_ex_days} cal. days · **${_ex_opp:.2f} hidden cost**")
+
+    _FEATURES = [
+        ("🔍", "Card Research",    "FMV · trend · buy signal · comps"),
+        ("🔥", "Hot Movers",       "What the market is chasing right now"),
+        ("📷", "Scan",             "Photo ID · AI batch · graded slab"),
+        ("📦", "Batch → eBay",     "Drip-scheduled CSV export with photos"),
+        ("📦", "Inventory Check",  "Grading ROI · gem rate · break-even"),
+        ("🧰", "Operations",       "Reprice queue · Sunday workflow"),
+        ("📬", "Submissions",      "PSA order tracker · cert lookup"),
+        ("💰", "Sales & P&L",      "eBay / CollX revenue · monthly P&L"),
+        ("🏷️", "Consignments",    "Track cards you're selling for others"),
+        ("📸", "Image Prep",       "Corner crops · eBay-ready photo sets"),
+    ]
+
+    for _icon, _name, _desc in _FEATURES:
+        st.markdown(
+            f"""<div style="display:flex;gap:10px;align-items:flex-start;
+                padding:7px 6px;border-radius:7px;margin-bottom:3px;
+                background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);">
+              <span style="font-size:1.1rem;line-height:1.3;">{_icon}</span>
+              <div>
+                <div style="font-size:0.8rem;font-weight:600;color:#e2e8f0;line-height:1.2;">{_name}</div>
+                <div style="font-size:0.68rem;color:#64748b;margin-top:2px;">{_desc}</div>
+              </div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
 
     st.markdown("---")
-    st.markdown("**Grading fees (updated May 18, 2026)**")
-    for tier, info in PSA_FEES_ALL.items():
-        biz = info['days']
-        st.caption(f"${info['fee']:.2f} · ~{biz} biz days · insured to ${info['max_insured']:,} — {tier.split('(')[0].strip()}")
-    st.caption(f"eBay sell fee: {EBAY_FEE*100:.2f}%")
+
+    # ── Guide button ──────────────────────────────────────────────────────────
+    if st.button("📖 How to Maximize This App", use_container_width=True, key="open_guide_btn"):
+        st.session_state["show_guide"] = True
+
+    st.markdown("---")
+
+    # ── Settings (collapsible) ────────────────────────────────────────────────
+    with st.expander("⚙️ Settings", expanded=False):
+        roi_target   = st.number_input("ROI target (×)", min_value=1.0, max_value=20.0, value=4.0, step=0.5)
+        min_gem      = st.number_input("Min gem rate (%)", min_value=0.0, max_value=100.0, value=40.0, step=5.0)
+        default_tier = st.selectbox("Default grading tier", list(PSA_FEES.keys()), index=0)
+
+        st.markdown("**📦 Shipping Costs**")
+        st.caption("Split your total shipping cost across the cards in the submission.")
+        _sc1, _sc2 = st.columns(2)
+        with _sc1:
+            ship_to = st.number_input(
+                "To PSA ($/card)", min_value=0.0, value=0.0, step=0.50,
+                help="Your actual cost to ship to PSA including insurance, divided by number of cards in the submission"
+            )
+        with _sc2:
+            ship_return = st.number_input(
+                "Return ($/card)", min_value=0.0, value=0.0, step=0.50,
+                help="PSA return shipping cost including insurance, divided by cards in order"
+            )
+        ship_cost = round(ship_to + ship_return, 2)
+        if ship_cost > 0:
+            st.caption(f"Total per card: **${ship_cost:.2f}**")
+        else:
+            st.caption("Enter shipping + insurance costs above.")
+
+        st.markdown("**⏳ Opportunity Cost**")
+        opp_rate = st.slider(
+            "Annual rate (%)", min_value=0.0, max_value=50.0, value=12.0, step=1.0,
+            help="e.g. 12%/yr: $649 locked at Express (~35 days) = $7.47 hidden cost",
+        )
+        if opp_rate > 0:
+            _ex_raw, _ex_tier = 200.0, default_tier
+            _ex_opp  = calc_opp_cost(_ex_raw, _ex_tier, opp_rate, ship_cost)
+            _ex_days = int(PSA_DAYS.get(_ex_tier, 60) * 1.4)
+            st.caption(f"→ $200 card · {_ex_days} days · **${_ex_opp:.2f} hidden cost**")
+
+        st.markdown("**PSA Fees** *(May 2026)*")
+        for tier, _fi in PSA_FEES_ALL.items():
+            st.caption(f"${_fi['fee']:.2f} · ~{_fi['days']} biz days — {tier.split('(')[0].strip()}")
+        st.caption(f"eBay sell fee: {EBAY_FEE*100:.2f}%")
+# ─── App Guide dialog ─────────────────────────────────────────────────────────
+@st.dialog(f"📖 How to Maximize {APP_NAME}", width="large")
+def _show_guide():
+    st.markdown("### Get the most out of every feature")
+    _GUIDE_SECTIONS = [
+        ("🔍", "Card Research — your first stop",
+         [
+             "Type any player, year, set, or parallel into the search bar — no image needed.",
+             "Check the **Buy Signal**: 🔥 HOT means rising demand; 🛑 COOLING means the market is softening. Time your sells accordingly.",
+             "Use the **Sell-Through %** (green/yellow/red) to see how fast copies are actually moving on eBay.",
+             "Tap **📋 Copy Comps** to paste recent sold prices directly into a message or spreadsheet.",
+         ]),
+        ("📷", "Scanning & AI Batch — raw cards",
+         [
+             "Drop front + back images interleaved (front1, back1, front2, back2…) into the **📦 Batch → eBay** tab.",
+             "Hit **Identify & Price All** — CardHedger visually matches each card and pulls FMV in one shot.",
+             "Edit the **Price ($)** column directly in the table before exporting. FMV is a starting point, not a floor.",
+             "Toggle **Drip Schedule** to stagger listings hourly — eBay rewards consistent daily activity with better placement.",
+             "Export once → upload once to eBay Seller Hub. No manual listing needed.",
+         ]),
+        ("🎫", "Graded Slabs — PSA / BGS / SGC",
+         [
+             "Go to **📷 Scan → 🎫 Graded slab (cert #)** and enter your cert number.",
+             "You get price history, trend direction, and a buy signal for that exact graded copy.",
+             "Hit **➕ Add to eBay Batch** — the card lands in the export table with grade, grader, and cert # pre-filled. No scanning needed.",
+             "The eBay CSV automatically populates the CD: grader, grade, and cert fields so eBay shows the slab details correctly.",
+         ]),
+        ("📦", "Inventory Check — grading decisions",
+         [
+             "Upload your card list or scan a card to run the **Grading ROI calculator**.",
+             "Set your **ROI target** and **Min gem rate** in ⚙️ Settings (sidebar) to filter GO / NO-GO automatically.",
+             "A card that pencils out at 4× ROI but has a 10% gem rate is a coin flip — the gem rate matters as much as the math.",
+             "Use **Opportunity Cost** in Settings to see the true cost of cash locked at PSA for 30–90 days.",
+         ]),
+        ("🧰", "Operations — weekly workflow",
+         [
+             "Every Sunday: go to **🧰 Operations → 📅 Sunday Reprice**. Upload your eBay active listings CSV.",
+             "Filter to 7–30 day listings that haven't sold. CardHedger pulls fresh FMV on each.",
+             "Download the bulk-edit CSV → upload to eBay Seller Hub to reprice the whole batch in one shot.",
+             "Consistent repricing = fewer stale listings and faster inventory turns.",
+         ]),
+        ("💰", "Sales & P&L — track what matters",
+         [
+             "Import your eBay sold CSV and CollX sales under **💰 Sales & P&L → Import**.",
+             "The monthly P&L breaks down revenue by channel (eBay vs CollX vs Whatnot).",
+             "Match SKU prefixes between your listings and sales to track per-lot profitability in **📦 Purchases**.",
+         ]),
+        ("⚙️", "Pro tips",
+         [
+             "Set a **SKU prefix** (e.g. your initials) in ⚙️ Settings so every eBay listing has a traceable ID.",
+             "Use **Best Offer** with a min floor — it catches buyers who won't pay BIN but will negotiate.",
+             "Drip 8–12 cards/day max. Flooding eBay with 40 at once suppresses your own listings.",
+             "Check **🔥 Hot Movers** before scanning a new lot — if a player is trending up, price up and hold a day.",
+         ]),
+    ]
+    for _gi, (_icon, _title, _points) in enumerate(_GUIDE_SECTIONS):
+        st.markdown(
+            f'<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);'
+            f'border-radius:10px;padding:14px 18px;margin-bottom:12px;">'
+            f'<div style="font-size:1rem;font-weight:700;color:#e2e8f0;margin-bottom:8px;">'
+            f'{_icon} {_title}</div>'
+            + "".join(
+                f'<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;">'
+                f'<span style="color:#6366f1;font-size:0.75rem;margin-top:3px;">▸</span>'
+                f'<span style="font-size:0.82rem;color:#94a3b8;line-height:1.5;">{p}</span></div>'
+                for p in _points
+            )
+            + "</div>",
+            unsafe_allow_html=True,
+        )
 
 # ─── What's New dialog ────────────────────────────────────────────────────────
 _WN_KEY = f"wn_seen_{APP_VERSION}"
@@ -2374,6 +2497,10 @@ def _show_whats_new():
 
 if not st.session_state.get(_WN_KEY) and APP_VERSION in RELEASE_NOTES:
     _show_whats_new()
+
+if st.session_state.get("show_guide"):
+    st.session_state["show_guide"] = False
+    _show_guide()
 
 # ─── Dashboard KPI tiles ──────────────────────────────────────────────────────
 if not is_beta and SUPABASE_URL:
