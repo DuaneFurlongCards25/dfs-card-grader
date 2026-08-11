@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.51"
+APP_VERSION = "1.5.52"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -5483,9 +5483,10 @@ alter table scan_cards disable row level security;"""
                                     _grade_suffix = f"{_grader_key} {_grade_val}"
                                     final_title = f"{final_title[:80 - len(_grade_suffix) - 1]} {_grade_suffix}"[:80]
 
-                                # Graded cards use condition 3000; Card Condition descriptor
-                                # (40001) must be blank — it conflicts with grader/grade fields.
-                                _export_cond_id = "3000" if _is_graded else cond_id
+                                # Graded cards: always use 2750 (NM or Better — the only valid
+                                # condition for graded slabs in category 261328). Card Condition
+                                # descriptor (40001) must be blank — conflicts with grader/grade.
+                                _export_cond_id = "2750" if _is_graded else cond_id
                                 _export_cond_sp = ""     if _is_graded else cond_sp
 
                                 writer.writerow({
@@ -5555,6 +5556,95 @@ alter table scan_cards disable row level security;"""
                                 key="raw_dl_btn",
                             )
     
+                        # ── Step 4: eBay Upload Error Reader ──────────────────
+                        st.markdown("---")
+                        st.markdown("**Step 4 — Review eBay Upload Results** *(optional)*")
+                        st.caption("After uploading to eBay File Exchange, paste the response CSV here to see plain-English results.")
+                        _ebay_resp_file = st.file_uploader(
+                            "📋 Drop eBay response CSV here", type=["csv"],
+                            key="ebay_resp_upload",
+                            help="The file eBay emails/shows after a File Exchange upload — contains success/failure per row.",
+                        )
+                        if _ebay_resp_file:
+                            import csv as _csv_resp
+                            import io as _io_resp
+
+                            _EBAY_ERR = {
+                                "21920351": "Card Condition descriptor not valid for this condition — graded cards must use Condition ID 3000",
+                                "21920352": "Condition descriptor value not accepted — check grader name or grade value",
+                                "21916626": "Missing required item specific for this category",
+                                "21916635": "Item specific value not valid for this field",
+                                "240":      "Title is missing or too short",
+                                "291":      "Listing already exists with this SKU",
+                                "21916587": "Picture URL is invalid or unreachable",
+                                "21916580": "Picture URL is empty",
+                                "21919456": "Business policy warning — use policy IDs instead of legacy shipping fields",
+                                "23015":    "Immediate payment warning with Best Offer (safe to ignore)",
+                                "21920218": "Photo URL could not be fetched by eBay",
+                                "17":       "Category ID not found",
+                                "21916884": "Condition ID not valid for category 261328 — graded cards must use 2750 (NM or Better)",
+                            }
+
+                            try:
+                                _resp_text = _ebay_resp_file.read().decode("utf-8", errors="replace")
+                                _resp_reader = _csv_resp.DictReader(_io_resp.StringIO(_resp_text))
+                                _resp_rows = list(_resp_reader)
+
+                                _successes = [r for r in _resp_rows if (r.get("Status") or "").strip().lower() == "success"]
+                                _failures  = [r for r in _resp_rows if (r.get("Status") or "").strip().lower() == "failure"]
+                                _warnings  = [r for r in _resp_rows if (r.get("Status") or "").strip().lower() == "warning"]
+
+                                if _successes:
+                                    st.success(f"✅ {len(_successes)} listing{'s' if len(_successes)!=1 else ''} uploaded successfully" +
+                                               (f" — Item IDs: {', '.join(r.get('ItemID','') for r in _successes if r.get('ItemID'))}" if any(r.get('ItemID') for r in _successes) else ""))
+
+                                for _fr in _failures:
+                                    _sku    = _fr.get("CustomLabel") or _fr.get("Custom label (SKU)") or "?"
+                                    _codes  = [c.strip() for c in (_fr.get("ErrorCode") or "").split("|") if c.strip() and c.strip().isdigit()]
+                                    _msgs   = [m.strip() for m in (_fr.get("ErrorMessage") or "").split("|") if m.strip() and not m.strip().startswith("Error -")]
+                                    # Deduplicate messages
+                                    _seen_msgs = set()
+                                    _clean_msgs = []
+                                    for _m in _msgs:
+                                        _mk = _m.lower()[:60]
+                                        if _mk not in _seen_msgs:
+                                            _seen_msgs.add(_mk)
+                                            _clean_msgs.append(_m)
+
+                                    with st.container():
+                                        st.error(f"❌ **{_sku}** — Upload failed")
+                                        for _code in _codes:
+                                            _plain = _EBAY_ERR.get(_code)
+                                            if _plain:
+                                                st.markdown(f"&nbsp;&nbsp;• **[{_code}]** {_plain}")
+                                            else:
+                                                # Fall back to eBay's raw message (trimmed)
+                                                _raw = next((_m for _m in _clean_msgs if _m), "")
+                                                if _raw:
+                                                    st.markdown(f"&nbsp;&nbsp;• **[{_code}]** {_raw[:200]}")
+                                        if _clean_msgs and not _codes:
+                                            for _m in _clean_msgs[:3]:
+                                                st.markdown(f"&nbsp;&nbsp;• {_m[:200]}")
+
+                                if _warnings and not _failures:
+                                    _warn_skus = set(r.get("CustomLabel","") for r in _warnings)
+                                    _w_codes = set()
+                                    for _wr in _warnings:
+                                        for _wc in (_wr.get("WarningCode") or "").split("|"):
+                                            _wc = _wc.strip()
+                                            if _wc: _w_codes.add(_wc)
+                                    _safe_warns = {"21919456", "23015"}
+                                    if _w_codes <= _safe_warns:
+                                        st.success(f"✅ Uploaded with minor warnings (safe to ignore) — {', '.join(_warn_skus)}")
+                                    else:
+                                        st.warning(f"⚠️ {len(_warnings)} row(s) with warnings — check eBay Seller Hub to confirm they listed.")
+
+                                if not _successes and not _failures and not _warnings:
+                                    st.info("No result rows found — make sure you're uploading the eBay *response* file, not your original upload CSV.")
+
+                            except Exception as _re:
+                                st.error(f"Could not parse response file: {_re}")
+
                         if ex_c2.button("🗑️ Clear Batch", key="raw_clear_btn"):
                             st.session_state.raw_batch = []
                             st.session_state.raw_batch_comps = {}
