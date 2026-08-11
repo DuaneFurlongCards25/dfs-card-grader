@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.48"
+APP_VERSION = "1.5.49"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4960,6 +4960,9 @@ alter table scan_cards disable row level security;"""
                         import datetime as _dt_prev
                         _prev_date_str = _dt_prev.date.today().strftime("%m%d%y")
                         _prev_sku_pfx  = st.session_state.get("bx_sku_prefix", "DFS")
+                        # Use only the name token (first segment before any "-") so the date
+                        # and sequence we append don't double-up when the prefix includes dates.
+                        _prev_sku_name = _prev_sku_pfx.split("-")[0] if _prev_sku_pfx else "DFS"
                         edit_rows = []
                         for _ei, c in enumerate(identified):
                             sim = c.get("similarity", 0)
@@ -4969,7 +4972,7 @@ alter table scan_cards disable row level security;"""
                             ebay_url    = f"https://www.ebay.com/sch/i.html?_nkw={ebay_q}&_sacat=261328&LH_Sold=1&LH_Complete=1"
                             raw_par = c.get("variant", "")
                             par_display = raw_par if raw_par and raw_par.lower() not in ("base","") else ""
-                            auto_sku = f"{_prev_sku_pfx}-{_prev_date_str}-{_ei+1:04d}"
+                            auto_sku = f"{_prev_sku_name}-{_prev_date_str}-{_ei+1:04d}"
                             edit_rows.append({
                                 "✓":          c.get("include", True),
                                 "Player":     c.get("player", ""),
@@ -5333,7 +5336,8 @@ alter table scan_cards disable row level security;"""
                                 _grade_export = _grade_val if _is_graded else ""
                                 _cert_export  = _cert_num  if _is_graded else ""
                                 # Custom SKU: use what's in the table (user may have edited it)
-                                sku      = (row.get("Custom SKU") or "").strip() or f"{_sx_sku}-{date_str}-{export_idx:04d}"
+                                _sx_sku_name = _sx_sku.split("-")[0] if _sx_sku else "DFS"
+                                sku      = (row.get("Custom SKU") or "").strip() or f"{_sx_sku_name}-{date_str}-{export_idx:04d}"
                                 front_u  = orig.get("front_url", "")
                                 back_u   = orig.get("back_url", "")
                                 # Graded: prefer PSA image if fetched
