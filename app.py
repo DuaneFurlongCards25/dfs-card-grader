@@ -4789,6 +4789,10 @@ alter table scan_cards disable row level security;"""
                                 try:
                                     _cd = json.loads(_sc.get("card_data_json") or "{}")
                                     if _cd:
+                                        # Always trust the DB status column — card_data_json
+                                        # may still say "identified" even after export marked it "listed"
+                                        _cd["status"] = _sc.get("status") or _cd.get("status", "identified")
+                                        _cd["idx"]    = _sc.get("idx", _cd.get("idx", 0))
                                         _loaded.append(_cd)
                                 except Exception:
                                     pass
