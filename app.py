@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.47"
+APP_VERSION = "1.5.48"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -5402,6 +5402,7 @@ alter table scan_cards disable row level security;"""
                                     ACTION_COL:                               "Add",
                                     "Custom label (SKU)":                     sku,
                                     "Category ID":                            "261328",
+                                    "Category name":                          "Sports Trading Cards",
                                     "Title":                                  final_title,
                                     "Schedule Time":                          _schedule_time,
                                     "Condition ID":                           cond_id,
