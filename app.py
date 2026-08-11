@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.45"
+APP_VERSION = "1.5.46"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4592,6 +4592,11 @@ alter table scan_cards disable row level security;"""
             # STACKS LIST VIEW  (no active stack)
             # ══════════════════════════════════════════════════════════════════
             if st.session_state["bx_active_stack_id"] is None:
+                # Show warning if cards are pending in raw_batch (e.g. added from cert tab)
+                _pending_cards = [c for c in st.session_state.get("raw_batch", []) if c.get("status") == "identified"]
+                if _pending_cards:
+                    st.warning(f"📦 **{len(_pending_cards)} card{'s' if len(_pending_cards) != 1 else ''} pending** (added from cert lookup). Create a new lot below — they'll be included automatically.")
+
                 _slh1, _slh2 = st.columns([5, 1])
                 _slh1.markdown("### 📦 Lots")
                 if _slh2.button("➕ New Lot", type="primary", key="bx_new_stack_btn"):
@@ -4611,7 +4616,9 @@ alter table scan_cards disable row level security;"""
                                     st.session_state["bx_active_stack_id"]   = _ns["id"]
                                     st.session_state["bx_active_stack_name"] = _ns["name"]
                                     st.session_state["bx_sku_prefix"]        = _px
-                                    st.session_state.raw_batch               = []
+                                    # Keep any cards already in raw_batch (e.g. from cert tab add)
+                                    if not st.session_state.raw_batch:
+                                        st.session_state.raw_batch = []
                                     st.session_state.raw_batch_comps         = {}
                                     st.session_state["bx_show_new_form"]     = False
                                     st.session_state["bx_stacks_cache"]      = None
