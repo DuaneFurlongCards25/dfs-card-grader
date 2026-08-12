@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.54"
+APP_VERSION = "1.5.58"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -6657,7 +6657,7 @@ with tab6:
     else:
         from datetime import timezone as _optz
 
-        op_tab_inv, op_tab_queue, op_tab_sunday = st.tabs(["📦 Inventory & Aging", "🔄 Reprice Queue", "📅 Sunday Reprice"])
+        op_tab_inv, op_tab_queue, op_tab_sunday, op_tab_promote = st.tabs(["📦 Inventory & Aging", "🔄 Reprice Queue", "📅 Sunday Reprice", "📣 Promote Listings"])
 
         # ── helpers shared across both sub-tabs ───────────────────────────────
         def _days_since(dt_str):
@@ -7182,6 +7182,99 @@ with tab6:
                     st.info(f"No listings found in the {sun_min_days}–{sun_max_days} day range above ${sun_floor}. Try widening the filter.")
             else:
                 st.info("Upload your eBay active listings CSV above to get started.")
+
+        # ── PROMOTE LISTINGS TAB ──────────────────────────────────────────────
+        with op_tab_promote:
+            st.markdown("### 📣 Promote Listings")
+            st.markdown("Upload your eBay active listings CSV to see how many listings fall into each ad-rate tier and get step-by-step instructions to promote them in Seller Hub.")
+
+            st.info(
+                "**How to get the file:** Seller Hub → Listings → Active → select all → Download → **Active listings report**\n\n"
+                "eBay limits bulk promotion to **200 listings per pass** — the tool below tells you exactly how many passes each tier needs."
+            )
+
+            promote_file = st.file_uploader("Upload active listings CSV", type=["csv"], key="promote_upload")
+
+            PROMOTE_TIERS = [
+                {"label": "Tier 1 — $5.00 to $14.99",  "min": 5.00,  "max": 14.99, "rate": 5,  "emoji": "🟡"},
+                {"label": "Tier 2 — $15.00 to $49.99", "min": 15.00, "max": 49.99, "rate": 8,  "emoji": "🟠"},
+                {"label": "Tier 3 — $50.00 and up",    "min": 50.00, "max": None,  "rate": 10, "emoji": "🔴"},
+            ]
+
+            if promote_file:
+                try:
+                    import pandas as _pd_promo
+                    _promo_df = _pd_promo.read_csv(promote_file)
+
+                    # Find the price column — eBay calls it "Current price" or "Buy It Now price" or "Price"
+                    _price_col = None
+                    for _col in _promo_df.columns:
+                        if "price" in _col.lower() or "buy it now" in _col.lower():
+                            _price_col = _col
+                            break
+
+                    if _price_col is None:
+                        st.error(f"Couldn't find a price column. Columns found: {list(_promo_df.columns)}")
+                    else:
+                        # Clean price column — strip $, commas
+                        _promo_df["_price_clean"] = (
+                            _promo_df[_price_col]
+                            .astype(str)
+                            .str.replace(r"[\$,]", "", regex=True)
+                        )
+                        _promo_df["_price_num"] = _pd_promo.to_numeric(_promo_df["_price_clean"], errors="coerce")
+
+                        _total_eligible = _promo_df[_promo_df["_price_num"] >= 5.0]
+                        _total_skip = len(_promo_df) - len(_total_eligible)
+
+                        st.markdown(f"**{len(_promo_df):,} total listings** — {len(_total_eligible):,} eligible (≥$5) · {_total_skip:,} skipped (<$5)")
+                        st.markdown("---")
+
+                        for _tier in PROMOTE_TIERS:
+                            if _tier["max"] is not None:
+                                _mask = (_promo_df["_price_num"] >= _tier["min"]) & (_promo_df["_price_num"] <= _tier["max"])
+                            else:
+                                _mask = _promo_df["_price_num"] >= _tier["min"]
+
+                            _tier_df = _promo_df[_mask]
+                            _count = len(_tier_df)
+                            _passes = (_count + 199) // 200  # ceil div
+
+                            with st.expander(f"{_tier['emoji']} **{_tier['label']}** — {_count:,} listings · {_tier['rate']}% ad rate · {_passes} pass{'es' if _passes != 1 else ''}", expanded=True):
+                                if _count == 0:
+                                    st.caption("No listings in this range.")
+                                    continue
+
+                                st.markdown(f"**Step-by-step — Seller Hub Promoted Listings:**")
+                                _steps = [
+                                    "Go to **Seller Hub → Marketing → Promoted Listings Advanced**",
+                                    "Click **Create campaign** → choose **General**",
+                                    f"In **Listings**, filter by price: **Min ${_tier['min']:.2f}**" + (f" / Max ${_tier['max']:.2f}**" if _tier['max'] else " and up**"),
+                                    "Click **Select all** (selects up to 200 at a time)",
+                                    f"Set ad rate to **{_tier['rate']}%**",
+                                    "Click **Add to campaign**",
+                                ]
+                                if _passes > 1:
+                                    _steps.append(f"Repeat **Select all → Add** until all {_count:,} listings are added ({_passes} passes total — 200 per pass)")
+                                _steps.append("Click **Launch campaign** and name it something like `DFS {label} {today}`.".replace("{label}", _tier["label"].split("—")[1].strip()).replace("{today}", str(date.today())))
+
+                                for _i, _step in enumerate(_steps, 1):
+                                    st.markdown(f"{_i}. {_step}")
+
+                                st.caption(f"Estimated cost if all {_count:,} sell: {_tier['rate']}% of revenue")
+
+                except Exception as _pe:
+                    st.error(f"Error reading file: {_pe}")
+            else:
+                st.markdown("#### Ad Rate Tiers")
+                _tc1, _tc2, _tc3 = st.columns(3)
+                with _tc1:
+                    st.metric("🟡 Tier 1", "$5 – $14.99", "5% ad rate")
+                with _tc2:
+                    st.metric("🟠 Tier 2", "$15 – $49.99", "8% ad rate")
+                with _tc3:
+                    st.metric("🔴 Tier 3", "$50+", "10% ad rate")
+                st.caption("Upload your active listings CSV above to see counts and step-by-step instructions for each tier.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 9 — Consignments (DC Sports)
