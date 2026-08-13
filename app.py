@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.75"
+APP_VERSION = "1.5.76"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -2481,6 +2481,13 @@ def gem_signal(g):
 
 # ─── Sidebar ──────────────────────────────────────────────────────────────────
 is_beta = st.session_state.get("is_beta", False)
+
+# Settings — read from session_state so widgets (defined below) persist across reruns
+roi_target   = st.session_state.get("m_roi",      4.0)
+min_gem      = st.session_state.get("m_mingem",  40.0)
+default_tier = st.session_state.get("m_tier",    list(PSA_FEES.keys())[0])
+opp_rate     = st.session_state.get("m_opp",     12.0)
+ship_cost    = round(st.session_state.get("m_ship_to", 0.0) + st.session_state.get("m_ship_ret", 0.0), 2)
 
 with st.sidebar:
     # ── Branding ──────────────────────────────────────────────────────────────
