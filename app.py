@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.65"
+APP_VERSION = "1.5.66"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -2723,34 +2723,33 @@ if not is_beta and SUPABASE_URL:
         unsafe_allow_html=True,
     )
 
-# ─── Tabs ─────────────────────────────────────────────────────────────────────
+# ─── Navigation ───────────────────────────────────────────────────────────────
 if is_beta:
     st.info("🔓 **Beta Preview** — You have access to Card Research and Inventory Check. Submission Tracker and Downloads unlock with a full membership.", icon="💎")
 
-tab1, tab7, tab8, tab2, tab6, tab3, tab4, tab5, tab9, tab11, tab10, tab12 = st.tabs(["🔍 Card Research", "🔥 Hot Movers", "📷 Scan", "📦 Inventory Check", "🧰 Operations", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake", "🏷️ Consignments", "📦 Purchases", "💰 Sales & P&L", "📸 Image Prep"])
-
-# ── Sidebar nav: jump to tab when a feature button was clicked ────────────────
-# Uses an inline img onload to run JS in the main Streamlit document (not an iframe),
-# so it can directly find and click the tab button without cross-origin restrictions.
+# If a sidebar feature button was clicked, update the active nav
 if "_goto_tab" in st.session_state:
-    _jump = st.session_state.pop("_goto_tab")
-    _gif = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
-    st.markdown(
-        f'<img src="data:image/gif;base64,{_gif}" style="display:none;position:absolute" '
-        f'onload="(function(){{'
-        f'  function go(){{'
-        f'    var t=document.querySelectorAll(\'button[role=\\"tab\\"]\');'
-        f'    if(t&&t.length>{_jump}){{t[{_jump}].click();return true;}}return false;'
-        f'  }}'
-        f'  if(!go()){{setTimeout(function(){{if(!go())setTimeout(go,600);}},300);}}'
-        f'}})()"/>',
-        unsafe_allow_html=True,
-    )
+    st.session_state["_nav"] = st.session_state.pop("_goto_tab")
+
+_NAV_LABELS = [
+    "🔍 Card Research", "🔥 Hot Movers", "📷 Scan", "📦 Inventory Check",
+    "🧰 Operations", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake",
+    "🏷️ Consignments", "📦 Purchases", "💰 Sales & P&L", "📸 Image Prep",
+]
+_active_tab = st.session_state.get("_nav", 0)
+_selected_label = st.radio(
+    "Section", _NAV_LABELS, index=_active_tab,
+    horizontal=True, label_visibility="collapsed", key="_nav_radio",
+)
+_active_tab = _NAV_LABELS.index(_selected_label)
+st.session_state["_nav"] = _active_tab
+
+st.markdown("---")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — Card Research
 # ══════════════════════════════════════════════════════════════════════════════
-with tab1:
+if _active_tab == 0:
     st.markdown("## 🔍 Card Research")
     st.markdown("Search any card — owned or not. Get gem rate, graded value comps, and eBay links.")
     st.caption("Tip: include the full set name for best results — e.g. *Steph Curry Topps Chrome Paradox* not just *Steph Curry Paradox*")
@@ -3824,7 +3823,7 @@ def save_listing_pricing(item_number, comp_avg, trend_dir, trend_pct, suggested)
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 7 — Hot Movers (top-movers)
 # ══════════════════════════════════════════════════════════════════════════════
-with tab7:
+if _active_tab == 1:
     st.markdown("## 🔥 Hot Movers")
     st.markdown("The week's biggest price gainers — what's heating up right now. A buy-radar, not a card you already own.")
     if not CARDHEDGER_KEY:
@@ -3873,7 +3872,7 @@ with tab7:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 8 — Scan (image-match raw card + cert lookup)
 # ══════════════════════════════════════════════════════════════════════════════
-with tab8:
+if _active_tab == 2:
     st.markdown("## 📷 Scan")
     st.markdown("Identify a card fast — snap a raw card, or look up a graded slab by its cert number.")
     if not CARDHEDGER_KEY:
@@ -5938,7 +5937,7 @@ alter table scan_cards disable row level security;"""
                 elif not all_files and not st.session_state.raw_batch:
                     st.info("💡 **How it works:** Select all scans at once — front and back interleaved (front1, back1, front2, back2…). CardHedger visually matches each card, shows recent sold comps, and exports an eBay Add CSV with both images on every listing.")
 
-with tab2:
+if _active_tab == 3:
     st.markdown("## 📦 Inventory Check")
 
     _is_owner = st.session_state.get("access_name", "") == "Duane"
@@ -6259,7 +6258,7 @@ with tab2:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — Submission Tracker
 # ══════════════════════════════════════════════════════════════════════════════
-with tab3:
+if _active_tab == 5:
     st.markdown("## 📬 Submission Tracker")
     if is_beta:
         st.warning("🔒 Submission Tracker is available with full membership. Your beta preview includes Card Research and Inventory Check.")
@@ -6381,7 +6380,7 @@ with tab3:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 4 — Downloads
 # ══════════════════════════════════════════════════════════════════════════════
-with tab4:
+if _active_tab == 6:
     st.markdown("## 📥 Downloads")
     if is_beta:
         st.warning("🔒 Downloads are available with full membership. Your beta preview includes Card Research and Inventory Check.")
@@ -6462,7 +6461,7 @@ Upload it in the **Inventory Check** tab to search GemRate and get GO/NO-GO deci
 INTAKE_PLATFORMS = ["eBay", "COMC", "Whatnot", "Card Show", "Private Sale", "MySlabs", "Facebook", "Other"]
 INTAKE_STATUSES  = ["Received", "Sent to PSA", "In Collection", "Listed", "Sold"]
 
-with tab5:
+if _active_tab == 7:
     st.markdown("## 🚚 Shipment Intake")
     st.markdown("Log cards as they arrive. Build a queue to evaluate or send to PSA.")
 
@@ -6689,7 +6688,7 @@ with tab5:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 6 — Operations & Inventory (paid, metered live pricing)
 # ══════════════════════════════════════════════════════════════════════════════
-with tab6:
+if _active_tab == 4:
     st.markdown("## 🧰 Operations & Inventory")
 
     if is_beta:
@@ -7710,7 +7709,7 @@ with tab6:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 9 — Consignments (DC Sports)
 # ══════════════════════════════════════════════════════════════════════════════
-with tab9:
+if _active_tab == 8:
     st.markdown("## 🏷️ Consignments")
     st.caption("DC Sports auction consignment tracking — import send history, track what sold and what was paid.")
 
@@ -8249,7 +8248,7 @@ create index if not exists idx_ci_shipment on consignment_items(shipment_id);"""
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 11 — Purchases (Lot Tracking)
 # ══════════════════════════════════════════════════════════════════════════════
-with tab11:
+if _active_tab == 9:
     st.markdown("## 📦 Purchases")
     st.caption("Track card lots you buy. SKU prefix (first 2 segments, e.g. MATTSFB-072026) ties every card back to its lot.")
 
@@ -9232,7 +9231,7 @@ create index if not exists idx_cp_sku on card_purchases(sku);""", language="sql"
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 10 — Sales & P&L
 # ══════════════════════════════════════════════════════════════════════════════
-with tab10:
+if _active_tab == 10:
     st.markdown("## 💰 Sales & P&L")
     st.caption("Import eBay and CollX sales exports — track gross revenue, platform fees, and net proceeds across all channels.")
 
@@ -10088,7 +10087,7 @@ create index if not exists idx_sr_source on sales_records(source);""",
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 12 — Image Prep (eBay corner crops)
 # ══════════════════════════════════════════════════════════════════════════════
-with tab12:
+if _active_tab == 11:
     st.markdown("## 📸 Image Prep")
     st.markdown(
         "Upload a front and back photo — get 8 eBay-ready images automatically: "
