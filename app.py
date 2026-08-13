@@ -13,9 +13,10 @@ import base64
 import csv
 import re
 import collections
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.61"
+APP_VERSION = "1.5.62"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -2876,18 +2877,45 @@ with tab1:
 
         if CARDHEDGER_KEY:
             with st.spinner("Fetching live sold comps, FMV & trend data..."):
-                ch_matches = ch_search(desc)
+                # Reuse already-cached card_match result (already called above for image);
+                # fall back to ch_search only if card_match gave nothing.
+                _ch_reuse = st.session_state.get("ch_match_result")
+                if _ch_reuse:
+                    ch_matches = [_ch_reuse]
+                else:
+                    ch_matches = ch_search(desc)
                 if ch_matches:
                     ch_card = ch_matches[0]
                     ch_id = ch_card.get("card_id") or ch_card.get("id")
                     ch_card_name = ch_card.get("name") or ch_card.get("title") or ""
                     if ch_id:
-                        raw_data  = ch_comps(ch_id, "Raw")
-                        psa_data  = ch_comps(ch_id, "PSA 10")
-                        psa9_data = ch_comps(ch_id, "PSA 9")
-                        ch_raw_fmv   = ch_fmv(ch_id, "Raw")
-                        ch_psa10_fmv = ch_fmv(ch_id, "PSA 10")
-                        ch_psa9_fmv  = ch_fmv(ch_id, "PSA 9")
+                        # Parallel: comps × 3 + price_history — all independent calls
+                        def _fetch_raw():   return ch_comps(ch_id, "Raw")
+                        def _fetch_psa10(): return ch_comps(ch_id, "PSA 10")
+                        def _fetch_psa9():  return ch_comps(ch_id, "PSA 9")
+                        def _fetch_hist():  return ch_price_history(ch_id, "PSA 10", days=90)
+                        with ThreadPoolExecutor(max_workers=4) as _ex:
+                            _f_raw  = _ex.submit(_fetch_raw)
+                            _f_p10  = _ex.submit(_fetch_psa10)
+                            _f_p9   = _ex.submit(_fetch_psa9)
+                            _f_hist = _ex.submit(_fetch_hist)
+                            raw_data  = _f_raw.result()
+                            psa_data  = _f_p10.result()
+                            psa9_data = _f_p9.result()
+                            history   = _f_hist.result()
+                        # Batch FMV — 1 call instead of 3
+                        _fmv_batch = ch_fmv_batch([
+                            {"card_id": ch_id, "grade": "Raw"},
+                            {"card_id": ch_id, "grade": "PSA 10"},
+                            {"card_id": ch_id, "grade": "PSA 9"},
+                        ])
+                        _fmv_items = _fmv_batch.get("items") or _fmv_batch.get("results") or []
+                        _fmv_map = {}
+                        for _fi in _fmv_items:
+                            _fmv_map[(_fi.get("grade") or "").upper()] = _fi
+                        ch_raw_fmv   = _fmv_map.get("RAW")   or ch_fmv(ch_id, "Raw")
+                        ch_psa10_fmv = _fmv_map.get("PSA 10") or ch_fmv(ch_id, "PSA 10")
+                        ch_psa9_fmv  = _fmv_map.get("PSA 9")  or ch_fmv(ch_id, "PSA 9")
                         ch_raw_avg   = raw_data.get("comp_price") or raw_data.get("average") or raw_data.get("mean")
                         ch_psa10_avg = psa_data.get("comp_price") or psa_data.get("average") or psa_data.get("mean")
                         ch_psa9_avg  = psa9_data.get("comp_price") or psa9_data.get("average") or psa9_data.get("mean")
@@ -2897,7 +2925,6 @@ with tab1:
                         for k in ("raw_prices", "sales", "comps", "data"):
                             if k in psa_data and isinstance(psa_data[k], list):
                                 ch_psa10_sales = psa_data[k]; break
-                        history = ch_price_history(ch_id, "PSA 10", days=90)
                         ch_trend_dir, ch_trend_pct = calculate_trend(history)
 
             if ch_raw_avg or ch_psa10_avg or ch_raw_sales or ch_psa10_sales:
@@ -3164,11 +3191,21 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
         ch_psa9  = price_map.get("PSA 9")
         ch_raw   = price_map.get("Raw")
 
-        # Cleaned FMV per grade (more reliable than the plain avg); falls back to avg.
+        # Cleaned FMV per grade — batch call instead of 3 sequential calls
         _cid = ch_match_data.get("card_id")
-        fb_raw_fmv   = ch_fmv(_cid, "Raw")    if _cid else {}
-        fb_psa10_fmv = ch_fmv(_cid, "PSA 10") if _cid else {}
-        fb_psa9_fmv  = ch_fmv(_cid, "PSA 9")  if _cid else {}
+        if _cid:
+            _fb_batch = ch_fmv_batch([
+                {"card_id": _cid, "grade": "Raw"},
+                {"card_id": _cid, "grade": "PSA 10"},
+                {"card_id": _cid, "grade": "PSA 9"},
+            ])
+            _fb_items = _fb_batch.get("items") or _fb_batch.get("results") or []
+            _fb_map = {(fi.get("grade") or "").upper(): fi for fi in _fb_items}
+            fb_raw_fmv   = _fb_map.get("RAW")    or ch_fmv(_cid, "Raw")
+            fb_psa10_fmv = _fb_map.get("PSA 10") or ch_fmv(_cid, "PSA 10")
+            fb_psa9_fmv  = _fb_map.get("PSA 9")  or ch_fmv(_cid, "PSA 9")
+        else:
+            fb_raw_fmv = fb_psa10_fmv = fb_psa9_fmv = {}
         raw_val   = fmv_price(fb_raw_fmv)   or ch_raw
         psa10_val = fmv_price(fb_psa10_fmv) or ch_psa10
         psa9_val  = fmv_price(fb_psa9_fmv)  or ch_psa9
@@ -7069,25 +7106,44 @@ with tab6:
                             disabled=(not can_run),
                         ):
                             prog = st.progress(0.0, text="Looking up prices…")
-                            results = []
-                            for i, c in enumerate(candidates):
+                            results_map = {}
+                            completed_count = [0]
+
+                            def _sun_lookup(idx_c):
+                                idx, c = idx_c
                                 grade = detect_grade(c["title"])
                                 mkt   = fetch_market(c["ch_query"], grade)
-                                raw_sugg    = suggest_reprice(mkt["comp_avg"], mkt["trend_pct"], "Match market", 0)
-                                sugg        = sane_price(raw_sugg, c["current_price"])
-                                suspect     = (raw_sugg is not None and sugg is None)
-                                results.append({
+                                raw_sugg = suggest_reprice(mkt["comp_avg"], mkt["trend_pct"], "Match market", 0)
+                                sugg     = sane_price(raw_sugg, c["current_price"])
+                                return idx, {
                                     **c,
                                     "grade":       grade,
                                     "comp":        mkt["comp_avg"],
                                     "trend":       trend_label(mkt["trend_dir"], mkt["trend_pct"] or 0),
                                     "matched":     mkt["matched"],
                                     "suggested":   sugg,
-                                    "suspect":     suspect,
+                                    "suspect":     (raw_sugg is not None and sugg is None),
                                     "hay_matched": c.get("hay_matched", False),
-                                })
-                                prog.progress((i + 1) / len(candidates),
-                                              text=f"Pricing… {i+1}/{len(candidates)}")
+                                }
+
+                            with ThreadPoolExecutor(max_workers=6) as _sun_ex:
+                                _sun_futures = {
+                                    _sun_ex.submit(_sun_lookup, (i, c)): i
+                                    for i, c in enumerate(candidates)
+                                }
+                                for _fut in as_completed(_sun_futures):
+                                    try:
+                                        _idx, _row = _fut.result()
+                                        results_map[_idx] = _row
+                                    except Exception:
+                                        pass
+                                    completed_count[0] += 1
+                                    prog.progress(
+                                        completed_count[0] / len(candidates),
+                                        text=f"Pricing… {completed_count[0]}/{len(candidates)}",
+                                    )
+
+                            results = [results_map[i] for i in sorted(results_map)]
                             pricing_bump(len(candidates))
                             prog.empty()
                             st.session_state["sun_results"]   = results
