@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.77"
+APP_VERSION = "1.5.78"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -2363,7 +2363,7 @@ def ebay_graded_buy_url(desc):
 
 def psa_pop_url(desc):
     q = urllib.parse.quote_plus(desc)
-    return f"https://www.psacertify.com/s/search?q={q}"
+    return f"https://www.psacard.com/pop/search?q={q}"
 
 # ─── ROI logic ────────────────────────────────────────────────────────────────
 def calc_opp_cost(raw_cost, psa_tier, opp_rate: float, ship_cost: float = 0.0) -> float:
