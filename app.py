@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.70"
+APP_VERSION = "1.5.71"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -1601,6 +1601,114 @@ def claude_identify_card(image_b64: str, media_type: str = "image/jpeg") -> dict
     )
     try:
         with urllib.request.urlopen(req, context=ssl_ctx(), timeout=30) as r:
+            resp = json.loads(r.read().decode())
+        text = resp["content"][0]["text"].strip()
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if m:
+            return json.loads(m.group(0))
+        return {"_error": "No JSON in response", "_raw": text}
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="ignore")
+        return {"_error": f"HTTP {e.code}", "_raw": body}
+    except Exception as e:
+        return {"_error": str(e)}
+
+_CLAUDE_GRADE_PROMPT = """You are a PSA expert grader with 20+ years of experience. Analyze the trading card image(s) and return a grading assessment.
+
+PSA GRADING CRITERIA:
+- PSA 10 (Gem Mint): Centering ≤55/45 front AND ≤75/25 back. All four corners perfectly sharp. All four edges clean. Surface flawless.
+- PSA 9 (Mint): Centering ≤65/35 front AND ≤85/15 back. Corners very sharp — one may have slight fraying. Edges very clean. Surface nearly flawless.
+- PSA 8 (NM-MT): Centering ≤65/35. One or two corners/edges with slight wear. Minor surface issues.
+- PSA 7 (NM): Centering ≤70/30. Noticeable corner wear or surface issue. No creases.
+- PSA 6 (EX-MT) and below: Obvious wear on multiple features.
+
+WHAT TO LOOK FOR:
+Centering: Estimate the white border widths. If left border = 45% and right = 55% of total horizontal space, that is 45/55 (fails PSA 10 front threshold of 55/45).
+Corners: Look at all four corners — NW (top-left), NE (top-right), SW (bottom-left), SE (bottom-right). Rate each: sharp / slight fraying / moderate wear / heavy wear.
+Edges: Look at top, bottom, left, right edges. Rate each: clean / rough / minor chip / chip / nick.
+Surface: Look for scratches, print lines, stains, dimples, fingerprints, creases.
+
+Return ONLY valid JSON — no prose, no explanation outside the JSON:
+
+{
+  "predicted_grade": 10,
+  "grade_label": "PSA 10",
+  "confidence": "high",
+  "centering": {
+    "front_left_right": "52/48",
+    "front_top_bottom": "51/49",
+    "back_left_right": "55/45",
+    "front_passes_10": true,
+    "back_passes_10": true,
+    "note": "Well-centered on both sides"
+  },
+  "corners": {
+    "NW": "sharp",
+    "NE": "sharp",
+    "SW": "sharp",
+    "SE": "slight fraying",
+    "worst": "SE",
+    "passes_10": false,
+    "note": "SE corner has very slight fraying visible under close inspection"
+  },
+  "edges": {
+    "top": "clean",
+    "bottom": "clean",
+    "left": "clean",
+    "right": "clean",
+    "passes_10": true,
+    "note": "All edges clean"
+  },
+  "surface": {
+    "front": "clean",
+    "back": "clean",
+    "front_defects": [],
+    "back_defects": [],
+    "passes_10": true,
+    "note": "No surface issues detected"
+  },
+  "fatal_flaws": ["SE corner: slight fraying — this will likely hold the grade to PSA 9"],
+  "positive_attributes": ["Excellent centering", "Three corners gem-sharp", "Clean edges", "Pristine surface"],
+  "estimated_grade_range": "PSA 9 – PSA 9.5",
+  "recommendation": "Strong PSA 9 candidate. Submit only if PSA 9 market value comfortably exceeds the grading fee.",
+  "submit_recommended": true,
+  "caveat": "AI grading is based on visible image quality only. Micro-defects under loupe, UV surface issues, and back defects not in the photo may affect the actual PSA grade."
+}"""
+
+def claude_grade_card(front_b64: str, back_b64: str | None,
+                       front_mime: str = "image/jpeg", back_mime: str = "image/jpeg") -> dict:
+    """Predict PSA grade from front (and optionally back) card images using Claude Vision."""
+    if not ANTHROPIC_KEY:
+        return {"_error": "Anthropic API key not configured"}
+    content = [
+        {"type": "text", "text": "FRONT OF CARD:"},
+        {"type": "image", "source": {"type": "base64", "media_type": front_mime, "data": front_b64}},
+    ]
+    if back_b64:
+        content += [
+            {"type": "text", "text": "BACK OF CARD:"},
+            {"type": "image", "source": {"type": "base64", "media_type": back_mime, "data": back_b64}},
+        ]
+    else:
+        content.append({"type": "text", "text": "(No back image provided — centering/surface back assessment will be estimated.)"})
+    content.append({"type": "text", "text": _CLAUDE_GRADE_PROMPT})
+    payload = {
+        "model": "claude-sonnet-5",
+        "max_tokens": 1800,
+        "messages": [{"role": "user", "content": content}],
+    }
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=data,
+        headers={
+            "x-api-key": ANTHROPIC_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=45) as r:
             resp = json.loads(r.read().decode())
         text = resp["content"][0]["text"].strip()
         m = re.search(r"\{.*\}", text, re.DOTALL)
@@ -3885,7 +3993,7 @@ if _active_tab == 2:
     if not CARDHEDGER_KEY:
         st.info("📊 Connect the CardHedger API to use scanning.")
     else:
-        scan_search, scan_raw, scan_ai_batch, scan_cert, scan_batch = st.tabs(["🔍 Title Search", "🃏 Raw card photo", "🤖 AI Batch", "🎫 Graded slab (cert #)", "📦 Batch → eBay"])
+        scan_search, scan_raw, scan_ai_batch, scan_cert, scan_batch, scan_grade = st.tabs(["🔍 Title Search", "🃏 Raw card photo", "🤖 AI Batch", "🎫 Graded slab (cert #)", "📦 Batch → eBay", "🔬 Grade Predictor"])
 
         # ── TITLE SEARCH ──────────────────────────────────────────────────────
         with scan_search:
@@ -5943,6 +6051,156 @@ alter table scan_cards disable row level security;"""
     
                 elif not all_files and not st.session_state.raw_batch:
                     st.info("💡 **How it works:** Select all scans at once — front and back interleaved (front1, back1, front2, back2…). CardHedger visually matches each card, shows recent sold comps, and exports an eBay Add CSV with both images on every listing.")
+
+        # ── GRADE PREDICTOR ───────────────────────────────────────────────────
+        with scan_grade:
+            st.markdown("### 🔬 PSA Grade Predictor")
+            st.caption("Upload a high-res front (and optionally back) scan. Claude Vision analyzes centering, corners, edges, and surface — then predicts your PSA grade.")
+
+            if not ANTHROPIC_KEY:
+                st.warning("⚠️ Add your Anthropic API key to `.streamlit/secrets.toml` to enable AI grading.")
+            else:
+                _gp_c1, _gp_c2 = st.columns(2)
+                with _gp_c1:
+                    st.markdown("**Front of card** *(required)*")
+                    _gp_front = st.file_uploader("Front scan", type=["jpg","jpeg","png","webp"], key="gp_front", label_visibility="collapsed")
+                with _gp_c2:
+                    st.markdown("**Back of card** *(recommended)*")
+                    _gp_back  = st.file_uploader("Back scan",  type=["jpg","jpeg","png","webp"], key="gp_back",  label_visibility="collapsed")
+
+                if _gp_front:
+                    _gp_img_c1, _gp_img_c2 = st.columns(2)
+                    with _gp_img_c1:
+                        st.image(_gp_front, caption="Front", use_container_width=True)
+                    with _gp_img_c2:
+                        if _gp_back:
+                            st.image(_gp_back, caption="Back", use_container_width=True)
+                        else:
+                            st.markdown("*No back image — centering/surface back will be estimated*")
+
+                    if st.button("🔬 Analyze Grade", type="primary", key="gp_run"):
+                        with st.spinner("Analyzing with Claude Vision… (~10 seconds)"):
+                            from PIL import Image as _PILG
+                            import io as _iog
+
+                            def _prep_gp(f):
+                                _b = f.read()
+                                _mime = "image/jpeg" if f.type in ("image/jpeg","image/jpg") else "image/png"
+                                try:
+                                    _img = _PILG.open(_iog.BytesIO(_b))
+                                    _img.thumbnail((2000, 2000), _PILG.LANCZOS)
+                                    _buf = _iog.BytesIO()
+                                    _img.save(_buf, format="JPEG" if _mime == "image/jpeg" else "PNG", quality=92)
+                                    _b = _buf.getvalue()
+                                    _mime = "image/jpeg" if _mime == "image/jpeg" else "image/png"
+                                except Exception:
+                                    pass
+                                return base64.b64encode(_b).decode(), _mime
+
+                            _front_b64, _front_mime = _prep_gp(_gp_front)
+                            _back_b64, _back_mime = None, "image/jpeg"
+                            if _gp_back:
+                                _back_b64, _back_mime = _prep_gp(_gp_back)
+
+                            _gp_result = claude_grade_card(_front_b64, _back_b64, _front_mime, _back_mime)
+                            st.session_state["gp_result"] = _gp_result
+
+                    # ── Results ───────────────────────────────────────────────
+                    _gpr = st.session_state.get("gp_result")
+                    if _gpr:
+                        if "_error" in _gpr:
+                            st.error(f"Analysis failed: {_gpr['_error']}")
+                            if "_raw" in _gpr:
+                                with st.expander("Raw response"):
+                                    st.text(_gpr["_raw"])
+                        else:
+                            _grade_num   = _gpr.get("predicted_grade", "?")
+                            _grade_label = _gpr.get("grade_label", f"PSA {_grade_num}")
+                            _confidence  = _gpr.get("confidence", "medium").capitalize()
+                            _grade_range = _gpr.get("estimated_grade_range", "")
+                            _submit      = _gpr.get("submit_recommended", False)
+                            _rec         = _gpr.get("recommendation", "")
+                            _caveat      = _gpr.get("caveat", "")
+
+                            # Grade badge
+                            _g_color = "#22c55e" if _grade_num == 10 else "#3b82f6" if _grade_num >= 9 else "#f59e0b" if _grade_num >= 7 else "#ef4444"
+                            st.markdown(f"""
+<div style="background:{_g_color}22;border:2px solid {_g_color};border-radius:12px;padding:16px 20px;margin:12px 0;display:flex;align-items:center;gap:20px;">
+  <div style="font-size:3rem;font-weight:900;color:{_g_color};line-height:1;">{_grade_label}</div>
+  <div>
+    <div style="font-size:1rem;color:#94a3b8;">Predicted grade · Confidence: <strong>{_confidence}</strong></div>
+    <div style="font-size:0.9rem;color:#64748b;">Range: {_grade_range}</div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+                            # Scorecard
+                            st.markdown("#### Scorecard")
+                            def _pill(passes, label):
+                                col = "#22c55e" if passes else "#ef4444"
+                                txt = "PASS" if passes else "FAIL"
+                                return f'<span style="background:{col}22;color:{col};border:1px solid {col};border-radius:6px;padding:2px 8px;font-size:0.75rem;font-weight:700;">{txt}</span> {label}'
+
+                            _cen  = _gpr.get("centering", {})
+                            _cor  = _gpr.get("corners", {})
+                            _edg  = _gpr.get("edges", {})
+                            _sur  = _gpr.get("surface", {})
+
+                            _rows = [
+                                ("Centering (front)", _cen.get("front_passes_10", False),
+                                 f"L/R {_cen.get('front_left_right','?')} · T/B {_cen.get('front_top_bottom','?')}",
+                                 _cen.get("note","")),
+                                ("Centering (back)",  _cen.get("back_passes_10", False),
+                                 f"L/R {_cen.get('back_left_right','?')}",
+                                 ""),
+                                ("Corners", _cor.get("passes_10", False),
+                                 f"NW:{_cor.get('NW','?')} · NE:{_cor.get('NE','?')} · SW:{_cor.get('SW','?')} · SE:{_cor.get('SE','?')}",
+                                 _cor.get("note","")),
+                                ("Edges", _edg.get("passes_10", False),
+                                 f"Top:{_edg.get('top','?')} · Bot:{_edg.get('bottom','?')} · L:{_edg.get('left','?')} · R:{_edg.get('right','?')}",
+                                 _edg.get("note","")),
+                                ("Surface (front)", _sur.get("passes_10", False),
+                                 ", ".join(_sur.get("front_defects",[]) or ["Clean"]),
+                                 _sur.get("note","")),
+                                ("Surface (back)", _sur.get("passes_10", False),
+                                 ", ".join(_sur.get("back_defects",[]) or ["Clean"]),
+                                 ""),
+                            ]
+                            _sc_html = '<table style="width:100%;border-collapse:collapse;font-size:0.88rem;">'
+                            for _rname, _passes, _detail, _note in _rows:
+                                _sc_html += f'<tr style="border-bottom:1px solid #1e293b;"><td style="padding:7px 4px;width:140px;font-weight:600;">{_rname}</td><td style="padding:7px 8px;">{_pill(_passes, "")}</td><td style="padding:7px 4px;color:#94a3b8;">{_detail}</td><td style="padding:7px 4px;color:#64748b;font-style:italic;">{_note}</td></tr>'
+                            _sc_html += "</table>"
+                            st.markdown(_sc_html, unsafe_allow_html=True)
+
+                            # Fatal flaws & positives
+                            _flaws = _gpr.get("fatal_flaws", [])
+                            _pos   = _gpr.get("positive_attributes", [])
+                            _fl_c, _po_c = st.columns(2)
+                            with _fl_c:
+                                if _flaws:
+                                    st.markdown("**⚠️ Issues found**")
+                                    for _f in _flaws:
+                                        st.markdown(f"- {_f}")
+                                else:
+                                    st.markdown("**✅ No issues detected**")
+                            with _po_c:
+                                if _pos:
+                                    st.markdown("**💪 Strengths**")
+                                    for _p in _pos:
+                                        st.markdown(f"- {_p}")
+
+                            # Recommendation
+                            _rec_color = "#22c55e" if _submit else "#f59e0b"
+                            _rec_icon  = "✅" if _submit else "⏸️"
+                            st.markdown(f"""
+<div style="background:{_rec_color}18;border-left:4px solid {_rec_color};border-radius:8px;padding:12px 16px;margin:12px 0;">
+  <strong>{_rec_icon} Recommendation</strong><br/><span style="color:#cbd5e1;">{_rec}</span>
+</div>""", unsafe_allow_html=True)
+
+                            if _caveat:
+                                st.caption(f"ℹ️ {_caveat}")
+
+                else:
+                    st.info("Upload the front scan to get started. High-res scans (600 DPI+) give the most accurate results.")
 
 if _active_tab == 3:
     st.markdown("## 📦 Inventory Check")
