@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.62"
+APP_VERSION = "1.5.63"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -2410,32 +2410,46 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
+    # Tab index = position in the st.tabs() list defined below
     _FEATURES = [
-        ("🔍", "Card Research",    "FMV · trend · buy signal · comps"),
-        ("🔥", "Hot Movers",       "What the market is chasing right now"),
-        ("📷", "Scan",             "Photo ID · AI batch · graded slab"),
-        ("📦", "Batch → eBay",     "Drip-scheduled CSV export with photos"),
-        ("📦", "Inventory Check",  "Grading ROI · gem rate · break-even"),
-        ("🧰", "Operations",       "Reprice queue · Sunday workflow"),
-        ("📬", "Submissions",      "PSA order tracker · cert lookup"),
-        ("💰", "Sales & P&L",      "eBay / CollX revenue · monthly P&L"),
-        ("🏷️", "Consignments",    "Track cards you're selling for others"),
-        ("📸", "Image Prep",       "Corner crops · eBay-ready photo sets"),
+        ("🔍", "Card Research",    "FMV · trend · buy signal · comps",         0),
+        ("🔥", "Hot Movers",       "What the market is chasing right now",      1),
+        ("📷", "Scan",             "Photo ID · AI batch · graded slab",         2),
+        ("📦", "Batch → eBay",     "Drip-scheduled CSV export with photos",     6),
+        ("📦", "Inventory Check",  "Grading ROI · gem rate · break-even",       3),
+        ("🧰", "Operations",       "Reprice queue · Sunday workflow",            4),
+        ("📬", "Submissions",      "PSA order tracker · cert lookup",            5),
+        ("💰", "Sales & P&L",      "eBay / CollX revenue · monthly P&L",        10),
+        ("🏷️", "Consignments",    "Track cards you're selling for others",      8),
+        ("📸", "Image Prep",       "Corner crops · eBay-ready photo sets",       11),
     ]
 
-    for _icon, _name, _desc in _FEATURES:
-        st.markdown(
-            f"""<div style="display:flex;gap:10px;align-items:flex-start;
-                padding:7px 6px;border-radius:7px;margin-bottom:3px;
-                background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);">
-              <span style="font-size:1.1rem;line-height:1.3;">{_icon}</span>
-              <div>
-                <div style="font-size:0.8rem;font-weight:600;color:#e2e8f0;line-height:1.2;">{_name}</div>
-                <div style="font-size:0.68rem;color:#64748b;margin-top:2px;">{_desc}</div>
-              </div>
-            </div>""",
-            unsafe_allow_html=True,
-        )
+    st.markdown("<div style='margin-bottom:4px;font-size:0.65rem;color:#64748b;letter-spacing:.08em;'>FEATURES</div>", unsafe_allow_html=True)
+    for _icon, _name, _desc, _tidx in _FEATURES:
+        # Render a styled button that looks like the old card but is clickable
+        _btn_html = f"""
+        <style>
+        div[data-testkey="feat_{_name}"] button {{
+            background: rgba(255,255,255,0.03) !important;
+            border: 1px solid rgba(255,255,255,0.06) !important;
+            border-radius: 7px !important;
+            padding: 7px 8px !important;
+            text-align: left !important;
+            width: 100% !important;
+            color: #e2e8f0 !important;
+            font-size: 0.78rem !important;
+            font-weight: 600 !important;
+            line-height: 1.3 !important;
+            margin-bottom: 2px !important;
+        }}
+        div[data-testkey="feat_{_name}"] button:hover {{
+            border-color: rgba(99,179,237,0.4) !important;
+            background: rgba(99,179,237,0.06) !important;
+        }}
+        </style>"""
+        st.markdown(_btn_html, unsafe_allow_html=True)
+        if st.button(f"{_icon} {_name}\n{_desc}", key=f"feat_{_name}", use_container_width=True):
+            st.session_state["_goto_tab"] = _tidx
 
     st.markdown("---")
 
@@ -2737,6 +2751,18 @@ if is_beta:
     st.info("🔓 **Beta Preview** — You have access to Card Research and Inventory Check. Submission Tracker and Downloads unlock with a full membership.", icon="💎")
 
 tab1, tab7, tab8, tab2, tab6, tab3, tab4, tab5, tab9, tab11, tab10, tab12 = st.tabs(["🔍 Card Research", "🔥 Hot Movers", "📷 Scan", "📦 Inventory Check", "🧰 Operations", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake", "🏷️ Consignments", "📦 Purchases", "💰 Sales & P&L", "📸 Image Prep"])
+
+# ── Sidebar nav: jump to tab when a feature button was clicked ────────────────
+if "_goto_tab" in st.session_state:
+    _jump = st.session_state.pop("_goto_tab")
+    st.components.v1.html(f"""
+    <script>
+    setTimeout(function() {{
+        var tabs = window.parent.document.querySelectorAll('[data-baseweb="tab"]');
+        if (tabs && tabs[{_jump}]) {{ tabs[{_jump}].click(); }}
+    }}, 150);
+    </script>
+    """, height=0)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — Card Research
