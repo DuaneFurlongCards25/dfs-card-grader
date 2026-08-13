@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.74"
+APP_VERSION = "1.5.75"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -402,8 +402,6 @@ header[data-testid="stHeader"] { background: transparent !important; }
 /* ── Page padding ── */
 .block-container { padding-top: 2.5rem !important; }
 
-/* ── Hide the <<< collapse button so sidebar can't be accidentally closed ── */
-[data-testid="stSidebarCollapseButton"] { display: none !important; }
 
 @media (max-width: 768px) {
     /* Tighten page padding */
@@ -2553,47 +2551,7 @@ with st.sidebar:
             st.session_state["show_admin"] = True
 
     st.markdown("---")
-
-    # ── Settings (collapsible) ────────────────────────────────────────────────
-    with st.expander("⚙️ Settings", expanded=False):
-        roi_target   = st.number_input("ROI target (×)", min_value=1.0, max_value=20.0, value=4.0, step=0.5)
-        min_gem      = st.number_input("Min gem rate (%)", min_value=0.0, max_value=100.0, value=40.0, step=5.0)
-        default_tier = st.selectbox("Default grading tier", list(PSA_FEES.keys()), index=0)
-
-        st.markdown("**📦 Shipping Costs**")
-        st.caption("Split your total shipping cost across the cards in the submission.")
-        _sc1, _sc2 = st.columns(2)
-        with _sc1:
-            ship_to = st.number_input(
-                "To PSA ($/card)", min_value=0.0, value=0.0, step=0.50,
-                help="Your actual cost to ship to PSA including insurance, divided by number of cards in the submission"
-            )
-        with _sc2:
-            ship_return = st.number_input(
-                "Return ($/card)", min_value=0.0, value=0.0, step=0.50,
-                help="PSA return shipping cost including insurance, divided by cards in order"
-            )
-        ship_cost = round(ship_to + ship_return, 2)
-        if ship_cost > 0:
-            st.caption(f"Total per card: **${ship_cost:.2f}**")
-        else:
-            st.caption("Enter shipping + insurance costs above.")
-
-        st.markdown("**⏳ Opportunity Cost**")
-        opp_rate = st.slider(
-            "Annual rate (%)", min_value=0.0, max_value=50.0, value=12.0, step=1.0,
-            help="e.g. 12%/yr: $649 locked at Express (~35 days) = $7.47 hidden cost",
-        )
-        if opp_rate > 0:
-            _ex_raw, _ex_tier = 200.0, default_tier
-            _ex_opp  = calc_opp_cost(_ex_raw, _ex_tier, opp_rate, ship_cost)
-            _ex_days = int(PSA_DAYS.get(_ex_tier, 60) * 1.4)
-            st.caption(f"→ $200 card · {_ex_days} days · **${_ex_opp:.2f} hidden cost**")
-
-        st.markdown("**PSA Fees** *(May 2026)*")
-        for tier, _fi in PSA_FEES_ALL.items():
-            st.caption(f"${_fi['fee']:.2f} · ~{_fi['days']} biz days — {tier.split('(')[0].strip()}")
-        st.caption(f"eBay sell fee: {EBAY_FEE*100:.2f}%")
+    st.caption(f"v{APP_VERSION} · Settings ⚙️ in main area below")
 # ─── App Guide dialog ─────────────────────────────────────────────────────────
 @st.dialog(f"📖 How to Maximize {APP_NAME}", width="large")
 def _show_guide():
@@ -2838,6 +2796,23 @@ if not is_beta and SUPABASE_URL:
 # ─── Navigation ───────────────────────────────────────────────────────────────
 if is_beta:
     st.info("🔓 **Beta Preview** — You have access to Card Research and Inventory Check. Submission Tracker and Downloads unlock with a full membership.", icon="💎")
+
+# ── Settings (main content — always visible regardless of sidebar) ────────────
+with st.expander("⚙️ Settings", expanded=False):
+    _s1, _s2, _s3 = st.columns(3)
+    with _s1:
+        roi_target   = st.number_input("ROI target (×)", min_value=1.0, max_value=20.0, value=4.0, step=0.5, key="m_roi")
+        min_gem      = st.number_input("Min gem rate (%)", min_value=0.0, max_value=100.0, value=40.0, step=5.0, key="m_mingem")
+    with _s2:
+        default_tier = st.selectbox("Default grading tier", list(PSA_FEES.keys()), index=0, key="m_tier")
+        opp_rate     = st.slider("Opportunity cost (%/yr)", min_value=0.0, max_value=50.0, value=12.0, step=1.0, key="m_opp",
+                                 help="e.g. 12%/yr: $649 locked at Express (~35 days) = $7.47 hidden cost")
+    with _s3:
+        st.markdown("**📦 Shipping ($/card)**")
+        ship_to     = st.number_input("To PSA", min_value=0.0, value=0.0, step=0.50, key="m_ship_to")
+        ship_return = st.number_input("Return",  min_value=0.0, value=0.0, step=0.50, key="m_ship_ret")
+    ship_cost = round(ship_to + ship_return, 2)
+    st.caption(f"PSA fees: " + " · ".join(f"{t.split('(')[0].strip()} ${f['fee']:.0f}" for t, f in PSA_FEES_ALL.items()))
 
 _NAV_LABELS = [
     "🔍 Card Research", "🔥 Hot Movers", "📷 Scan", "📦 Inventory Check",
