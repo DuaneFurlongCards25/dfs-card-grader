@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.72"
+APP_VERSION = "1.5.73"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -401,9 +401,18 @@ header[data-testid="stHeader"] { background: transparent !important; }
 /* ── Page padding ── */
 .block-container { padding-top: 2.5rem !important; }
 
-/* ── Hide sidebar collapse button so users can't accidentally close it ── */
+/* ── Hide ONLY the collapse (<<<) button inside the open sidebar ── */
+/* collapsedControl is the reopen button — never hide it              */
 [data-testid="stSidebarCollapseButton"] { display: none !important; }
-[data-testid="collapsedControl"]        { display: none !important; }
+
+/* Make the reopen / hamburger button larger and obvious on mobile ── */
+[data-testid="collapsedControl"] {
+    width: 2.75rem !important;
+    height: 2.75rem !important;
+    background: #3b82f6 !important;
+    border-radius: 50% !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5) !important;
+}
 
 @media (max-width: 768px) {
     /* Tighten page padding */
