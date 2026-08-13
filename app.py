@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.79"
+APP_VERSION = "1.5.80"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -2903,8 +2903,13 @@ if _active_tab == 0:
             # CardHedger first — fast and reliable for prices
             if CARDHEDGER_KEY:
                 st.session_state.ch_match_result = ch_card_match(query)
+                # Also fetch all variants so user can switch if wrong one matched
+                _ch_all_variants = ch_search(query)
+                st.session_state.ch_search_results = _ch_all_variants[:15] if _ch_all_variants else []
             # Also try GemRate for population/gem-rate data (fails silently if offline)
             st.session_state.gr_results = search_gemrate(query)
+        # Reset variant picker when new search runs
+        st.session_state.pop("ch_variant_pick", None)
         # Only use GemRate-primary path if CardHedger is not configured
         if st.session_state.gr_results and not CARDHEDGER_KEY:
             st.session_state.pop("ch_match_result", None)
@@ -3326,13 +3331,51 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
 
     elif ch_match_data:
         # ── CardHedger AI-match fallback (GemRate unavailable) ───────────────
-        confidence  = ch_match_data.get("confidence", 0)
-        reasoning   = ch_match_data.get("reasoning", "")
-        desc        = ch_match_data.get("description", query)
-        player      = ch_match_data.get("player", "")
-        set_name    = ch_match_data.get("set", "")
-        variant     = ch_match_data.get("variant", "")
-        prices_list = ch_match_data.get("prices", [])
+
+        # Variant picker — let user switch if CardHedger matched wrong parallel
+        _ch_all = st.session_state.get("ch_search_results", [])
+        _active_match = ch_match_data
+        if _ch_all and len(_ch_all) > 1:
+            _var_labels = [
+                f"{c.get('variant','Base') or 'Base'} — {c.get('description','')}"
+                for c in _ch_all
+            ]
+            _default_var = 0
+            _matched_id = ch_match_data.get("card_id", "")
+            for _vi, _vc in enumerate(_ch_all):
+                if _vc.get("card_id") == _matched_id:
+                    _default_var = _vi
+                    break
+            _picked_var = st.selectbox(
+                "🎨 Variant (CardHedger matched this — change if wrong)",
+                _var_labels,
+                index=_default_var,
+                key="ch_variant_pick",
+            )
+            _picked_idx = _var_labels.index(_picked_var)
+            if _picked_idx != _default_var:
+                # User switched variant — build a synthetic match object from search result
+                _picked_card = _ch_all[_picked_idx]
+                _active_match = {
+                    "card_id":    _picked_card.get("card_id"),
+                    "description": _picked_card.get("description", ""),
+                    "player":     _picked_card.get("player", ""),
+                    "set":        _picked_card.get("set", ""),
+                    "variant":    _picked_card.get("variant", ""),
+                    "image":      _picked_card.get("image", ""),
+                    "confidence": None,
+                    "prices":     _picked_card.get("prices", []),
+                }
+        elif _ch_all:
+            _active_match = ch_match_data
+
+        confidence  = _active_match.get("confidence", 0) or 0
+        reasoning   = _active_match.get("reasoning", "")
+        desc        = _active_match.get("description", query)
+        player      = _active_match.get("player", "")
+        set_name    = _active_match.get("set", "")
+        variant     = _active_match.get("variant", "")
+        prices_list = _active_match.get("prices", [])
 
         # Build price map
         price_map = {}
@@ -3346,7 +3389,7 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
         ch_raw   = price_map.get("Raw")
 
         # Cleaned FMV per grade — batch call instead of 3 sequential calls
-        _cid = ch_match_data.get("card_id")
+        _cid = _active_match.get("card_id")
         if _cid:
             _fb_batch = ch_fmv_batch([
                 {"card_id": _cid, "grade": "Raw"},
@@ -3377,10 +3420,10 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
         )
 
         # ── Card image ────────────────────────────────────────────────────────
-        image_url = ch_match_data.get("image", "") or ""
-        if not image_url and ch_match_data.get("card_id"):
+        image_url = _active_match.get("image", "") or ""
+        if not image_url and _active_match.get("card_id"):
             with st.spinner("Loading card image..."):
-                image_url = ch_card_image(ch_match_data["card_id"])
+                image_url = ch_card_image(_active_match["card_id"])
 
         img_col, info_col = st.columns([1, 3])
         with img_col:
@@ -3390,7 +3433,10 @@ True total cost: ${total_in:,.2f} | Target: ${tgt:,.0f} | Net: ${net:,.0f} | ROI
             ci1, ci2, ci3 = st.columns(3)
             ci1.markdown(f"**Set:** {set_name}")
             ci2.markdown(f"**Variant:** {variant}")
-            ci3.markdown(f"**AI Match confidence:** {confidence * 100:.0f}%")
+            if confidence:
+                ci3.markdown(f"**AI Match confidence:** {confidence * 100:.0f}%")
+            else:
+                ci3.markdown("**Source:** CardHedger")
 
         st.markdown("#### 💰 Market Prices (CardHedger)")
         if prices_list:
