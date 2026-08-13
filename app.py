@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.58"
+APP_VERSION = "1.5.59"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -6657,7 +6657,7 @@ with tab6:
     else:
         from datetime import timezone as _optz
 
-        op_tab_inv, op_tab_queue, op_tab_sunday, op_tab_promote = st.tabs(["📦 Inventory & Aging", "🔄 Reprice Queue", "📅 Sunday Reprice", "📣 Promote Listings"])
+        op_tab_inv, op_tab_queue, op_tab_sunday, op_tab_promote, op_tab_tcp = st.tabs(["📦 Inventory & Aging", "🔄 Reprice Queue", "📅 Sunday Reprice", "📣 Promote Listings", "📊 TCP Reprice"])
 
         # ── helpers shared across both sub-tabs ───────────────────────────────
         def _days_since(dt_str):
@@ -7275,6 +7275,339 @@ with tab6:
                 with _tc3:
                     st.metric("🔴 Tier 3", "$50+", "10% ad rate")
                 st.caption("Upload your active listings CSV above to see counts and step-by-step instructions for each tier.")
+
+        # ── TCP REPRICE TAB ───────────────────────────────────────────────────
+        with op_tab_tcp:
+            import io as _io
+            import math as _math
+            import re as _re
+            from datetime import datetime as _dt
+
+            st.markdown("### 📊 TCP Reprice")
+            st.markdown("Two-step workflow: **Step 1** converts your eBay listings to TCP format for pricing. **Step 2** analyzes TCP results and produces your upload + review files.")
+
+            # ── shared helpers ────────────────────────────────────────────────
+            _TCP_NFL = {'Cardinals','Falcons','Ravens','Bills','Panthers','Bears','Bengals','Browns','Cowboys','Broncos','Lions','Packers','Texans','Colts','Jaguars','Chiefs','Raiders','Chargers','Rams','Dolphins','Vikings','Patriots','Saints','Giants','Jets','Eagles','Steelers','Seahawks','49ers',"49's",'Buccaneers','Titans','Commanders','Niners'}
+            _TCP_NBA = {'Hawks','Celtics','Nets','Hornets','Bulls','Cavaliers','Mavericks','Nuggets','Pistons','Warriors','Rockets','Pacers','Clippers','Lakers','Grizzlies','Heat','Bucks','Timberwolves','Pelicans','Knicks','Thunder','Magic','Sixers','76ers','Suns','Blazers','Kings','Spurs','Raptors','Jazz'}
+            _TCP_MLB = {'Orioles','Red Sox','Yankees','Rays','Blue Jays','White Sox','Guardians','Tigers','Royals','Twins','Astros','Angels','Athletics',"A's",'Mariners','Rangers','Braves','Marlins','Mets','Phillies','Nationals','Cubs','Reds','Brewers','Pirates','Cardinals','Diamondbacks','Rockies','Dodgers','Padres','Giants','Indians'}
+            _TCP_MFRS = ['Panini','Topps','Bowman','Upper Deck','Donruss','Score','Leaf','Fleer',"Collector's Edge",'Pro Set','Hoops','SkyBox','Playoff','Pacific','Wild Card']
+            _TCP_SETS = ['Prizm','Mosaic','Select','Phoenix','Illusions','Absolute','Donruss','Chronicles','National Treasures','Flawless','Immaculate','Revolution','Optic','Contenders','Rookies & Stars','Score','Origins','Elements','Obsidian','Hoops','Court Kings','Certified','Noir','Spectra','Gold Standard','Chrome','Series 1','Series 2','Update','Allen & Ginter','Stadium Club','Heritage','Finest','Now','Gypsy Queen','Archives','Opening Day','Holiday','Big League','Draft','Platinum','Sapphire']
+            _TCP_PARALLELS = ['LogoFractor','Superfractor','X-Fractor','Refractor','Sandglitter','Elevate','Reactive Blue','Reactive Purple','Reactive','Cracked Ice','Mojo','Disco','Laser','Neon','Pulsar','Holo','Wave','Scope','Atomic','Shimmer','Gold','Silver','Blue','Red','Green','Orange','Purple','Pink','Rainbow','Prizm']
+            _TCP_POKEMON = ['pokemon','pokémon','sudowoodo','psyduck','fuecoco','magnemite','quaxwell','scraggy','crocalor','drednaw','quaxly','reuniclus','floragato','pawmo','chansey','rockruff','pineco','sprigatito','pikachu','blitzle']
+            _TCP_STARS = ['ohtani','messi','yamal','haaland']
+
+            _TCP_HEADER = ['*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)','CustomLabel','*Category','StoreCategory','*Title','Subtitle','Relationship','*ConditionID','*C:Graded','*C:Sport','*C:Player/Athlete','*C:Parallel/Variety','*C:Manufacturer','C:Season','*C:Features','*C:Set','CD:Grade - (ID: 27502)','*C:League','CD:Professional Grader - (ID: 27501)','*C:Team','*C:Autographed','CD:Card Condition - (ID: 40001)','*C:Card Name','*C:Card Number','CDA:Certification Number - (ID: 27503)','*C:Type','C:Signed By','C:Autograph Authentication','C:Year Manufactured','C:Card Size','C:Country/Region of Manufacturer','C:Material','C:Autograph Format','C:Vintage','C:Original/Licensed Reprint','C:Event/Tournament','C:Language','C:Autograph Authentication Number','C:Bundle Description','C:California Prop 65 Warning','C:Card Thickness','C:Custom Bundle','C:Insert Set','C:Print Run','PicURL','GalleryType','*Description','*Format','*Duration','*StartPrice','BuyItNowPrice','*Quantity','PayPalAccepted','PayPalEmailAddress','ImmediatePayRequired','PaymentInstructions','*Location','PostalCode','ShippingType','ShippingService-1:Option','ShippingService-1:FreeShipping','ShippingService-1:Cost','ShippingService-1:AdditionalCost','ShippingService-2:Option','ShippingService-2:Cost','*DispatchTimeMax','PromotionalShippingDiscount','ShippingDiscountProfileID','*ReturnsAcceptedOption','ReturnsWithinOption','RefundOption','ShippingCostPaidByOption','AdditionalDetails','ShippingProfileName','ReturnProfileName','PaymentProfileName','TakeBackPolicyID','ProductCompliancePolicyID','ScheduleTime','BestOfferEnabled','MinimumBestOfferPrice','BestOfferAutoAcceptPrice','*C:Rookie','*C:Memorabilia','ActiveListings','SoldListings','Confidence','PricingPulledFrom']
+
+            _TCP_DESC = ('<div style="background:#FDFEFE;border:1px solid #CBD4C2;color:#353535;padding:40px;line-height:1.6;font-family:Arial,sans-serif;font-size:16px;"><h1 style="text-align:center;">{t}</h1><table style="width:100%;margin-top:30px;border-spacing:0;"><tr><th align="left">Payment</th><td>Payment is due within 4 days. Unpaid items may be canceled and relisted.</td></tr><tr><th align="left">Shipping</th><td>Items ship via eBay Standard Envelope. Combined shipping may apply. Usually ships within 1 business day.</td></tr><tr><th align="left">Disclaimer</th><td>All cards are sold as-is. No refunds or returns. Contact us before leaving negative feedback.</td></tr></table><div style="text-align:center;margin:2.5rem 0;"><a href="https://www.tradingcardpricer.com" style="text-decoration:none;color:inherit;"><div style="display:inline-flex;align-items:center;gap:1rem;"><img src="https://s3.us-east-2.amazonaws.com/tcr.image.bucket/Logos/Priced+by+TCP.png" alt="EZ Price by TradingCardPricer" style="width:48%;max-width:300px;"><span style="font-size:2rem;font-weight:bold;">TradingCardPricer</span></div></a></div></div>')
+
+            def _tcp_sport(title):
+                t = title.upper()
+                if any(k in t for k in ['SOCCER','FIFA','WORLD CUP','UEFA','MLS']): return 'SOCCER','SOCCER'
+                if 'WWE' in t or 'WRESTLING' in t: return 'WRESTLING','WWE'
+                if 'BASKETBALL' in t or 'NBA' in t: return 'BASKETBALL','NBA'
+                if 'FOOTBALL' in t or 'NFL' in t: return 'FOOTBALL','NFL'
+                if 'BASEBALL' in t or 'MLB' in t: return 'BASEBALL','MLB'
+                if 'HOCKEY' in t or 'NHL' in t: return 'HOCKEY','NHL'
+                for tm in _TCP_NFL:
+                    if _re.search(r'\b'+_re.escape(tm)+r'\b', title, _re.I): return 'FOOTBALL','NFL'
+                for tm in _TCP_NBA:
+                    if _re.search(r'\b'+_re.escape(tm)+r'\b', title, _re.I): return 'BASKETBALL','NBA'
+                for tm in _TCP_MLB:
+                    if _re.search(r'\b'+_re.escape(tm)+r'\b', title, _re.I): return 'BASEBALL','MLB'
+                if any(m in title for m in ['Topps','Bowman']): return 'BASEBALL','MLB'
+                return 'FOOTBALL','NFL'
+
+            def _tcp_meta(title):
+                year = (_re.search(r'\b(19|20)\d{2}\b', title) or type('',(),{'group':lambda s,x:''})()).group(0) if _re.search(r'\b(19|20)\d{2}\b', title) else ''
+                mfr  = next((m for m in _TCP_MFRS if _re.search(r'\b'+_re.escape(m)+r'\b', title, _re.I)), '')
+                set_ = next((s for s in _TCP_SETS if _re.search(r'\b'+_re.escape(s)+r'\b', title, _re.I)), '')
+                num  = (_re.search(r'#([A-Za-z0-9\-]+)', title) or type('',(),{'group':lambda s,x:''})()).group(1) if _re.search(r'#([A-Za-z0-9\-]+)', title) else ''
+                para = next((p for p in _TCP_PARALLELS if _re.search(r'\b'+_re.escape(p)+r'\b', title, _re.I)), '')
+                pr   = (_re.search(r'/(\d+)', title) or type('',(),{'group':lambda s,x:''})()).group(1) if _re.search(r'/(\d+)', title) else ''
+                team = next((tm for tm_set in [_TCP_MLB,_TCP_NFL,_TCP_NBA] for tm in tm_set if _re.search(r'\b'+_re.escape(tm)+r'\b', title, _re.I)), '')
+                rookie = 'Yes' if _re.search(r'\bRC\b|\bRookie\b|\(RC\)', title, _re.I) else 'No'
+                graded_flag = 'Yes' if _re.search(r'\bPSA\b|\bBGS\b|\bSGC\b|\bCGC\b', title, _re.I) else 'No'
+                # extract player
+                t = title
+                for sub in [year, mfr, set_]:
+                    if sub: t = _re.sub(r'\b'+_re.escape(sub)+r'\b','',t,flags=_re.I,count=1)
+                if num: t = _re.sub(r'#'+_re.escape(num),'',t)
+                t = _re.sub(r'\(RC\)|\bRC\b|\bRookie\b','',t,flags=_re.I)
+                t = _re.sub(r'/\d+','',t)
+                for p in _TCP_PARALLELS: t = _re.sub(r'\b'+_re.escape(p)+r'\b','',t,flags=_re.I)
+                t = _re.sub(r'\b(FOOTBALL|BASKETBALL|BASEBALL|HOCKEY|SOCCER|NFL|NBA|MLB|NHL|WWE|WNBA)\b','',t,flags=_re.I)
+                for tm_set in [_TCP_NFL,_TCP_NBA,_TCP_MLB]:
+                    for tm in tm_set: t = _re.sub(r'\b'+_re.escape(tm)+r'\b','',t,flags=_re.I)
+                player = _re.sub(r'\s+',' ',t).strip(' ,#-')[:50]
+                return year, mfr, set_, num, para, pr, team, rookie, player, graded_flag
+
+            def _tcp_build_row(listing):
+                title  = listing.get('Title','')
+                sku    = listing.get('Custom label (SKU)','') or listing.get('Item number','')
+                price  = listing.get('Current price', listing.get('Start price',''))
+                grader = listing.get('CD:Professional Grader - (ID: 27501)','')
+                grade  = listing.get('CD:Grade - (ID: 27502)','')
+                cert   = listing.get('CDA:Certification Number - (ID: 27503)','')
+                cond   = listing.get('CD:Card Condition - (ID: 40001)','') or 'Excellent'
+                year, mfr, set_, num, para, pr, team, rookie, player, graded_flag = _tcp_meta(title)
+                if grader or grade: graded_flag = 'Yes'
+                sport, league = _tcp_sport(title)
+                desc = _TCP_DESC.replace('{t}', title.replace('"','&quot;'))
+                return {
+                    '*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)':'Add',
+                    'CustomLabel':sku,'*Category':'261328','StoreCategory':'0','*Title':title,
+                    'Subtitle':'','Relationship':'','*ConditionID':'4000','*C:Graded':graded_flag,
+                    '*C:Sport':sport,'*C:Player/Athlete':player,'*C:Parallel/Variety':para,
+                    '*C:Manufacturer':mfr,'C:Season':year,'*C:Features':'','*C:Set':set_,
+                    'CD:Grade - (ID: 27502)':grade,'*C:League':league,
+                    'CD:Professional Grader - (ID: 27501)':grader,'*C:Team':team,
+                    '*C:Autographed':'No','CD:Card Condition - (ID: 40001)':cond,
+                    '*C:Card Name':player,'*C:Card Number':num,
+                    'CDA:Certification Number - (ID: 27503)':cert,'*C:Type':'Sports Trading Card',
+                    'C:Signed By':'','C:Autograph Authentication':'','C:Year Manufactured':year,
+                    'C:Card Size':'','C:Country/Region of Manufacturer':'','C:Material':'',
+                    'C:Autograph Format':'','C:Vintage':'','C:Original/Licensed Reprint':'',
+                    'C:Event/Tournament':'','C:Language':'','C:Autograph Authentication Number':'',
+                    'C:Bundle Description':'','C:California Prop 65 Warning':'','C:Card Thickness':'',
+                    'C:Custom Bundle':'','C:Insert Set':'','C:Print Run':pr,'PicURL':'','GalleryType':'',
+                    '*Description':desc,'*Format':'FixedPrice','*Duration':'GTC','*StartPrice':price,
+                    'BuyItNowPrice':'','*Quantity':'1','PayPalAccepted':'1','PayPalEmailAddress':'',
+                    'ImmediatePayRequired':'1','PaymentInstructions':'','*Location':'United States',
+                    'PostalCode':'','ShippingType':'Flat','ShippingService-1:Option':'USPSFirstClass',
+                    'ShippingService-1:FreeShipping':'1','ShippingService-1:Cost':'0',
+                    'ShippingService-1:AdditionalCost':'0','ShippingService-2:Option':'',
+                    'ShippingService-2:Cost':'','*DispatchTimeMax':'1',
+                    'PromotionalShippingDiscount':'','ShippingDiscountProfileID':'',
+                    '*ReturnsAcceptedOption':'ReturnsNotAccepted','ReturnsWithinOption':'',
+                    'RefundOption':'','ShippingCostPaidByOption':'','AdditionalDetails':'',
+                    'ShippingProfileName':'','ReturnProfileName':'','PaymentProfileName':'',
+                    'TakeBackPolicyID':'','ProductCompliancePolicyID':'','ScheduleTime':'',
+                    'BestOfferEnabled':'','MinimumBestOfferPrice':'','BestOfferAutoAcceptPrice':'',
+                    '*C:Rookie':rookie,'*C:Memorabilia':'No',
+                    'ActiveListings':'','SoldListings':'','Confidence':'','PricingPulledFrom':'',
+                }
+
+            def _tcp_make_csv(rows):
+                buf = _io.StringIO()
+                info = ['Info','Version=1.0.0','Template=fx_category_template_EBAY_US'] + [''] * (len(_TCP_HEADER)-3)
+                buf.write(','.join(info) + '\n')
+                w = csv.DictWriter(buf, fieldnames=_TCP_HEADER)
+                w.writeheader()
+                w.writerows(rows)
+                return buf.getvalue().encode('utf-8')
+
+            def _tcp_make_revise_csv(approved_rows):
+                buf = _io.StringIO()
+                acol = '*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)'
+                buf.write('Info,Version=1.0.0,Template=fx_category_template_EBAY_US,,\n')
+                w = csv.DictWriter(buf, fieldnames=[acol,'ItemID','CustomLabel','*StartPrice'])
+                w.writeheader()
+                for r in approved_rows:
+                    w.writerow({acol:'Revise','ItemID':r['Item number'],'CustomLabel':r['SKU'],'*StartPrice':r['TCP price']})
+                return buf.getvalue().encode('utf-8')
+
+            def _tcp_make_analysis_csv(rows):
+                fields = ['Item number','SKU','Title','Current price','TCP price','Change $','Change %','Direction','Confidence','Reason held','Matched to']
+                buf = _io.StringIO()
+                w = csv.DictWriter(buf, fieldnames=fields)
+                w.writeheader()
+                w.writerows(rows)
+                return buf.getvalue().encode('utf-8')
+
+            # ── STEP 1 ────────────────────────────────────────────────────────
+            st.markdown("---")
+            st.markdown("#### Step 1 — Convert eBay Listings → TCP Format")
+
+            _tcp_ebay_upload = st.file_uploader("Upload eBay active listings report", type=["csv"], key="tcp_ebay_upload")
+
+            if _tcp_ebay_upload:
+                _tcp_ebay_bytes = _tcp_ebay_upload.read()
+                _tcp_ebay_rows  = list(csv.DictReader(_io.StringIO(_tcp_ebay_bytes.decode('utf-8-sig'))))
+                st.session_state['tcp_ebay_rows'] = _tcp_ebay_rows
+                st.success(f"Loaded {len(_tcp_ebay_rows):,} listings")
+
+            _tcp_ebay_rows_ss = st.session_state.get('tcp_ebay_rows', [])
+
+            if _tcp_ebay_rows_ss:
+                _tcpc1, _tcpc2 = st.columns(2)
+                with _tcpc1:
+                    _tcp_min_days = st.number_input("Min days listed", min_value=0, max_value=365, value=7, key="tcp_min_days")
+                with _tcpc2:
+                    _tcp_max_days = st.number_input("Max days listed", min_value=1, max_value=730, value=30, key="tcp_max_days")
+
+                _tcp_today = _dt.today()
+                _tcp_filtered = []
+                for _row in _tcp_ebay_rows_ss:
+                    _sd = _row.get('Start date','')
+                    try:
+                        _dtt = _dt.strptime(_sd[:9], '%b-%d-%y')
+                        _age = (_tcp_today - _dtt).days
+                        if _tcp_min_days <= _age <= _tcp_max_days:
+                            _tcp_filtered.append(_row)
+                    except:
+                        pass
+
+                _tcp_n_batches = _math.ceil(len(_tcp_filtered) / 250) if _tcp_filtered else 0
+                st.info(f"**{len(_tcp_filtered):,} listings** in {_tcp_min_days}–{_tcp_max_days} day range → **{_tcp_n_batches} batch file(s)** of 250")
+
+                if _tcp_filtered:
+                    _tcp_built_rows = [_tcp_build_row(r) for r in _tcp_filtered]
+                    _tcp_date_label = _tcp_today.strftime('%Y-%m-%d')
+                    _dl_cols = st.columns(min(_tcp_n_batches, 4))
+                    for _bi in range(_tcp_n_batches):
+                        _batch = _tcp_built_rows[_bi*250:(_bi+1)*250]
+                        _col = _dl_cols[_bi % len(_dl_cols)]
+                        with _col:
+                            st.download_button(
+                                f"📥 Batch {_bi+1} ({len(_batch)} rows)",
+                                data=_tcp_make_csv(_batch),
+                                file_name=f"TCP_{_tcp_date_label}_{_tcp_min_days}to{_tcp_max_days}day_batch{str(_bi+1).zfill(2)}.csv",
+                                mime="text/csv",
+                                key=f"tcp_dl_batch_{_bi}",
+                            )
+                    st.caption("Upload these files to TradingCardPricer.com, then bring the completed files back to Step 2 below.")
+
+            # ── STEP 2 ────────────────────────────────────────────────────────
+            st.markdown("---")
+            st.markdown("#### Step 2 — Analyze TCP Results & Build Upload Files")
+
+            _tcp_completed_files = st.file_uploader(
+                "Upload TCP completed CSV(s)", type=["csv"],
+                accept_multiple_files=True, key="tcp_completed_upload"
+            )
+
+            _tcps2c1, _tcps2c2 = st.columns(2)
+            with _tcps2c1:
+                _tcp_conf_thresh = st.number_input("Min confidence to approve (%)", min_value=0, max_value=100, value=85, key="tcp_conf_thresh")
+            with _tcps2c2:
+                _tcp_chg_thresh = st.number_input("Max price change to approve (%)", min_value=1, max_value=100, value=20, key="tcp_chg_thresh")
+
+            st.caption("⭐ Ohtani · Messi · Yamal · Haaland — never priced down (up only)")
+
+            if _tcp_completed_files:
+                _ebay_ref = st.session_state.get('tcp_ebay_rows', [])
+                if not _ebay_ref:
+                    _tcp_ebay2 = st.file_uploader("Also upload your original eBay listings CSV (needed for current prices)", type=["csv"], key="tcp_ebay_ref2")
+                    if _tcp_ebay2:
+                        _ebay_ref = list(csv.DictReader(_io.StringIO(_tcp_ebay2.read().decode('utf-8-sig'))))
+                        st.session_state['tcp_ebay_rows'] = _ebay_ref
+
+                if _ebay_ref:
+                    _ebay_by_sku = {r.get('Custom label (SKU)','').strip(): r for r in _ebay_ref if r.get('Custom label (SKU)','')}
+
+                    _approved_all, _review_all, _analysis_all = [], [], []
+                    _batch_stats = []
+
+                    for _cf in _tcp_completed_files:
+                        _cf_lines = _cf.read().decode('utf-8-sig').splitlines()
+                        _cf_start = 1 if _cf_lines[0].startswith('Info') else 0
+                        _cf_rows  = list(csv.DictReader(_cf_lines[_cf_start:]))
+                        for _r in _cf_rows:
+                            for _k in list(_r.keys()):
+                                if _k != _k.strip(): _r[_k.strip()] = _r.pop(_k)
+
+                        _b_approved = _b_review = _b_skip = 0
+                        for _r in _cf_rows:
+                            _sku      = _r.get('CustomLabel','').strip()
+                            _title    = _r.get('*Title','').strip()
+                            _new_raw  = _r.get('*StartPrice','').strip()
+                            _conf_raw = _r.get('Confidence','').strip().replace('%','')
+                            _pulled   = _r.get('PricingPulledFrom','').strip()
+                            _ebay_r   = _ebay_by_sku.get(_sku, {})
+                            _item_num = _ebay_r.get('Item number','').strip()
+                            _cur_raw  = _ebay_r.get('Current price', _ebay_r.get('Start price','')).strip()
+
+                            try:
+                                _new_p = float(_new_raw)
+                                if _new_p <= 0: raise ValueError
+                            except: _b_skip += 1; continue
+                            if any(_k in _title.lower() for _k in _TCP_POKEMON): _b_skip += 1; continue
+                            try: _cur_p = float(_cur_raw)
+                            except: _b_skip += 1; continue
+                            try: _conf = int(_conf_raw) if _conf_raw else 0
+                            except: _conf = 0
+
+                            _diff = _new_p - _cur_p
+                            _pct  = (_diff / _cur_p * 100) if _cur_p else 0
+                            _dir  = 'UP' if _diff > 0.005 else ('DOWN' if _diff < -0.005 else 'NO CHANGE')
+                            _star = any(_s in _title.lower() for _s in _TCP_STARS)
+
+                            if _star and _dir == 'DOWN': _b_skip += 1; continue
+                            if _dir == 'NO CHANGE': _b_skip += 1; continue
+
+                            _reasons = []
+                            if _conf < _tcp_conf_thresh: _reasons.append(f"Conf {_conf}%<{_tcp_conf_thresh}%")
+                            if abs(_pct) > _tcp_chg_thresh: _reasons.append(f"Chg {_pct:+.1f}%>{_tcp_chg_thresh}%")
+
+                            _row_out = {
+                                'Item number'  : _item_num,
+                                'SKU'          : _sku,
+                                'Title'        : _title,
+                                'Current price': f"{_cur_p:.2f}",
+                                'TCP price'    : f"{_new_p:.2f}",
+                                'Change $'     : f"{_diff:+.2f}",
+                                'Change %'     : f"{_pct:+.1f}%",
+                                'Direction'    : _dir,
+                                'Confidence'   : f"{_conf}%",
+                                'Reason held'  : ' | '.join(_reasons),
+                                'Matched to'   : _pulled[:100],
+                            }
+                            _analysis_all.append(_row_out)
+                            if _reasons:
+                                _review_all.append(_row_out); _b_review += 1
+                            else:
+                                _approved_all.append(_row_out); _b_approved += 1
+
+                        _batch_stats.append((_cf.name, _b_approved, _b_review, _b_skip))
+
+                    # Stats display
+                    st.markdown("##### Results")
+                    _sc1, _sc2, _sc3 = st.columns(3)
+                    _sc1.metric("✅ Approved to Upload", len(_approved_all))
+                    _sc2.metric("🔍 Held for Review", len(_review_all))
+                    _sc3.metric("📊 Total Analyzed", len(_analysis_all))
+
+                    if len(_batch_stats) > 1:
+                        with st.expander("Per-file breakdown"):
+                            for _fn, _a, _rv, _sk in _batch_stats:
+                                st.caption(f"**{_fn}** — ✅{_a} approved / 🔍{_rv} review / ⏭{_sk} skipped")
+
+                    if _approved_all:
+                        _up_a   = sum(1 for r in _approved_all if r['Direction']=='UP')
+                        _down_a = sum(1 for r in _approved_all if r['Direction']=='DOWN')
+                        _up_r   = sum(1 for r in _review_all   if r['Direction']=='UP')
+                        _down_r = sum(1 for r in _review_all   if r['Direction']=='DOWN')
+                        st.caption(f"Approved: {_up_a} ↑ up / {_down_a} ↓ down  ·  Review: {_up_r} ↑ up / {_down_r} ↓ down")
+
+                    _tcp_label = _dt.today().strftime('%Y-%m-%d')
+                    _dl1, _dl2, _dl3 = st.columns(3)
+                    with _dl1:
+                        if _approved_all:
+                            st.download_button(
+                                f"📤 eBay Upload ({len(_approved_all)} listings)",
+                                data=_tcp_make_revise_csv(_approved_all),
+                                file_name=f"eBay_FileExchange_Revise_{_tcp_label}.csv",
+                                mime="text/csv", key="tcp_dl_revise",
+                                help="File Exchange format — upload to eBay Seller Hub"
+                            )
+                        else:
+                            st.caption("No approved listings")
+                    with _dl2:
+                        if _analysis_all:
+                            st.download_button(
+                                f"📊 Price Analysis ({len(_analysis_all)} rows)",
+                                data=_tcp_make_analysis_csv(_analysis_all),
+                                file_name=f"eBay_PriceAnalysis_{_tcp_label}.csv",
+                                mime="text/csv", key="tcp_dl_analysis",
+                            )
+                    with _dl3:
+                        if _review_all:
+                            st.download_button(
+                                f"🔍 Review Sheet ({len(_review_all)} rows)",
+                                data=_tcp_make_analysis_csv(_review_all),
+                                file_name=f"eBay_PriceReview_{_tcp_label}.csv",
+                                mime="text/csv", key="tcp_dl_review",
+                            )
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 9 — Consignments (DC Sports)
