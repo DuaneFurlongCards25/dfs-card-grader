@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.63"
+APP_VERSION = "1.5.64"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -2424,31 +2424,8 @@ with st.sidebar:
         ("📸", "Image Prep",       "Corner crops · eBay-ready photo sets",       11),
     ]
 
-    st.markdown("<div style='margin-bottom:4px;font-size:0.65rem;color:#64748b;letter-spacing:.08em;'>FEATURES</div>", unsafe_allow_html=True)
     for _icon, _name, _desc, _tidx in _FEATURES:
-        # Render a styled button that looks like the old card but is clickable
-        _btn_html = f"""
-        <style>
-        div[data-testkey="feat_{_name}"] button {{
-            background: rgba(255,255,255,0.03) !important;
-            border: 1px solid rgba(255,255,255,0.06) !important;
-            border-radius: 7px !important;
-            padding: 7px 8px !important;
-            text-align: left !important;
-            width: 100% !important;
-            color: #e2e8f0 !important;
-            font-size: 0.78rem !important;
-            font-weight: 600 !important;
-            line-height: 1.3 !important;
-            margin-bottom: 2px !important;
-        }}
-        div[data-testkey="feat_{_name}"] button:hover {{
-            border-color: rgba(99,179,237,0.4) !important;
-            background: rgba(99,179,237,0.06) !important;
-        }}
-        </style>"""
-        st.markdown(_btn_html, unsafe_allow_html=True)
-        if st.button(f"{_icon} {_name}\n{_desc}", key=f"feat_{_name}", use_container_width=True):
+        if st.button(f"{_icon}  {_name}", key=f"feat_{_name}", use_container_width=True, help=_desc):
             st.session_state["_goto_tab"] = _tidx
 
     st.markdown("---")
@@ -2757,10 +2734,23 @@ if "_goto_tab" in st.session_state:
     _jump = st.session_state.pop("_goto_tab")
     st.components.v1.html(f"""
     <script>
-    setTimeout(function() {{
-        var tabs = window.parent.document.querySelectorAll('[data-baseweb="tab"]');
-        if (tabs && tabs[{_jump}]) {{ tabs[{_jump}].click(); }}
-    }}, 150);
+    function clickTab() {{
+        // Streamlit tabs render as <button role="tab"> elements
+        var tabs = window.parent.document.querySelectorAll('button[role="tab"]');
+        if (tabs && tabs.length > {_jump}) {{
+            tabs[{_jump}].click();
+            return true;
+        }}
+        return false;
+    }}
+    // Retry with increasing delays in case the DOM isn't ready yet
+    if (!clickTab()) {{
+        setTimeout(function() {{
+            if (!clickTab()) {{
+                setTimeout(clickTab, 500);
+            }}
+        }}, 300);
+    }}
     </script>
     """, height=0)
 
