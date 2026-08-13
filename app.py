@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.64"
+APP_VERSION = "1.5.65"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -2730,29 +2730,22 @@ if is_beta:
 tab1, tab7, tab8, tab2, tab6, tab3, tab4, tab5, tab9, tab11, tab10, tab12 = st.tabs(["🔍 Card Research", "🔥 Hot Movers", "📷 Scan", "📦 Inventory Check", "🧰 Operations", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake", "🏷️ Consignments", "📦 Purchases", "💰 Sales & P&L", "📸 Image Prep"])
 
 # ── Sidebar nav: jump to tab when a feature button was clicked ────────────────
+# Uses an inline img onload to run JS in the main Streamlit document (not an iframe),
+# so it can directly find and click the tab button without cross-origin restrictions.
 if "_goto_tab" in st.session_state:
     _jump = st.session_state.pop("_goto_tab")
-    st.components.v1.html(f"""
-    <script>
-    function clickTab() {{
-        // Streamlit tabs render as <button role="tab"> elements
-        var tabs = window.parent.document.querySelectorAll('button[role="tab"]');
-        if (tabs && tabs.length > {_jump}) {{
-            tabs[{_jump}].click();
-            return true;
-        }}
-        return false;
-    }}
-    // Retry with increasing delays in case the DOM isn't ready yet
-    if (!clickTab()) {{
-        setTimeout(function() {{
-            if (!clickTab()) {{
-                setTimeout(clickTab, 500);
-            }}
-        }}, 300);
-    }}
-    </script>
-    """, height=0)
+    _gif = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+    st.markdown(
+        f'<img src="data:image/gif;base64,{_gif}" style="display:none;position:absolute" '
+        f'onload="(function(){{'
+        f'  function go(){{'
+        f'    var t=document.querySelectorAll(\'button[role=\\"tab\\"]\');'
+        f'    if(t&&t.length>{_jump}){{t[{_jump}].click();return true;}}return false;'
+        f'  }}'
+        f'  if(!go()){{setTimeout(function(){{if(!go())setTimeout(go,600);}},300);}}'
+        f'}})()"/>',
+        unsafe_allow_html=True,
+    )
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — Card Research
