@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.66"
+APP_VERSION = "1.5.67"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -2727,15 +2727,18 @@ if not is_beta and SUPABASE_URL:
 if is_beta:
     st.info("🔓 **Beta Preview** — You have access to Card Research and Inventory Check. Submission Tracker and Downloads unlock with a full membership.", icon="💎")
 
-# If a sidebar feature button was clicked, update the active nav
-if "_goto_tab" in st.session_state:
-    st.session_state["_nav"] = st.session_state.pop("_goto_tab")
-
 _NAV_LABELS = [
     "🔍 Card Research", "🔥 Hot Movers", "📷 Scan", "📦 Inventory Check",
     "🧰 Operations", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake",
     "🏷️ Consignments", "📦 Purchases", "💰 Sales & P&L", "📸 Image Prep",
 ]
+
+# If a sidebar feature button was clicked, update both nav state AND the radio widget's own state key
+if "_goto_tab" in st.session_state:
+    _target = st.session_state.pop("_goto_tab")
+    st.session_state["_nav"] = _target
+    st.session_state["_nav_radio"] = _NAV_LABELS[_target]
+
 _active_tab = st.session_state.get("_nav", 0)
 _selected_label = st.radio(
     "Section", _NAV_LABELS, index=_active_tab,
