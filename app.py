@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.59"
+APP_VERSION = "1.5.60"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -7436,16 +7436,46 @@ with tab6:
                     _tcp_max_days = st.number_input("Max days listed", min_value=1, max_value=730, value=30, key="tcp_max_days")
 
                 _tcp_today = _dt.today()
+
+                # Case-insensitive column lookup for Start date
+                _tcp_col_map = {k.lower(): k for k in (_tcp_ebay_rows_ss[0].keys() if _tcp_ebay_rows_ss else {})}
+                _tcp_date_col = _tcp_col_map.get('start date', 'Start date')
+
+                def _tcp_parse_age(row):
+                    """Parse eBay start date → age in days. Handles timezone suffixes and single-digit days."""
+                    sd = str(row.get(_tcp_date_col, '') or '').strip()
+                    for tz in [' PDT', ' PST', ' EDT', ' EST', ' UTC']:
+                        sd = sd.replace(tz, '')
+                    sd = sd.strip()
+                    for fmt in ('%b-%d-%y %H:%M:%S', '%b-%d-%y'):
+                        try:
+                            return (_tcp_today - _dt.strptime(sd, fmt)).days
+                        except Exception:
+                            pass
+                    return None
+
                 _tcp_filtered = []
+                _tcp_age_buckets = {'0–7': 0, '8–30': 0, '31–60': 0, '61–90': 0, '91–180': 0, '180+': 0, 'unknown': 0}
                 for _row in _tcp_ebay_rows_ss:
-                    _sd = _row.get('Start date','')
-                    try:
-                        _dtt = _dt.strptime(_sd[:9], '%b-%d-%y')
-                        _age = (_tcp_today - _dtt).days
-                        if _tcp_min_days <= _age <= _tcp_max_days:
-                            _tcp_filtered.append(_row)
-                    except:
-                        pass
+                    _age = _tcp_parse_age(_row)
+                    if _age is None:
+                        _tcp_age_buckets['unknown'] += 1
+                        continue
+                    if _age <= 7:       _tcp_age_buckets['0–7'] += 1
+                    elif _age <= 30:    _tcp_age_buckets['8–30'] += 1
+                    elif _age <= 60:    _tcp_age_buckets['31–60'] += 1
+                    elif _age <= 90:    _tcp_age_buckets['61–90'] += 1
+                    elif _age <= 180:   _tcp_age_buckets['91–180'] += 1
+                    else:               _tcp_age_buckets['180+'] += 1
+                    if _tcp_min_days <= _age <= _tcp_max_days:
+                        _tcp_filtered.append(_row)
+
+                # Show age distribution so user knows what's in the file
+                _bucket_parts = [f"**{v}** {k}d" for k, v in _tcp_age_buckets.items() if v > 0 and k != 'unknown']
+                if _tcp_age_buckets['unknown']:
+                    _bucket_parts.append(f"{_tcp_age_buckets['unknown']} unparseable")
+                if _bucket_parts:
+                    st.caption("Age breakdown: " + " · ".join(_bucket_parts))
 
                 _tcp_n_batches = _math.ceil(len(_tcp_filtered) / 250) if _tcp_filtered else 0
                 st.info(f"**{len(_tcp_filtered):,} listings** in {_tcp_min_days}–{_tcp_max_days} day range → **{_tcp_n_batches} batch file(s)** of 250")
