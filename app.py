@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.78"
+APP_VERSION = "1.5.79"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -2987,6 +2987,9 @@ if _active_tab == 0:
         ch_raw_sales = []
         ch_psa10_sales = []
         ch_card_name = ""
+        ch_matched_desc = ""
+        ch_matched_variant = ""
+        ch_match_confidence = None
         ch_id = None
         ch_raw_fmv = {}
         ch_psa10_fmv = {}
@@ -3005,6 +3008,9 @@ if _active_tab == 0:
                     ch_card = ch_matches[0]
                     ch_id = ch_card.get("card_id") or ch_card.get("id")
                     ch_card_name = ch_card.get("name") or ch_card.get("title") or ""
+                    ch_matched_desc = ch_card.get("description") or ch_card.get("name") or ch_card.get("title") or ""
+                    ch_matched_variant = ch_card.get("variant") or ""
+                    ch_match_confidence = ch_card.get("confidence")
                     if ch_id:
                         # Parallel: comps × 3 + price_history — all independent calls
                         def _fetch_raw():   return ch_comps(ch_id, "Raw")
@@ -3043,6 +3049,21 @@ if _active_tab == 0:
                             if k in psa_data and isinstance(psa_data[k], list):
                                 ch_psa10_sales = psa_data[k]; break
                         ch_trend_dir, ch_trend_pct = calculate_trend(history)
+
+            # Show which card was matched (important for numbered parallels)
+            if ch_matched_desc:
+                import re as _re
+                _conf_str = f" · {ch_match_confidence*100:.0f}% match" if ch_match_confidence else ""
+                _variant_str = f" · **{ch_matched_variant}**" if ch_matched_variant else ""
+                st.caption(f"🎯 Matched: {ch_matched_desc}{_variant_str}{_conf_str}")
+                # Detect numbered parallel in user query (/150, /99, /50, /25, /10, /5, /1)
+                _parallel_m = _re.search(r"/(\d+)", desc)
+                if _parallel_m and ch_matched_variant and "base" in ch_matched_variant.lower():
+                    st.warning(
+                        f"⚠️ You searched for **/{_parallel_m.group(1)}** (a numbered parallel) but CardHedger matched the **Base** card — "
+                        f"pricing below is for the **base** version, NOT your numbered parallel. "
+                        f"Search for the specific parallel name (e.g. 'Gold Refractor /150') for accurate pricing."
+                    )
 
             if ch_raw_avg or ch_psa10_avg or ch_raw_sales or ch_psa10_sales:
                 def _fmt_sale_row(s):
