@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.76"
+APP_VERSION = "1.5.77"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -398,6 +398,18 @@ st.markdown("""
 /* ── Hide Streamlit toolbar (GitHub, edit, share icons) ── */
 [data-testid="stToolbar"] { display: none !important; }
 header[data-testid="stHeader"] { background: transparent !important; }
+
+/* ── Force sidebar always visible — overrides browser localStorage collapsed state ── */
+section[data-testid="stSidebar"] {
+    transform: translateX(0) !important;
+    display: block !important;
+    visibility: visible !important;
+    min-width: 244px !important;
+    width: 244px !important;
+    left: 0 !important;
+    margin-left: 0 !important;
+    position: relative !important;
+}
 
 /* ── Page padding ── */
 .block-container { padding-top: 2.5rem !important; }
