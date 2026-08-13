@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.67"
+APP_VERSION = "1.5.68"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -2415,7 +2415,7 @@ with st.sidebar:
         ("🔍", "Card Research",    "FMV · trend · buy signal · comps",         0),
         ("🔥", "Hot Movers",       "What the market is chasing right now",      1),
         ("📷", "Scan",             "Photo ID · AI batch · graded slab",         2),
-        ("📦", "Batch → eBay",     "Drip-scheduled CSV export with photos",     6),
+        ("📦", "Batch → eBay",     "Drip-scheduled CSV export with photos",     2),
         ("📦", "Inventory Check",  "Grading ROI · gem rate · break-even",       3),
         ("🧰", "Operations",       "Reprice queue · Sunday workflow",            4),
         ("📬", "Submissions",      "PSA order tracker · cert lookup",            5),
