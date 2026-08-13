@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.71"
+APP_VERSION = "1.5.72"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -3103,6 +3103,22 @@ if _active_tab == 0:
         else:
             st.info("📊 Live sold comps will appear here once the CardHedger API is connected.")
 
+        # ── Quick pricing summary + GemRate link ─────────────────────────────
+        _raw_show   = fmv_price(ch_raw_fmv)   or ch_raw_avg
+        _p10_show   = fmv_price(ch_psa10_fmv) or ch_psa10_avg
+        if _raw_show or _p10_show:
+            _ps_c1, _ps_c2, _ps_c3, _ps_c4 = st.columns(4)
+            _ps_c1.metric("📦 Raw Avg", f"${_raw_show:,.2f}" if _raw_show else "—")
+            _ps_c2.metric("💎 PSA 10 Avg", f"${_p10_show:,.2f}" if _p10_show else "—")
+            if _raw_show and _p10_show:
+                _uplift = _p10_show - _raw_show
+                _ps_c3.metric("💰 Grade Uplift", f"${_uplift:,.2f}", help="PSA 10 avg minus raw avg — what grading adds in dollar terms")
+            _ps_c4.metric("🔵 Gem Rate", fmt_gem(gem) if gem is not None else "—")
+            _gr_btn_url = gemrate_url(sel.get("gemrate_id", ""))
+            if _gr_btn_url:
+                st.link_button("📊 View Full Pop Report on GemRate →", _gr_btn_url)
+            st.markdown("---")
+
         # Prefer cleaned FMV for pre-fills; fall back to the comp average.
         raw_auto    = fmv_price(ch_raw_fmv)   or ch_raw_avg
         graded_auto = fmv_price(ch_psa10_fmv) or ch_psa10_avg
@@ -6057,6 +6073,57 @@ alter table scan_cards disable row level security;"""
             st.markdown("### 🔬 PSA Grade Predictor")
             st.caption("Upload a high-res front (and optionally back) scan. Claude Vision analyzes centering, corners, edges, and surface — then predicts your PSA grade.")
 
+            # ── Step 1: Quick GemRate check ───────────────────────────────────
+            st.markdown("#### Step 1 — Is it worth grading?")
+            st.caption("Check gem rate and pricing before you scan. Skip if you already know.")
+            _gq_col, _gq_btn = st.columns([5, 1])
+            with _gq_col:
+                _gq = st.text_input("Card name", placeholder="e.g. Luka Doncic Prizm RC PSA — or leave blank to skip", key="gp_quick_query", label_visibility="collapsed")
+            with _gq_btn:
+                _gq_go = st.button("Check", key="gp_quick_go", use_container_width=True)
+
+            if _gq and (_gq_go or st.session_state.get("gp_last_q") != _gq):
+                st.session_state["gp_last_q"] = _gq
+                with st.spinner("Fetching gem rate + pricing…"):
+                    _gq_gr = search_gemrate(_gq)
+                    _gq_ch = ch_card_match(_gq) if CARDHEDGER_KEY else None
+                st.session_state["gp_quick_results"] = (_gq_gr, _gq_ch)
+
+            _gq_data = st.session_state.get("gp_quick_results")
+            if _gq_data:
+                _gq_gr_res, _gq_ch_res = _gq_data
+                if _gq_gr_res:
+                    _gq_sel = _gq_gr_res[0]
+                    _gq_gem = _gq_sel.get("gem_rate")
+                    _gq_pop = _gq_sel.get("total_population", 0)
+                    _gq_gems = _gq_sel.get("gems", 0)
+                    _gq_ch_raw, _gq_ch_p10 = None, None
+                    if _gq_ch_res and CARDHEDGER_KEY:
+                        _gq_id = _gq_ch_res.get("card_id") or _gq_ch_res.get("id")
+                        if _gq_id:
+                            _gq_fmv = ch_fmv_batch([{"card_id": _gq_id, "grade": "Raw"}, {"card_id": _gq_id, "grade": "PSA 10"}])
+                            _gq_items = {(i.get("grade") or "").upper(): i for i in (_gq_fmv.get("items") or _gq_fmv.get("results") or [])}
+                            _gq_ch_raw = fmv_price(_gq_items.get("RAW") or {})
+                            _gq_ch_p10 = fmv_price(_gq_items.get("PSA 10") or {})
+
+                    _gq_m1, _gq_m2, _gq_m3, _gq_m4 = st.columns(4)
+                    with _gq_m1:
+                        st.markdown("**Gem Rate**")
+                        st.markdown(gem_bar_html(_gq_gem), unsafe_allow_html=True)
+                    _gq_m2.metric("Total Pop", f"{_gq_pop:,}")
+                    _gq_m3.metric("Gem Copies", f"{_gq_gems:,}")
+                    if _gq_ch_raw or _gq_ch_p10:
+                        _gq_m4.metric("💰 Grade Uplift", f"${(_gq_ch_p10 or 0) - (_gq_ch_raw or 0):,.2f}" if _gq_ch_raw and _gq_ch_p10 else "—")
+                    _pr1, _pr2, _pr3 = st.columns(3)
+                    if _gq_ch_raw:  _pr1.metric("📦 Raw Avg",    f"${_gq_ch_raw:,.2f}")
+                    if _gq_ch_p10:  _pr2.metric("💎 PSA 10 Avg", f"${_gq_ch_p10:,.2f}")
+                    _gq_url = gemrate_url(_gq_sel.get("gemrate_id", ""))
+                    if _gq_url:
+                        _pr3.markdown(f"[📊 Full pop report on GemRate ↗]({_gq_url})")
+                else:
+                    st.info("No GemRate results — try a different card name, or skip and proceed to scan.")
+
+            st.markdown("#### Step 2 — Scan the card")
             if not ANTHROPIC_KEY:
                 st.warning("⚠️ Add your Anthropic API key to `.streamlit/secrets.toml` to enable AI grading.")
             else:
