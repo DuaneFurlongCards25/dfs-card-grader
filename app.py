@@ -15,7 +15,7 @@ import re
 import collections
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.60"
+APP_VERSION = "1.5.61"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -7438,7 +7438,10 @@ with tab6:
                 _tcp_today = _dt.today()
 
                 # Case-insensitive column lookup for Start date
-                _tcp_col_map = {k.lower(): k for k in (_tcp_ebay_rows_ss[0].keys() if _tcp_ebay_rows_ss else {})}
+                try:
+                    _tcp_col_map = {str(k).lower(): k for k in _tcp_ebay_rows_ss[0]}
+                except Exception:
+                    _tcp_col_map = {}
                 _tcp_date_col = _tcp_col_map.get('start date', 'Start date')
 
                 def _tcp_parse_age(row):
