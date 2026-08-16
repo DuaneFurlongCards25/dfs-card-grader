@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.94"
+APP_VERSION = "1.5.95"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4190,6 +4190,34 @@ if _active_tab == 2:
             else:
                 return "$501-600"
 
+        def _ab_expand_title(base_title, r, target=78):
+            """Pad eBay title toward target chars using card metadata."""
+            t = base_title.strip()
+            team     = str(r.get('Team', '') or '').strip()
+            sport    = str(r.get('Sport', '') or '').strip()
+            numbered = str(r.get('Numbered', '') or '').strip()
+            is_rc    = bool(r.get('Rookie', False))
+            notes    = str(r.get('Notes', '') or '').strip()
+            extras = []
+            if is_rc and 'Rookie' not in t:
+                extras.append('Rookie Card')
+            if team and team.upper() not in t.upper():
+                extras.append(team)
+            if numbered and numbered not in t:
+                extras.append(numbered)
+            if sport and sport.upper() not in t.upper():
+                extras.append(sport)
+            if notes and len(notes) <= 25 and notes.upper() not in t.upper():
+                extras.append(notes)
+            extras += ['Sports Trading Card', 'Mint']
+            for extra in extras:
+                candidate = t + ' ' + extra
+                if len(candidate) <= target:
+                    t = candidate
+                elif len(t) >= target:
+                    break
+            return t[:80]
+
         def _ab_make_tcp_row(r, idx):
             """Build a TCP/eBay row dict from a Vision scan result dict."""
             player    = str(r.get('Player', '') or '')
@@ -4740,6 +4768,10 @@ if _active_tab == 2:
                             "Card #":      _abcv.get("card_number", ""),
                             "Parallel":    _abcv.get("parallel", ""),
                             "Sport":       _abcv.get("sport", ""),
+                            "Team":        _abcv.get("team", ""),
+                            "Rookie":      bool(_abcv.get("rookie", False)),
+                            "Numbered":    str(_abcv.get("numbered", "") or ""),
+                            "Notes":       str(_abcv.get("notes", "") or ""),
                             "CH Match":    _ab_ch_match,
                             "CH Image":    (_abm.get("image", "") if _abm else ""),
                             "PicURLs":     _ab_pic_urls,
@@ -4869,8 +4901,44 @@ if _active_tab == 2:
                 st.markdown("---")
                 st.markdown("#### Step 2 — Pricing")
                 _ab_tcp_rows   = [_ab_make_tcp_row(r, i + 1) for i, r in enumerate(_ab_res)]
-                _ab_ch_priced  = sum(1 for r in _ab_res if r.get("FMV_raw"))
-                _ab_ch_missing = len(_ab_res) - _ab_ch_priced
+                # Auto-expand all titles to ~80 chars
+                for _i2, (_r2, _row2) in enumerate(zip(_ab_res, _ab_tcp_rows)):
+                    _row2['*Title'] = _ab_expand_title(_row2.get('*Title', ''), _r2)
+
+                # ── Editable title + price review ─────────────────────────────
+                st.markdown("**Review titles & prices before downloading** (click any cell to edit)")
+                _ab_edit_df = pd.DataFrame([{
+                    'SKU':   row.get('CustomLabel', f'LOT{i+1:03d}'),
+                    'Title': row.get('*Title', ''),
+                    'Chars': len(row.get('*Title', '')),
+                    'Price': row.get('*StartPrice', ''),
+                    'Source': 'CH ✅' if _ab_res[i].get('FMV_raw') else '— needs TCP',
+                } for i, row in enumerate(_ab_tcp_rows)])
+                _ab_edited_df = st.data_editor(
+                    _ab_edit_df,
+                    hide_index=True,
+                    use_container_width=True,
+                    height=min(500, 55 + len(_ab_tcp_rows) * 40),
+                    column_config={
+                        'SKU':    st.column_config.TextColumn('SKU',     width='small',  disabled=True),
+                        'Title':  st.column_config.TextColumn('Title (80 max)', width='large'),
+                        'Chars':  st.column_config.NumberColumn('Chars', width='small',  disabled=True),
+                        'Price':  st.column_config.NumberColumn('$ Price', width='small', format='$%.2f'),
+                        'Source': st.column_config.TextColumn('Priced By', width='small', disabled=True),
+                    },
+                    key='ab_title_editor',
+                )
+                # Apply edited titles and prices back to tcp_rows
+                for _ei, _erow in _ab_edited_df.iterrows():
+                    if _ei < len(_ab_tcp_rows):
+                        _new_title = str(_erow.get('Title') or _ab_tcp_rows[_ei].get('*Title', ''))[:80]
+                        _ab_tcp_rows[_ei]['*Title'] = _new_title
+                        _new_price = _erow.get('Price')
+                        if _new_price is not None and str(_new_price).strip() not in ('', 'nan', 'None'):
+                            _ab_tcp_rows[_ei]['*StartPrice'] = f"{float(_new_price):.2f}"
+
+                _ab_ch_priced  = sum(1 for row in _ab_tcp_rows if str(row.get('*StartPrice') or '').strip())
+                _ab_ch_missing = len(_ab_tcp_rows) - _ab_ch_priced
 
                 # ── Option A: CardHedger prices → direct eBay CSV ─────────────
                 if _ab_ch_priced > 0:
