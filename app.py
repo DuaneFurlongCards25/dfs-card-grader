@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.85"
+APP_VERSION = "1.5.86"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4831,13 +4831,24 @@ if _active_tab == 2:
                                 'PricingPulledFrom':st.column_config.TextColumn('Priced From',   width='medium'),
                             },
                         )
-                        # Build eBay Add CSV — pass through TCP result columns, force *Action=Add and BestOfferEnabled=1
+                        # Build eBay Add CSV — pull price from TCP, rebuild our description (TCP overwrites it)
+                        # Build SKU → scan result lookup so we can restore PicURL + FrontURL
+                        _ab_sku_map = {f"LOT{i+1:03d}": r for i, r in enumerate(_ab_res)}
                         _ab_ebay_rows = []
                         for _tcp_r in _ab_tcp_result_rows:
                             _ebay_r = {k: '' for k in _AB_TCP_HEADER}
                             for k in _AB_TCP_HEADER:
                                 if k in _tcp_r:
                                     _ebay_r[k] = _tcp_r[k]
+                            # Restore our branded description — TCP replaces it with their own
+                            _ab_sku       = str(_tcp_r.get('CustomLabel', '') or '').strip().upper()
+                            _ab_orig      = _ab_sku_map.get(_ab_sku, {})
+                            _ab_title_r   = str(_tcp_r.get('*Title', '') or '').strip()
+                            _ab_front_r   = str(_ab_orig.get('FrontURL', '') or _tcp_r.get('PicURL', '') or '').split('|')[0]
+                            _ab_pic_r     = str(_ab_orig.get('PicURLs', '') or _tcp_r.get('PicURL', '') or '')
+                            _ebay_r['*Description']  = _ab_build_desc(_ab_title_r.replace('"', '&quot;'), _ab_front_r)
+                            _ebay_r['PicURL']        = _ab_pic_r or _ebay_r.get('PicURL', '')
+                            _ebay_r['GalleryType']   = 'Gallery' if _ebay_r['PicURL'] else ''
                             _ebay_r['*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)'] = 'Add'
                             _ebay_r['BestOfferEnabled'] = '1'
                             _ab_ebay_rows.append(_ebay_r)
