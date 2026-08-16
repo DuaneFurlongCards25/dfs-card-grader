@@ -4159,8 +4159,10 @@ if _active_tab == 2:
                 return "$201-$300"
             elif p <= 400:
                 return "$301-$400"
-            else:
+            elif p <= 500:
                 return "$401-500"
+            else:
+                return "$501-600"
 
         def _ab_make_tcp_row(r, idx):
             """Build a TCP/eBay row dict from a Vision scan result dict."""
