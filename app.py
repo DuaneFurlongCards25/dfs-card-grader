@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.91"
+APP_VERSION = "1.5.92"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -39,13 +39,12 @@ EBAY_GRADER_VALUES = {
 # Condition descriptor 40001 (ungraded card condition) option IDs for category 261328.
 # If upload errors with 21920352 (invalid) or 21920355 (required), call eBay
 # GetItemConditionDescriptors API for the real IDs and update these values.
-EBAY_CONDITION_DEFAULT = "Near Mint or Better - (ID: 40000)"
+EBAY_CONDITION_DEFAULT = "400011"   # Excellent — confirmed valid from eBay template Aug 2026
 EBAY_CONDITION_VALUES = {
-    "near mint":   "Near Mint or Better - (ID: 40000)",
-    "very good":   "Very Good - (ID: 40001)",
-    "good":        "Good - (ID: 40002)",
-    "acceptable":  "Acceptable - (ID: 40003)",
-    "poor":        "Poor - (ID: 40004)",
+    "near mint":   "400010",  # Near mint or better
+    "excellent":   "400011",  # Excellent
+    "very good":   "400012",  # Very good
+    "poor":        "400013",  # Poor
 }
 
 # Grade option IDs — 10 confirmed from Card Dealer Pro; others follow sequential pattern.
@@ -4118,7 +4117,7 @@ if _active_tab == 2:
         _AB_TCP_MFRS = ['Panini','Topps','Bowman','Upper Deck','Donruss','Score','Leaf','Fleer',"Collector's Edge",'Pro Set','Hoops','SkyBox','Playoff','Pacific','Wild Card']
         _AB_TCP_SETS = ['Prizm','Mosaic','Select','Phoenix','Illusions','Absolute','Donruss','Chronicles','National Treasures','Flawless','Immaculate','Revolution','Optic','Contenders','Rookies & Stars','Score','Origins','Elements','Obsidian','Hoops','Court Kings','Certified','Noir','Spectra','Gold Standard','Chrome','Series 1','Series 2','Update','Allen & Ginter','Stadium Club','Heritage','Finest','Now','Gypsy Queen','Archives','Opening Day','Holiday','Big League','Draft','Platinum','Sapphire']
         _AB_TCP_PARALLELS = ['LogoFractor','Superfractor','X-Fractor','Refractor','Sandglitter','Elevate','Reactive Blue','Reactive Purple','Reactive','Cracked Ice','Mojo','Disco','Laser','Neon','Pulsar','Holo','Wave','Scope','Atomic','Shimmer','Gold','Silver','Blue','Red','Green','Orange','Purple','Pink','Rainbow','Prizm']
-        _AB_TCP_HEADER = ['*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)','CustomLabel','*Category','StoreCategory','*Title','Subtitle','Relationship','*ConditionID','*C:Graded','*C:Sport','*C:Player/Athlete','*C:Parallel/Variety','*C:Manufacturer','C:Season','*C:Features','*C:Set','CD:Grade - (ID: 27502)','*C:League','CD:Professional Grader - (ID: 27501)','*C:Team','*C:Autographed','CD:Card Condition - (ID: 40001)','*C:Card Name','*C:Card Number','CDA:Certification Number - (ID: 27503)','*C:Type','C:Signed By','C:Autograph Authentication','C:Year Manufactured','C:Card Size','C:Country/Region of Manufacturer','C:Material','C:Autograph Format','C:Vintage','C:Original/Licensed Reprint','C:Event/Tournament','C:Language','C:Autograph Authentication Number','C:Bundle Description','C:California Prop 65 Warning','C:Card Thickness','C:Custom Bundle','C:Insert Set','C:Print Run','PicURL','GalleryType','*Description','*Format','*Duration','*StartPrice','BuyItNowPrice','*Quantity','PayPalAccepted','PayPalEmailAddress','ImmediatePayRequired','PaymentInstructions','*Location','PostalCode','ShippingPackage','WeightMajor','WeightMinor','PackageLengthInches','PackageWidthInches','PackageDepthInches','ShippingType','ShippingService-1:Option','ShippingService-1:FreeShipping','ShippingService-1:Cost','ShippingService-1:AdditionalCost','ShippingService-2:Option','ShippingService-2:Cost','*DispatchTimeMax','PromotionalShippingDiscount','ShippingDiscountProfileID','*ReturnsAcceptedOption','ReturnsWithinOption','RefundOption','ShippingCostPaidByOption','AdditionalDetails','ShippingProfileName','ReturnProfileName','PaymentProfileName','TakeBackPolicyID','ProductCompliancePolicyID','ScheduleTime','BestOfferEnabled','MinimumBestOfferPrice','BestOfferAutoAcceptPrice','*C:Rookie','*C:Memorabilia','ActiveListings','SoldListings','Confidence','PricingPulledFrom']
+        _AB_TCP_HEADER = ['*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)','CustomLabel','*Category','StoreCategory','*Title','Subtitle','Relationship','*ConditionID','*C:Graded','*C:Sport','*C:Player/Athlete','*C:Parallel/Variety','*C:Manufacturer','C:Season','*C:Features','*C:Set','CD:Grade - (ID: 27502)','*C:League','CD:Professional Grader - (ID: 27501)','*C:Team','*C:Autographed','CD:Card Condition - (ID: 40001)','*C:Card Name','*C:Card Number','CDA:Certification Number - (ID: 27503)','*C:Type','C:Signed By','C:Autograph Authentication','C:Year Manufactured','C:Card Size','C:Country/Region of Manufacturer','C:Material','C:Autograph Format','C:Vintage','C:Original/Licensed Reprint','C:Event/Tournament','C:Language','C:Autograph Authentication Number','C:Bundle Description','C:California Prop 65 Warning','C:Card Thickness','C:Custom Bundle','C:Insert Set','C:Print Run','PicURL','GalleryType','*Description','*Format','*Duration','*StartPrice','BuyItNowPrice','*Quantity','PayPalAccepted','PayPalEmailAddress','ImmediatePayRequired','PaymentInstructions','*Location','PostalCode','ShippingType','ShippingService-1:Option','ShippingService-1:FreeShipping','ShippingService-1:Cost','ShippingService-1:AdditionalCost','ShippingService-2:Option','ShippingService-2:Cost','*DispatchTimeMax','PromotionalShippingDiscount','ShippingDiscountProfileID','*ReturnsAcceptedOption','ReturnsWithinOption','RefundOption','ShippingCostPaidByOption','AdditionalDetails','ShippingProfileName','ReturnProfileName','PaymentProfileName','TakeBackPolicyID','ProductCompliancePolicyID','ScheduleTime','BestOfferEnabled','MinimumBestOfferPrice','BestOfferAutoAcceptPrice','*C:Rookie','*C:Memorabilia','ActiveListings','SoldListings','Confidence','PricingPulledFrom']
         def _ab_build_desc(title, img_url=""):
             img_tag = (f'<img src="{img_url}" alt="{title}" style="width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;" />'
                        if img_url else '<div style="width:180px;height:240px;background:#f3f4f6;border-radius:12px;"></div>')
@@ -4250,12 +4249,6 @@ if _active_tab == 2:
                 'ImmediatePayRequired':              '1',
                 '*Location':                         'Scottsdale, AZ',
                 'PostalCode':                        '85255',
-                'ShippingPackage':                   '',
-                'WeightMajor':                       '',
-                'WeightMinor':                       '',
-                'PackageLengthInches':               '',
-                'PackageWidthInches':                '',
-                'PackageDepthInches':                '',
                 'ShippingType':                      '',
                 'ShippingService-1:Option':          '',
                 'ShippingService-1:FreeShipping':    '',
@@ -4918,13 +4911,6 @@ if _active_tab == 2:
                             _ebay_r['PaymentProfileName']               = 'BIN'
                             _ebay_r['*Location']                        = 'Scottsdale, AZ'
                             _ebay_r['PostalCode']                       = '85255'
-                            _ab_pkg, _ab_wt, _ab_pl, _ab_pw, _ab_pd = _ab_package_dims(_ab_price_r)
-                            _ebay_r['ShippingPackage']                  = _ab_pkg
-                            _ebay_r['WeightMajor']                      = '0'
-                            _ebay_r['WeightMinor']                      = _ab_wt
-                            _ebay_r['PackageLengthInches']              = _ab_pl
-                            _ebay_r['PackageWidthInches']               = _ab_pw
-                            _ebay_r['PackageDepthInches']               = _ab_pd
                             _ebay_r['CD:Card Condition - (ID: 40001)']  = EBAY_CONDITION_DEFAULT
                             _ebay_r['ShippingType']                     = ''
                             _ebay_r['ShippingService-1:Option']         = ''
@@ -8106,7 +8092,7 @@ if _active_tab == 4:
             _TCP_POKEMON = ['pokemon','pokémon','sudowoodo','psyduck','fuecoco','magnemite','quaxwell','scraggy','crocalor','drednaw','quaxly','reuniclus','floragato','pawmo','chansey','rockruff','pineco','sprigatito','pikachu','blitzle']
             _TCP_STARS = ['ohtani','messi','yamal','haaland']
 
-            _TCP_HEADER = ['*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)','CustomLabel','*Category','StoreCategory','*Title','Subtitle','Relationship','*ConditionID','*C:Graded','*C:Sport','*C:Player/Athlete','*C:Parallel/Variety','*C:Manufacturer','C:Season','*C:Features','*C:Set','CD:Grade - (ID: 27502)','*C:League','CD:Professional Grader - (ID: 27501)','*C:Team','*C:Autographed','CD:Card Condition - (ID: 40001)','*C:Card Name','*C:Card Number','CDA:Certification Number - (ID: 27503)','*C:Type','C:Signed By','C:Autograph Authentication','C:Year Manufactured','C:Card Size','C:Country/Region of Manufacturer','C:Material','C:Autograph Format','C:Vintage','C:Original/Licensed Reprint','C:Event/Tournament','C:Language','C:Autograph Authentication Number','C:Bundle Description','C:California Prop 65 Warning','C:Card Thickness','C:Custom Bundle','C:Insert Set','C:Print Run','PicURL','GalleryType','*Description','*Format','*Duration','*StartPrice','BuyItNowPrice','*Quantity','PayPalAccepted','PayPalEmailAddress','ImmediatePayRequired','PaymentInstructions','*Location','PostalCode','ShippingPackage','WeightMajor','WeightMinor','PackageLengthInches','PackageWidthInches','PackageDepthInches','ShippingType','ShippingService-1:Option','ShippingService-1:FreeShipping','ShippingService-1:Cost','ShippingService-1:AdditionalCost','ShippingService-2:Option','ShippingService-2:Cost','*DispatchTimeMax','PromotionalShippingDiscount','ShippingDiscountProfileID','*ReturnsAcceptedOption','ReturnsWithinOption','RefundOption','ShippingCostPaidByOption','AdditionalDetails','ShippingProfileName','ReturnProfileName','PaymentProfileName','TakeBackPolicyID','ProductCompliancePolicyID','ScheduleTime','BestOfferEnabled','MinimumBestOfferPrice','BestOfferAutoAcceptPrice','*C:Rookie','*C:Memorabilia','ActiveListings','SoldListings','Confidence','PricingPulledFrom']
+            _TCP_HEADER = ['*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)','CustomLabel','*Category','StoreCategory','*Title','Subtitle','Relationship','*ConditionID','*C:Graded','*C:Sport','*C:Player/Athlete','*C:Parallel/Variety','*C:Manufacturer','C:Season','*C:Features','*C:Set','CD:Grade - (ID: 27502)','*C:League','CD:Professional Grader - (ID: 27501)','*C:Team','*C:Autographed','CD:Card Condition - (ID: 40001)','*C:Card Name','*C:Card Number','CDA:Certification Number - (ID: 27503)','*C:Type','C:Signed By','C:Autograph Authentication','C:Year Manufactured','C:Card Size','C:Country/Region of Manufacturer','C:Material','C:Autograph Format','C:Vintage','C:Original/Licensed Reprint','C:Event/Tournament','C:Language','C:Autograph Authentication Number','C:Bundle Description','C:California Prop 65 Warning','C:Card Thickness','C:Custom Bundle','C:Insert Set','C:Print Run','PicURL','GalleryType','*Description','*Format','*Duration','*StartPrice','BuyItNowPrice','*Quantity','PayPalAccepted','PayPalEmailAddress','ImmediatePayRequired','PaymentInstructions','*Location','PostalCode','ShippingType','ShippingService-1:Option','ShippingService-1:FreeShipping','ShippingService-1:Cost','ShippingService-1:AdditionalCost','ShippingService-2:Option','ShippingService-2:Cost','*DispatchTimeMax','PromotionalShippingDiscount','ShippingDiscountProfileID','*ReturnsAcceptedOption','ReturnsWithinOption','RefundOption','ShippingCostPaidByOption','AdditionalDetails','ShippingProfileName','ReturnProfileName','PaymentProfileName','TakeBackPolicyID','ProductCompliancePolicyID','ScheduleTime','BestOfferEnabled','MinimumBestOfferPrice','BestOfferAutoAcceptPrice','*C:Rookie','*C:Memorabilia','ActiveListings','SoldListings','Confidence','PricingPulledFrom']
 
             _TCP_DESC = ('<div style="background:#FDFEFE;border:1px solid #CBD4C2;color:#353535;padding:40px;line-height:1.6;font-family:Arial,sans-serif;font-size:16px;"><h1 style="text-align:center;">{t}</h1><table style="width:100%;margin-top:30px;border-spacing:0;"><tr><th align="left">Payment</th><td>Payment is due within 4 days. Unpaid items may be canceled and relisted.</td></tr><tr><th align="left">Shipping</th><td>Items ship via eBay Standard Envelope. Combined shipping may apply. Usually ships within 1 business day.</td></tr><tr><th align="left">Disclaimer</th><td>All cards are sold as-is. No refunds or returns. Contact us before leaving negative feedback.</td></tr></table><div style="text-align:center;margin:2.5rem 0;"><a href="https://www.tradingcardpricer.com" style="text-decoration:none;color:inherit;"><div style="display:inline-flex;align-items:center;gap:1rem;"><img src="https://s3.us-east-2.amazonaws.com/tcr.image.bucket/Logos/Priced+by+TCP.png" alt="EZ Price by TradingCardPricer" style="width:48%;max-width:300px;"><span style="font-size:2rem;font-weight:bold;">TradingCardPricer</span></div></a></div></div>')
 
@@ -8155,7 +8141,6 @@ if _active_tab == 4:
                 title  = listing.get('Title','')
                 sku    = listing.get('Custom label (SKU)','') or listing.get('Item number','')
                 price  = listing.get('Current price', listing.get('Start price',''))
-                _pkg, _wt, _pl, _pw, _pd = _ab_package_dims(price)
                 grader = listing.get('CD:Professional Grader - (ID: 27501)','')
                 grade  = listing.get('CD:Grade - (ID: 27502)','')
                 cert   = listing.get('CDA:Certification Number - (ID: 27503)','')
@@ -8184,8 +8169,7 @@ if _active_tab == 4:
                     '*Description':desc,'*Format':'FixedPrice','*Duration':'GTC','*StartPrice':price,
                     'BuyItNowPrice':'','*Quantity':'1','PayPalAccepted':'1','PayPalEmailAddress':'',
                     'ImmediatePayRequired':'1','PaymentInstructions':'','*Location':'Scottsdale, AZ',
-                    'PostalCode':'85255','ShippingPackage':_pkg,'WeightMajor':'0','WeightMinor':_wt,
-                    'PackageLengthInches':_pl,'PackageWidthInches':_pw,'PackageDepthInches':_pd,
+                    'PostalCode':'85255',
                     'ShippingType':'','ShippingService-1:Option':'',
                     'ShippingService-1:FreeShipping':'','ShippingService-1:Cost':'',
                     'ShippingService-1:AdditionalCost':'','ShippingService-2:Option':'',
