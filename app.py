@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.97"
+APP_VERSION = "1.5.98"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -1923,7 +1923,7 @@ def _scan_description(title: str, front_url: str = "") -> str:
         '<ol style="margin:0 0 20px;padding-left:20px;">'
         '<li style="margin-bottom:10px;">All cards are scanned. If you see any lines or want more pictures, just ask!</li>'
         '<li style="margin-bottom:10px;">Cards over $20 ship with tracking. Memorabilia/patch cards ship Ground Advantage to prevent damage.</li>'
-        '<li style="margin-bottom:10px;">Cards over $100 include shipping insurance — you\'re protected as the buyer.</li>'
+        '<li style="margin-bottom:10px;">Cards $75–$199 ship with signature required — you\'re protected as the buyer.</li>'
         '</ol>'
         '<p style="margin:0;">My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions? Please ask!!!</p>'
         '</div>'
@@ -4130,7 +4130,7 @@ if _active_tab == 2:
                 '<ol style="margin:0 0 20px;padding-left:20px;">'
                 '<li style="margin-bottom:10px;">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>'
                 '<li style="margin-bottom:10px;">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>'
-                '<li style="margin-bottom:10px;">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>'
+                '<li style="margin-bottom:10px;">Cards $75–$199 ship with signature required, which protects you as the buyer.&nbsp;</li>'
                 '</ol>'
                 '<p style="margin:0;">My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!</p>'
                 '</td></tr></table></div>'
@@ -5277,7 +5277,7 @@ if _active_tab == 2:
                     '<ol style="margin:0 0 16px;padding-left:20px;">'
                     '<li style="margin-bottom:8px;">All cards are scanned. If you see any lines or want more pictures, just ask!</li>'
                     '<li style="margin-bottom:8px;">Cards over $20 ship with tracking. Memorabilia/patch cards ship Ground Advantage to prevent damage.</li>'
-                    '<li style="margin-bottom:8px;">Cards over $100 include shipping insurance — you\'re protected as the buyer.</li>'
+                    '<li style="margin-bottom:8px;">Cards $75–$199 ship with signature required — you\'re protected as the buyer.</li>'
                     '</ol>'
                     '<p style="margin:0;">My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions? Please ask!!!</p>'
                     '</td>'
