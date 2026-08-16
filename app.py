@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.98"
+APP_VERSION = "1.5.99"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4684,12 +4684,18 @@ if _active_tab == 2:
                             _abm = ch_card_match(_ab_query)
                             if _abm:
                                 _ab_ch_id  = _abm.get("card_id") or _abm.get("id") or ""
-                                _ab_ch_match = (_abm.get("description") or _abm.get("name") or _abm.get("title") or "")[:50]
-                                # Card number from CH — fallback when not visible on front scan
+                                _ab_ch_title = (_abm.get("description") or _abm.get("name") or _abm.get("title") or "")
+                                _ab_ch_match = _ab_ch_title[:50]
+                                # Card number from CH — fallback when vision misses it
+                                # Priority 1: explicit number/card_number field from CH
                                 _ab_ch_card_num = str(_abm.get("number") or _abm.get("card_number") or "").strip()
                                 if not _ab_ch_card_num:
-                                    # Try extracting from CH match title via regex
-                                    _cn_m = re.search(r'\b([A-Z]{1,4}-?\d{1,4}|\d{1,4})\b', _ab_ch_match)
+                                    # Priority 2: extract from full CH title (NOT truncated)
+                                    # Look for #NNN or #NNNa style first, then ALPHA-NNN codes (BCP-53, TOG-14)
+                                    _cn_m = (
+                                        re.search(r'#(\d{1,4}[A-Za-z]?)\b', _ab_ch_title) or
+                                        re.search(r'\b([A-Z]{1,6}-\d{1,4}[A-Za-z]?)\b', _ab_ch_title)
+                                    )
                                     if _cn_m:
                                         _ab_ch_card_num = _cn_m.group(1)
                                 if _ab_ch_id:
