@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.81"
+APP_VERSION = "1.5.82"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -1526,6 +1526,18 @@ def ch_all_prices(card_id):
     """Latest price for EVERY grade in one call (Raw..PSA 10). Cheaper than N comps calls."""
     d = _ch_post("/v1/cards/all-prices-by-card", {"card_id": card_id}) or {}
     return d.get("prices", []) if isinstance(d, dict) else []
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def ch_price_est(card_id, grade: str):
+    """Single-card price estimate with confidence band and freshness. Faster than comps."""
+    return _ch_post("/v1/cards/price-estimate", {"card_id": card_id, "grade": grade}) or {}
+
+def ch_batch_price_est(items: list):
+    """Bulk price estimate — items=[{card_id, grade}, ...]. One call for many cards."""
+    if not items:
+        return []
+    d = _ch_post("/v1/cards/batch-price-estimate", {"items": items}) or {}
+    return d.get("results", []) if isinstance(d, dict) else []
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def ch_sales_stats(player, interval="week", periods=8):
@@ -4078,7 +4090,23 @@ if _active_tab == 2:
         _AB_TCP_SETS = ['Prizm','Mosaic','Select','Phoenix','Illusions','Absolute','Donruss','Chronicles','National Treasures','Flawless','Immaculate','Revolution','Optic','Contenders','Rookies & Stars','Score','Origins','Elements','Obsidian','Hoops','Court Kings','Certified','Noir','Spectra','Gold Standard','Chrome','Series 1','Series 2','Update','Allen & Ginter','Stadium Club','Heritage','Finest','Now','Gypsy Queen','Archives','Opening Day','Holiday','Big League','Draft','Platinum','Sapphire']
         _AB_TCP_PARALLELS = ['LogoFractor','Superfractor','X-Fractor','Refractor','Sandglitter','Elevate','Reactive Blue','Reactive Purple','Reactive','Cracked Ice','Mojo','Disco','Laser','Neon','Pulsar','Holo','Wave','Scope','Atomic','Shimmer','Gold','Silver','Blue','Red','Green','Orange','Purple','Pink','Rainbow','Prizm']
         _AB_TCP_HEADER = ['*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)','CustomLabel','*Category','StoreCategory','*Title','Subtitle','Relationship','*ConditionID','*C:Graded','*C:Sport','*C:Player/Athlete','*C:Parallel/Variety','*C:Manufacturer','C:Season','*C:Features','*C:Set','CD:Grade - (ID: 27502)','*C:League','CD:Professional Grader - (ID: 27501)','*C:Team','*C:Autographed','CD:Card Condition - (ID: 40001)','*C:Card Name','*C:Card Number','CDA:Certification Number - (ID: 27503)','*C:Type','C:Signed By','C:Autograph Authentication','C:Year Manufactured','C:Card Size','C:Country/Region of Manufacturer','C:Material','C:Autograph Format','C:Vintage','C:Original/Licensed Reprint','C:Event/Tournament','C:Language','C:Autograph Authentication Number','C:Bundle Description','C:California Prop 65 Warning','C:Card Thickness','C:Custom Bundle','C:Insert Set','C:Print Run','PicURL','GalleryType','*Description','*Format','*Duration','*StartPrice','BuyItNowPrice','*Quantity','PayPalAccepted','PayPalEmailAddress','ImmediatePayRequired','PaymentInstructions','*Location','PostalCode','ShippingType','ShippingService-1:Option','ShippingService-1:FreeShipping','ShippingService-1:Cost','ShippingService-1:AdditionalCost','ShippingService-2:Option','ShippingService-2:Cost','*DispatchTimeMax','PromotionalShippingDiscount','ShippingDiscountProfileID','*ReturnsAcceptedOption','ReturnsWithinOption','RefundOption','ShippingCostPaidByOption','AdditionalDetails','ShippingProfileName','ReturnProfileName','PaymentProfileName','TakeBackPolicyID','ProductCompliancePolicyID','ScheduleTime','BestOfferEnabled','MinimumBestOfferPrice','BestOfferAutoAcceptPrice','*C:Rookie','*C:Memorabilia','ActiveListings','SoldListings','Confidence','PricingPulledFrom']
-        _AB_TCP_DESC = ('<div style="background:#FDFEFE;border:1px solid #CBD4C2;color:#353535;padding:40px;line-height:1.6;font-family:Arial,sans-serif;font-size:16px;"><h1 style="text-align:center;">{t}</h1><table style="width:100%;margin-top:30px;border-spacing:0;"><tr><th align="left">Payment</th><td>Payment is due within 4 days. Unpaid items may be canceled and relisted.</td></tr><tr><th align="left">Shipping</th><td>Items ship via eBay Standard Envelope. Combined shipping may apply. Usually ships within 1 business day.</td></tr><tr><th align="left">Disclaimer</th><td>All cards are sold as-is. No refunds or returns. Contact us before leaving negative feedback.</td></tr></table><div style="text-align:center;margin:2.5rem 0;"><a href="https://www.tradingcardpricer.com" style="text-decoration:none;color:inherit;"><div style="display:inline-flex;align-items:center;gap:1rem;"><img src="https://s3.us-east-2.amazonaws.com/tcr.image.bucket/Logos/Priced+by+TCP.png" alt="EZ Price by TradingCardPricer" style="width:48%;max-width:300px;"><span style="font-size:2rem;font-weight:bold;">TradingCardPricer</span></div></a></div></div>')
+        def _ab_build_desc(title, img_url=""):
+            img_tag = (f'<img src="{img_url}" alt="{title}" style="width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;" />'
+                       if img_url else '<div style="width:180px;height:240px;background:#f3f4f6;border-radius:12px;"></div>')
+            return (
+                '<div style="font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;">'
+                '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;"><tr>'
+                f'<td valign="top" style="width:180px;padding-right:20px;">{img_tag}</td>'
+                '<td valign="top">'
+                f'<h2 style="margin:0 0 12px;font-size:24px;text-transform:uppercase;">{title}</h2>'
+                '<ol style="margin:0 0 20px;padding-left:20px;">'
+                '<li style="margin-bottom:10px;">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>'
+                '<li style="margin-bottom:10px;">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>'
+                '<li style="margin-bottom:10px;">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>'
+                '</ol>'
+                '<p style="margin:0;">My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!</p>'
+                '</td></tr></table></div>'
+            )
 
         def _ab_tcp_sport(sport_str):
             """Map Vision sport string → (sport_col, league_col)."""
@@ -4104,6 +4132,7 @@ if _active_tab == 2:
             card_num = str(r.get('Card #', '') or '')
             parallel = str(r.get('Parallel', '') or '')
             sport_s  = str(r.get('Sport', '') or '')
+            card_img = str(r.get('CH Image', '') or '')
             parts = [p for p in [year, set_, player, parallel, f'#{card_num}' if card_num else ''] if p.strip()]
             title = ' '.join(parts)[:80]
             sport_col, league_col = _ab_tcp_sport(sport_s)
@@ -4112,7 +4141,7 @@ if _active_tab == 2:
             set_name = next((s for s in _AB_TCP_SETS if re.search(r'\b'+re.escape(s)+r'\b', set_, re.I)), set_)
             para_col = next((p for p in _AB_TCP_PARALLELS if re.search(r'\b'+re.escape(p)+r'\b', parallel, re.I)), parallel)
             rookie = 'Yes' if re.search(r'\bRC\b|\bRookie\b|\(RC\)', title, re.I) else 'No'
-            desc = _AB_TCP_DESC.replace('{t}', title.replace('"', '&quot;'))
+            desc = _ab_build_desc(title.replace('"', '&quot;'), card_img)
             row = {k: '' for k in _AB_TCP_HEADER}
             row.update({
                 '*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)': 'Add',
@@ -4141,6 +4170,8 @@ if _active_tab == 2:
                 '*C:Type':                           'Sports Trading Card',
                 'C:Year Manufactured':               year,
                 'C:Print Run':                       '',
+                'PicURL':                            card_img,
+                'GalleryType':                       'Gallery' if card_img else '',
                 '*Description':                      desc,
                 '*Format':                           'FixedPrice',
                 '*Duration':                         'GTC',
@@ -4605,6 +4636,7 @@ if _active_tab == 2:
                             "Parallel":    _abcv.get("parallel", ""),
                             "Sport":       _abcv.get("sport", ""),
                             "CH Match":    _ab_ch_match,
+                            "CH Image":    (_abm.get("image", "") if _abm else ""),
                             "FMV":         _ab_fmv,
                             "Comp Avg":    _ab_comp_avg,
                             "Low":         _ab_low,
