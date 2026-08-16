@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.92"
+APP_VERSION = "1.5.93"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4767,20 +4767,53 @@ if _active_tab == 2:
                 _ab_img_zips = st.session_state.get("ai_batch_img_zips", {})
                 _ab_df  = pd.DataFrame(_ab_res)
                 st.markdown(f"### Results — {len(_ab_res)} cards · grade: {_ab_grade}")
+
+                # ── Card Image Preview ──────────────────────────────────────────
+                _ab_prev_opts = [
+                    f"#{r['#']} — {r.get('Player','?')}  {r.get('Year','')}  {r.get('Set','')}"
+                    for r in _ab_res
+                ]
+                _ab_prev_idx = st.selectbox(
+                    "📸 Card Preview", _ab_prev_opts, index=0,
+                    key="ab_preview_sel",
+                ).split("—")[0].strip().lstrip("#")
+                try:
+                    _ab_prev_idx = int(_ab_prev_idx) - 1
+                except Exception:
+                    _ab_prev_idx = 0
+                _ab_prev_r     = _ab_res[_ab_prev_idx]
+                _ab_prev_pics  = [u.strip() for u in str(_ab_prev_r.get("PicURLs","")).split("|") if u.strip()]
+                _ab_prev_front = _ab_prev_r.get("FrontURL","") or (_ab_prev_pics[0] if _ab_prev_pics else "")
+                _ab_prev_back  = _ab_prev_pics[1] if len(_ab_prev_pics) > 1 else ""
+                _ab_prev_ch    = _ab_prev_r.get("CH Image","")
+                _ab_pcols = st.columns(3 if (_ab_prev_front and _ab_prev_back and _ab_prev_ch) else 2 if (_ab_prev_front and _ab_prev_back) else 1)
+                if _ab_prev_front:
+                    _ab_pcols[0].image(_ab_prev_front, caption="Front ↕ click to expand", use_container_width=True)
+                if _ab_prev_back and len(_ab_pcols) > 1:
+                    _ab_pcols[1].image(_ab_prev_back, caption="Back ↕ click to expand", use_container_width=True)
+                if _ab_prev_ch and len(_ab_pcols) > 2:
+                    _ab_pcols[2].image(_ab_prev_ch, caption=f"📚 CH: {_ab_prev_r.get('CH Match','Reference')[:40]}", use_container_width=True)
+                elif _ab_prev_ch and not _ab_prev_back:
+                    _ab_pcols[1].image(_ab_prev_ch, caption=f"📚 CH: {_ab_prev_r.get('CH Match','Reference')[:40]}", use_container_width=True)
+                st.markdown("---")
+
+                # ── Results table ───────────────────────────────────────────────
+                _ab_table_cols = ["#","FrontURL","Player","Year","Set","Card #","Parallel","Sport","FMV","Comp Avg","Low","High","Trend (90d)","Images","🔍 Sold","Status"]
+                _ab_df_disp = _ab_df[[c for c in _ab_table_cols if c in _ab_df.columns]]
                 st.dataframe(
-                    _ab_df,
+                    _ab_df_disp,
                     hide_index=True,
                     use_container_width=True,
                     height=min(600, 45 + len(_ab_res) * 36),
                     column_config={
                         "#":           st.column_config.NumberColumn("#",           width="small"),
+                        "FrontURL":    st.column_config.ImageColumn("📸",           width="small"),
                         "Player":      st.column_config.TextColumn("Player",        width="medium"),
                         "Year":        st.column_config.TextColumn("Year",          width="small"),
                         "Set":         st.column_config.TextColumn("Set",           width="medium"),
                         "Card #":      st.column_config.TextColumn("Card #",        width="small"),
                         "Parallel":    st.column_config.TextColumn("Parallel",      width="medium"),
                         "Sport":       st.column_config.TextColumn("Sport",         width="small"),
-                        "CH Match":    st.column_config.TextColumn("CH Match",      width="large"),
                         "FMV":         st.column_config.TextColumn("FMV",           width="small"),
                         "Comp Avg":    st.column_config.TextColumn("Comp Avg",      width="small"),
                         "Low":         st.column_config.TextColumn("Low",           width="small"),
@@ -4788,7 +4821,6 @@ if _active_tab == 2:
                         "Trend (90d)": st.column_config.TextColumn("Trend (90d)",   width="small"),
                         "Images":      st.column_config.TextColumn("Images",        width="small"),
                         "🔍 Sold":     st.column_config.LinkColumn("🔍 Sold", display_text="eBay ↗", width="small"),
-                        "Query":       st.column_config.TextColumn("Query",         width="large"),
                         "Status":      st.column_config.TextColumn("Status",        width="small"),
                     },
                 )
