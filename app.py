@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.95"
+APP_VERSION = "1.5.96"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4669,6 +4669,7 @@ if _active_tab == 2:
 
                         # Step 2: CardHedger comps + trend
                         _ab_ch_match = ""
+                        _ab_ch_card_num = ""   # card number from CH match — fallback when vision misses it
                         _ab_fmv = ""
                         _ab_fmv_raw = ""
                         _ab_comp_avg = ""
@@ -4682,6 +4683,13 @@ if _active_tab == 2:
                             if _abm:
                                 _ab_ch_id  = _abm.get("card_id") or _abm.get("id") or ""
                                 _ab_ch_match = (_abm.get("description") or _abm.get("name") or _abm.get("title") or "")[:50]
+                                # Card number from CH — fallback when not visible on front scan
+                                _ab_ch_card_num = str(_abm.get("number") or _abm.get("card_number") or "").strip()
+                                if not _ab_ch_card_num:
+                                    # Try extracting from CH match title via regex
+                                    _cn_m = re.search(r'\b([A-Z]{1,4}-?\d{1,4}|\d{1,4})\b', _ab_ch_match)
+                                    if _cn_m:
+                                        _ab_ch_card_num = _cn_m.group(1)
                                 if _ab_ch_id:
                                     _ab_fmv_r  = ch_fmv(_ab_ch_id, _ab_grade)
                                     _ab_comp_r = ch_comps(_ab_ch_id, _ab_grade)
@@ -4765,7 +4773,7 @@ if _active_tab == 2:
                             "Player":      _abcv.get("player", ""),
                             "Year":        _abcv.get("year", ""),
                             "Set":         _abcv.get("set", ""),
-                            "Card #":      _abcv.get("card_number", ""),
+                            "Card #":      _abcv.get("card_number", "") or _ab_ch_card_num,
                             "Parallel":    _abcv.get("parallel", ""),
                             "Sport":       _abcv.get("sport", ""),
                             "Team":        _abcv.get("team", ""),
