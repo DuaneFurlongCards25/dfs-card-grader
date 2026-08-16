@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.83"
+APP_VERSION = "1.5.84"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -381,7 +381,7 @@ DEFAULT_EBAY_KEY = get_secret("ebay", "app_id")
 CARDHEDGER_KEY = get_secret("cardhedger", "api_key")
 CARDHEDGER_BASE = "https://api.cardhedger.com"
 ANTHROPIC_KEY = get_secret("anthropic", "api_key")
-IMGBB_KEY = get_secret("imgbb", "api_key")
+IMGBB_KEY = get_secret("imgbb", "api_key") or "e3909e93e7d7962973b65bdf4bf60f52"
 WP_PROXY_URL   = "https://duanefurlongstudios.com/wp-admin/admin-ajax.php?action=dfs_gemrate"
 
 # ─── Page config ──────────────────────────────────────────────────────────────
