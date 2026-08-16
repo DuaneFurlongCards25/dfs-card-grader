@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.88"
+APP_VERSION = "1.5.89"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4141,6 +4141,21 @@ if _active_tab == 2:
                     return val
             return ('BASEBALL', 'MLB')
 
+        def _ab_package_dims(price_str):
+            """Return (ShippingPackage, WeightMinor, L, W, D) for a given price.
+            WeightMinor is oz; WeightMajor is always 0 (under 1 lb).
+            Weights are for single card — buyer/seller adjusts for multiples."""
+            try:
+                p = float(str(price_str).replace(',', '').strip() or 0)
+            except (ValueError, TypeError):
+                p = 0
+            if p < 20:
+                return ('LargeEnvelope', '1', '', '', '')   # flat rate envelope, 1 oz single card
+            elif p < 50:
+                return ('Package', '4', '9', '6', '1')      # $20–$49: 9x6x1 mailer, 4 oz
+            else:
+                return ('Package', '4', '6', '4', '2')      # $50+: 6x4x2 box, 4 oz
+
         def _ab_shipping_policy(price_str):
             """Return the eBay ShippingProfileName for a given price."""
             try:
@@ -4223,12 +4238,12 @@ if _active_tab == 2:
                 'ImmediatePayRequired':              '1',
                 '*Location':                         'Scottsdale, AZ',
                 'PostalCode':                        '85255',
-                'ShippingPackage':                   'Package',
-                'WeightMajor':                       '0',
-                'WeightMinor':                       '4',
-                'PackageLengthInches':               '6',
-                'PackageWidthInches':                '4',
-                'PackageDepthInches':                '2',
+                'ShippingPackage':                   '',
+                'WeightMajor':                       '',
+                'WeightMinor':                       '',
+                'PackageLengthInches':               '',
+                'PackageWidthInches':                '',
+                'PackageDepthInches':                '',
                 'ShippingType':                      '',
                 'ShippingService-1:Option':          '',
                 'ShippingService-1:FreeShipping':    '',
@@ -4891,12 +4906,13 @@ if _active_tab == 2:
                             _ebay_r['PaymentProfileName']               = 'BIN'
                             _ebay_r['*Location']                        = 'Scottsdale, AZ'
                             _ebay_r['PostalCode']                       = '85255'
-                            _ebay_r['ShippingPackage']                  = 'Package'
+                            _ab_pkg, _ab_wt, _ab_pl, _ab_pw, _ab_pd = _ab_package_dims(_ab_price_r)
+                            _ebay_r['ShippingPackage']                  = _ab_pkg
                             _ebay_r['WeightMajor']                      = '0'
-                            _ebay_r['WeightMinor']                      = '4'
-                            _ebay_r['PackageLengthInches']              = '6'
-                            _ebay_r['PackageWidthInches']               = '4'
-                            _ebay_r['PackageDepthInches']               = '2'
+                            _ebay_r['WeightMinor']                      = _ab_wt
+                            _ebay_r['PackageLengthInches']              = _ab_pl
+                            _ebay_r['PackageWidthInches']               = _ab_pw
+                            _ebay_r['PackageDepthInches']               = _ab_pd
                             _ebay_r['CD:Card Condition - (ID: 40001)']  = ''
                             _ebay_r['ShippingType']                     = ''
                             _ebay_r['ShippingService-1:Option']         = ''
@@ -8127,6 +8143,7 @@ if _active_tab == 4:
                 title  = listing.get('Title','')
                 sku    = listing.get('Custom label (SKU)','') or listing.get('Item number','')
                 price  = listing.get('Current price', listing.get('Start price',''))
+                _pkg, _wt, _pl, _pw, _pd = _ab_package_dims(price)
                 grader = listing.get('CD:Professional Grader - (ID: 27501)','')
                 grade  = listing.get('CD:Grade - (ID: 27502)','')
                 cert   = listing.get('CDA:Certification Number - (ID: 27503)','')
@@ -8155,8 +8172,8 @@ if _active_tab == 4:
                     '*Description':desc,'*Format':'FixedPrice','*Duration':'GTC','*StartPrice':price,
                     'BuyItNowPrice':'','*Quantity':'1','PayPalAccepted':'1','PayPalEmailAddress':'',
                     'ImmediatePayRequired':'1','PaymentInstructions':'','*Location':'Scottsdale, AZ',
-                    'PostalCode':'85255','ShippingPackage':'Package','WeightMajor':'0','WeightMinor':'4',
-                    'PackageLengthInches':'6','PackageWidthInches':'4','PackageDepthInches':'2',
+                    'PostalCode':'85255','ShippingPackage':_pkg,'WeightMajor':'0','WeightMinor':_wt,
+                    'PackageLengthInches':_pl,'PackageWidthInches':_pw,'PackageDepthInches':_pd,
                     'ShippingType':'','ShippingService-1:Option':'',
                     'ShippingService-1:FreeShipping':'','ShippingService-1:Cost':'',
                     'ShippingService-1:AdditionalCost':'','ShippingService-2:Option':'',
