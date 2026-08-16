@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.90"
+APP_VERSION = "1.5.91"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -39,13 +39,13 @@ EBAY_GRADER_VALUES = {
 # Condition descriptor 40001 (ungraded card condition) option IDs for category 261328.
 # If upload errors with 21920352 (invalid) or 21920355 (required), call eBay
 # GetItemConditionDescriptors API for the real IDs and update these values.
-EBAY_CONDITION_DEFAULT = "Near Mint or Better - (ID: 400010)"
+EBAY_CONDITION_DEFAULT = "Near Mint or Better - (ID: 40000)"
 EBAY_CONDITION_VALUES = {
-    "near mint":   "Near Mint or Better - (ID: 400010)",
-    "very good":   "Very Good - (ID: 400011)",
-    "good":        "Good - (ID: 400012)",
-    "acceptable":  "Acceptable - (ID: 400013)",
-    "poor":        "Poor - (ID: 400014)",
+    "near mint":   "Near Mint or Better - (ID: 40000)",
+    "very good":   "Very Good - (ID: 40001)",
+    "good":        "Good - (ID: 40002)",
+    "acceptable":  "Acceptable - (ID: 40003)",
+    "poor":        "Poor - (ID: 40004)",
 }
 
 # Grade option IDs — 10 confirmed from Card Dealer Pro; others follow sequential pattern.
