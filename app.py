@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.89"
+APP_VERSION = "1.5.90"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -36,6 +36,18 @@ EBAY_GRADER_VALUES = {
     "CSG":  "CSG - (ID: 275014)",
     "HGA":  "Hybrid Grading Approach (HGA) - (ID: 275015)",
 }
+# Condition descriptor 40001 (ungraded card condition) option IDs for category 261328.
+# If upload errors with 21920352 (invalid) or 21920355 (required), call eBay
+# GetItemConditionDescriptors API for the real IDs and update these values.
+EBAY_CONDITION_DEFAULT = "Near Mint or Better - (ID: 400010)"
+EBAY_CONDITION_VALUES = {
+    "near mint":   "Near Mint or Better - (ID: 400010)",
+    "very good":   "Very Good - (ID: 400011)",
+    "good":        "Good - (ID: 400012)",
+    "acceptable":  "Acceptable - (ID: 400013)",
+    "poor":        "Poor - (ID: 400014)",
+}
+
 # Grade option IDs — 10 confirmed from Card Dealer Pro; others follow sequential pattern.
 # If a grade upload errors with 21920352, find its ID in eBay's GetItemConditionDescriptors.
 EBAY_GRADE_VALUES = {
@@ -4150,11 +4162,11 @@ if _active_tab == 2:
             except (ValueError, TypeError):
                 p = 0
             if p < 20:
-                return ('LargeEnvelope', '1', '', '', '')   # flat rate envelope, 1 oz single card
+                return ('LargeEnvelope', '1', '6', '4', '0.25')     # envelope, 1 oz, 6x4x0.25
             elif p < 50:
-                return ('Package', '4', '9', '6', '1')      # $20–$49: 9x6x1 mailer, 4 oz
+                return ('PackageThickEnvelope', '4', '9', '6', '1') # $20–$49: 9x6x1 mailer, 4 oz
             else:
-                return ('Package', '4', '6', '4', '2')      # $50+: 6x4x2 box, 4 oz
+                return ('PackageThickEnvelope', '4', '6', '4', '2') # $50+: 6x4x2 box, 4 oz
 
         def _ab_shipping_policy(price_str):
             """Return the eBay ShippingProfileName for a given price."""
@@ -4220,7 +4232,7 @@ if _active_tab == 2:
                 'CD:Professional Grader - (ID: 27501)': '',
                 '*C:Team':                           '',
                 '*C:Autographed':                    'No',
-                'CD:Card Condition - (ID: 40001)':   '',
+                'CD:Card Condition - (ID: 40001)':   EBAY_CONDITION_DEFAULT,
                 '*C:Card Name':                      player[:50],
                 '*C:Card Number':                    card_num,
                 'CDA:Certification Number - (ID: 27503)': '',
@@ -4913,7 +4925,7 @@ if _active_tab == 2:
                             _ebay_r['PackageLengthInches']              = _ab_pl
                             _ebay_r['PackageWidthInches']               = _ab_pw
                             _ebay_r['PackageDepthInches']               = _ab_pd
-                            _ebay_r['CD:Card Condition - (ID: 40001)']  = ''
+                            _ebay_r['CD:Card Condition - (ID: 40001)']  = EBAY_CONDITION_DEFAULT
                             _ebay_r['ShippingType']                     = ''
                             _ebay_r['ShippingService-1:Option']         = ''
                             _ebay_r['ShippingService-1:FreeShipping']   = ''
@@ -8147,7 +8159,7 @@ if _active_tab == 4:
                 grader = listing.get('CD:Professional Grader - (ID: 27501)','')
                 grade  = listing.get('CD:Grade - (ID: 27502)','')
                 cert   = listing.get('CDA:Certification Number - (ID: 27503)','')
-                cond   = ''
+                cond   = EBAY_CONDITION_DEFAULT
                 year, mfr, set_, num, para, pr, team, rookie, player, graded_flag = _tcp_meta(title)
                 if grader or grade: graded_flag = 'Yes'
                 sport, league = _tcp_sport(title)
