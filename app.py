@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.93"
+APP_VERSION = "1.5.94"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4243,7 +4243,7 @@ if _active_tab == 2:
                 '*Description':                      desc,
                 '*Format':                           'FixedPrice',
                 '*Duration':                         'GTC',
-                '*StartPrice':                       '',
+                '*StartPrice':                       str(r.get('FMV_raw', '') or ''),
                 '*Quantity':                         '1',
                 'PayPalAccepted':                    '1',
                 'ImmediatePayRequired':              '1',
@@ -4642,6 +4642,7 @@ if _active_tab == 2:
                         # Step 2: CardHedger comps + trend
                         _ab_ch_match = ""
                         _ab_fmv = ""
+                        _ab_fmv_raw = ""
                         _ab_comp_avg = ""
                         _ab_low = ""
                         _ab_high = ""
@@ -4660,6 +4661,7 @@ if _active_tab == 2:
 
                                     _ab_fmv_v = fmv_price(_ab_fmv_r)
                                     _ab_fmv   = f"${_ab_fmv_v:,.2f}" if _ab_fmv_v else ""
+                                    _ab_fmv_raw = f"{_ab_fmv_v:.2f}" if _ab_fmv_v else ""
 
                                     _ab_avg_v = _ab_comp_r.get("comp_price") or _ab_comp_r.get("average")
                                     _ab_comp_avg = f"${float(_ab_avg_v):,.2f}" if _ab_avg_v else ""
@@ -4743,6 +4745,7 @@ if _active_tab == 2:
                             "PicURLs":     _ab_pic_urls,
                             "FrontURL":    _ab_front_url,
                             "FMV":         _ab_fmv,
+                            "FMV_raw":     _ab_fmv_raw,
                             "Comp Avg":    _ab_comp_avg,
                             "Low":         _ab_low,
                             "High":        _ab_high,
@@ -4862,20 +4865,49 @@ if _active_tab == 2:
                     st.session_state.pop("ai_batch_img_zips", None)
                     st.rerun()
 
-                # ── Step 2 — Export for TradingCardPricer.com ─────────────────
+                # ── Step 2 — Pricing ──────────────────────────────────────────
                 st.markdown("---")
-                st.markdown("#### Step 2 — Export for TradingCardPricer.com")
-                st.caption("Download this CSV and upload it to [tradingcardpricer.com](https://tradingcardpricer.com) to get prices. TCP fills in *StartPrice for each LOT SKU and returns a priced CSV.")
-                _ab_tcp_rows = [_ab_make_tcp_row(r, i + 1) for i, r in enumerate(_ab_res)]
-                _ab_tcp_csv  = _ab_make_tcp_csv(_ab_tcp_rows)
-                st.download_button(
-                    "📊 Download TCP Upload CSV",
-                    _ab_tcp_csv,
-                    f"lot_scan_tcp_upload.csv",
-                    "text/csv",
-                    key="ab_tcp_dl",
-                )
-                st.caption(f"{len(_ab_tcp_rows)} cards · SKUs LOT001–LOT{len(_ab_tcp_rows):03d} · *StartPrice left blank for TCP to fill in")
+                st.markdown("#### Step 2 — Pricing")
+                _ab_tcp_rows   = [_ab_make_tcp_row(r, i + 1) for i, r in enumerate(_ab_res)]
+                _ab_ch_priced  = sum(1 for r in _ab_res if r.get("FMV_raw"))
+                _ab_ch_missing = len(_ab_res) - _ab_ch_priced
+
+                # ── Option A: CardHedger prices → direct eBay CSV ─────────────
+                if _ab_ch_priced > 0:
+                    if _ab_ch_priced == len(_ab_res):
+                        st.success(f"✅ All {len(_ab_res)} cards priced by CardHedger — ready to list directly!")
+                    else:
+                        st.success(f"✅ {_ab_ch_priced}/{len(_ab_res)} cards priced by CardHedger")
+                        st.warning(f"⚠️ {_ab_ch_missing} card(s) not found in CardHedger — use Option B below for those")
+                    # Build eBay-ready CSV using CH prices for all CH-priced cards
+                    _ab_ch_ebay_rows = [row for row in _ab_tcp_rows if row.get('*StartPrice')]
+                    _ab_ch_ebay_csv  = _ab_make_tcp_csv(_ab_ch_ebay_rows)
+                    st.download_button(
+                        f"⚡ Download eBay CSV — {_ab_ch_priced} cards (CardHedger prices)",
+                        _ab_ch_ebay_csv,
+                        "lot_scan_ebay_ch_prices.csv",
+                        "text/csv",
+                        key="ab_ch_ebay_dl",
+                        type="primary",
+                    )
+                    st.caption("Prices from CardHedger FMV · shipping policy auto-set by price tier · upload directly to eBay File Exchange")
+                else:
+                    st.warning("CardHedger couldn't price any cards in this batch — use TradingCardPricer.com below")
+
+                # ── Option B: TradingCardPricer fallback ──────────────────────
+                if _ab_ch_missing > 0 or _ab_ch_priced == 0:
+                    st.markdown(f"**{'Option B' if _ab_ch_priced > 0 else 'Option A'} — TradingCardPricer.com** ({_ab_ch_missing if _ab_ch_priced > 0 else len(_ab_res)} cards need pricing)")
+                    # Export only unpriced cards to TCP
+                    _ab_tcp_unpriced = [row for row in _ab_tcp_rows if not row.get('*StartPrice')]
+                    _ab_tcp_csv = _ab_make_tcp_csv(_ab_tcp_unpriced if _ab_tcp_unpriced else _ab_tcp_rows)
+                    st.download_button(
+                        "📊 Download TCP Upload CSV",
+                        _ab_tcp_csv,
+                        "lot_scan_tcp_upload.csv",
+                        "text/csv",
+                        key="ab_tcp_dl",
+                    )
+                    st.caption(f"{len(_ab_tcp_unpriced or _ab_tcp_rows)} cards · upload to [tradingcardpricer.com](https://tradingcardpricer.com) · TCP fills in *StartPrice and returns a priced CSV")
 
                 # ── Step 3 — Import TCP Results → eBay Listing CSV ────────────
                 st.markdown("---")
