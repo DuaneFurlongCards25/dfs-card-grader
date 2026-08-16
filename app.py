@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.80"
+APP_VERSION = "1.5.81"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4070,6 +4070,107 @@ if _active_tab == 2:
     if not CARDHEDGER_KEY:
         st.info("📊 Connect the CardHedger API to use scanning.")
     else:
+        # ── TCP helpers shared with AI Batch → eBay export ────────────────
+        _AB_TCP_NFL = {'Cardinals','Falcons','Ravens','Bills','Panthers','Bears','Bengals','Browns','Cowboys','Broncos','Lions','Packers','Texans','Colts','Jaguars','Chiefs','Raiders','Chargers','Rams','Dolphins','Vikings','Patriots','Saints','Giants','Jets','Eagles','Steelers','Seahawks','49ers',"49's",'Buccaneers','Titans','Commanders','Niners'}
+        _AB_TCP_NBA = {'Hawks','Celtics','Nets','Hornets','Bulls','Cavaliers','Mavericks','Nuggets','Pistons','Warriors','Rockets','Pacers','Clippers','Lakers','Grizzlies','Heat','Bucks','Timberwolves','Pelicans','Knicks','Thunder','Magic','Sixers','76ers','Suns','Blazers','Kings','Spurs','Raptors','Jazz'}
+        _AB_TCP_MLB = {'Orioles','Red Sox','Yankees','Rays','Blue Jays','White Sox','Guardians','Tigers','Royals','Twins','Astros','Angels','Athletics',"A's",'Mariners','Rangers','Braves','Marlins','Mets','Phillies','Nationals','Cubs','Reds','Brewers','Pirates','Cardinals','Diamondbacks','Rockies','Dodgers','Padres','Giants','Indians'}
+        _AB_TCP_MFRS = ['Panini','Topps','Bowman','Upper Deck','Donruss','Score','Leaf','Fleer',"Collector's Edge",'Pro Set','Hoops','SkyBox','Playoff','Pacific','Wild Card']
+        _AB_TCP_SETS = ['Prizm','Mosaic','Select','Phoenix','Illusions','Absolute','Donruss','Chronicles','National Treasures','Flawless','Immaculate','Revolution','Optic','Contenders','Rookies & Stars','Score','Origins','Elements','Obsidian','Hoops','Court Kings','Certified','Noir','Spectra','Gold Standard','Chrome','Series 1','Series 2','Update','Allen & Ginter','Stadium Club','Heritage','Finest','Now','Gypsy Queen','Archives','Opening Day','Holiday','Big League','Draft','Platinum','Sapphire']
+        _AB_TCP_PARALLELS = ['LogoFractor','Superfractor','X-Fractor','Refractor','Sandglitter','Elevate','Reactive Blue','Reactive Purple','Reactive','Cracked Ice','Mojo','Disco','Laser','Neon','Pulsar','Holo','Wave','Scope','Atomic','Shimmer','Gold','Silver','Blue','Red','Green','Orange','Purple','Pink','Rainbow','Prizm']
+        _AB_TCP_HEADER = ['*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)','CustomLabel','*Category','StoreCategory','*Title','Subtitle','Relationship','*ConditionID','*C:Graded','*C:Sport','*C:Player/Athlete','*C:Parallel/Variety','*C:Manufacturer','C:Season','*C:Features','*C:Set','CD:Grade - (ID: 27502)','*C:League','CD:Professional Grader - (ID: 27501)','*C:Team','*C:Autographed','CD:Card Condition - (ID: 40001)','*C:Card Name','*C:Card Number','CDA:Certification Number - (ID: 27503)','*C:Type','C:Signed By','C:Autograph Authentication','C:Year Manufactured','C:Card Size','C:Country/Region of Manufacturer','C:Material','C:Autograph Format','C:Vintage','C:Original/Licensed Reprint','C:Event/Tournament','C:Language','C:Autograph Authentication Number','C:Bundle Description','C:California Prop 65 Warning','C:Card Thickness','C:Custom Bundle','C:Insert Set','C:Print Run','PicURL','GalleryType','*Description','*Format','*Duration','*StartPrice','BuyItNowPrice','*Quantity','PayPalAccepted','PayPalEmailAddress','ImmediatePayRequired','PaymentInstructions','*Location','PostalCode','ShippingType','ShippingService-1:Option','ShippingService-1:FreeShipping','ShippingService-1:Cost','ShippingService-1:AdditionalCost','ShippingService-2:Option','ShippingService-2:Cost','*DispatchTimeMax','PromotionalShippingDiscount','ShippingDiscountProfileID','*ReturnsAcceptedOption','ReturnsWithinOption','RefundOption','ShippingCostPaidByOption','AdditionalDetails','ShippingProfileName','ReturnProfileName','PaymentProfileName','TakeBackPolicyID','ProductCompliancePolicyID','ScheduleTime','BestOfferEnabled','MinimumBestOfferPrice','BestOfferAutoAcceptPrice','*C:Rookie','*C:Memorabilia','ActiveListings','SoldListings','Confidence','PricingPulledFrom']
+        _AB_TCP_DESC = ('<div style="background:#FDFEFE;border:1px solid #CBD4C2;color:#353535;padding:40px;line-height:1.6;font-family:Arial,sans-serif;font-size:16px;"><h1 style="text-align:center;">{t}</h1><table style="width:100%;margin-top:30px;border-spacing:0;"><tr><th align="left">Payment</th><td>Payment is due within 4 days. Unpaid items may be canceled and relisted.</td></tr><tr><th align="left">Shipping</th><td>Items ship via eBay Standard Envelope. Combined shipping may apply. Usually ships within 1 business day.</td></tr><tr><th align="left">Disclaimer</th><td>All cards are sold as-is. No refunds or returns. Contact us before leaving negative feedback.</td></tr></table><div style="text-align:center;margin:2.5rem 0;"><a href="https://www.tradingcardpricer.com" style="text-decoration:none;color:inherit;"><div style="display:inline-flex;align-items:center;gap:1rem;"><img src="https://s3.us-east-2.amazonaws.com/tcr.image.bucket/Logos/Priced+by+TCP.png" alt="EZ Price by TradingCardPricer" style="width:48%;max-width:300px;"><span style="font-size:2rem;font-weight:bold;">TradingCardPricer</span></div></a></div></div>')
+
+        def _ab_tcp_sport(sport_str):
+            """Map Vision sport string → (sport_col, league_col)."""
+            s = (sport_str or '').upper()
+            if 'SOCCER' in s or 'FOOTBALL' in s and 'AMERICAN' not in s: pass
+            mapping = {
+                'BASKETBALL': ('BASKETBALL', 'NBA'),
+                'FOOTBALL':   ('FOOTBALL',   'NFL'),
+                'BASEBALL':   ('BASEBALL',   'MLB'),
+                'SOCCER':     ('SOCCER',     'SOCCER'),
+                'HOCKEY':     ('HOCKEY',     'NHL'),
+            }
+            for key, val in mapping.items():
+                if key in s:
+                    return val
+            return ('BASEBALL', 'MLB')
+
+        def _ab_make_tcp_row(r, idx):
+            """Build a TCP/eBay row dict from a Vision scan result dict."""
+            player   = str(r.get('Player', '') or '')
+            year     = str(r.get('Year', '') or '')
+            set_     = str(r.get('Set', '') or '')
+            card_num = str(r.get('Card #', '') or '')
+            parallel = str(r.get('Parallel', '') or '')
+            sport_s  = str(r.get('Sport', '') or '')
+            parts = [p for p in [year, set_, player, parallel, f'#{card_num}' if card_num else ''] if p.strip()]
+            title = ' '.join(parts)[:80]
+            sport_col, league_col = _ab_tcp_sport(sport_s)
+            sku = f'LOT{idx:03d}'
+            mfr = next((m for m in _AB_TCP_MFRS if re.search(r'\b'+re.escape(m)+r'\b', set_, re.I)), '')
+            set_name = next((s for s in _AB_TCP_SETS if re.search(r'\b'+re.escape(s)+r'\b', set_, re.I)), set_)
+            para_col = next((p for p in _AB_TCP_PARALLELS if re.search(r'\b'+re.escape(p)+r'\b', parallel, re.I)), parallel)
+            rookie = 'Yes' if re.search(r'\bRC\b|\bRookie\b|\(RC\)', title, re.I) else 'No'
+            desc = _AB_TCP_DESC.replace('{t}', title.replace('"', '&quot;'))
+            row = {k: '' for k in _AB_TCP_HEADER}
+            row.update({
+                '*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)': 'Add',
+                'CustomLabel':                       sku,
+                '*Category':                         '261328',
+                'StoreCategory':                     '0',
+                '*Title':                            title,
+                '*ConditionID':                      '4000',
+                '*C:Graded':                         'No',
+                '*C:Sport':                          sport_col,
+                '*C:Player/Athlete':                 player[:50],
+                '*C:Parallel/Variety':               para_col,
+                '*C:Manufacturer':                   mfr,
+                'C:Season':                          year,
+                '*C:Features':                       '',
+                '*C:Set':                            set_name,
+                'CD:Grade - (ID: 27502)':            '',
+                '*C:League':                         league_col,
+                'CD:Professional Grader - (ID: 27501)': '',
+                '*C:Team':                           '',
+                '*C:Autographed':                    'No',
+                'CD:Card Condition - (ID: 40001)':   'Excellent',
+                '*C:Card Name':                      player[:50],
+                '*C:Card Number':                    card_num,
+                'CDA:Certification Number - (ID: 27503)': '',
+                '*C:Type':                           'Sports Trading Card',
+                'C:Year Manufactured':               year,
+                'C:Print Run':                       '',
+                '*Description':                      desc,
+                '*Format':                           'FixedPrice',
+                '*Duration':                         'GTC',
+                '*StartPrice':                       '',
+                '*Quantity':                         '1',
+                'PayPalAccepted':                    '1',
+                'ImmediatePayRequired':              '1',
+                '*Location':                         'United States',
+                'ShippingType':                      'Flat',
+                'ShippingService-1:Option':          'USPSFirstClass',
+                'ShippingService-1:FreeShipping':    '1',
+                'ShippingService-1:Cost':            '0',
+                'ShippingService-1:AdditionalCost':  '0',
+                '*DispatchTimeMax':                  '1',
+                '*ReturnsAcceptedOption':            'ReturnsNotAccepted',
+                'BestOfferEnabled':                  '1',
+                '*C:Rookie':                         rookie,
+                '*C:Memorabilia':                    'No',
+            })
+            return row
+
+        def _ab_make_tcp_csv(rows):
+            buf = io.StringIO()
+            info = ['Info', 'Version=1.0.0', 'Template=fx_category_template_EBAY_US'] + [''] * (len(_AB_TCP_HEADER) - 3)
+            buf.write(','.join(info) + '\n')
+            w = csv.DictWriter(buf, fieldnames=_AB_TCP_HEADER)
+            w.writeheader()
+            w.writerows(rows)
+            return buf.getvalue().encode('utf-8')
+
         scan_search, scan_raw, scan_ai_batch, scan_cert, scan_batch, scan_grade = st.tabs(["🔍 Title Search", "🃏 Raw card photo", "🤖 AI Batch", "🎫 Graded slab (cert #)", "📦 Batch → eBay", "🔬 Grade Predictor"])
 
         # ── TITLE SEARCH ──────────────────────────────────────────────────────
@@ -4591,6 +4692,83 @@ if _active_tab == 2:
                     st.session_state.pop("ai_batch_results", None)
                     st.session_state.pop("ai_batch_img_zips", None)
                     st.rerun()
+
+                # ── Step 2 — Export for TradingCardPricer.com ─────────────────
+                st.markdown("---")
+                st.markdown("#### Step 2 — Export for TradingCardPricer.com")
+                st.caption("Download this CSV and upload it to [tradingcardpricer.com](https://tradingcardpricer.com) to get prices. TCP fills in *StartPrice for each LOT SKU and returns a priced CSV.")
+                _ab_tcp_rows = [_ab_make_tcp_row(r, i + 1) for i, r in enumerate(_ab_res)]
+                _ab_tcp_csv  = _ab_make_tcp_csv(_ab_tcp_rows)
+                st.download_button(
+                    "📊 Download TCP Upload CSV",
+                    _ab_tcp_csv,
+                    f"lot_scan_tcp_upload.csv",
+                    "text/csv",
+                    key="ab_tcp_dl",
+                )
+                st.caption(f"{len(_ab_tcp_rows)} cards · SKUs LOT001–LOT{len(_ab_tcp_rows):03d} · *StartPrice left blank for TCP to fill in")
+
+                # ── Step 3 — Import TCP Results → eBay Listing CSV ────────────
+                st.markdown("---")
+                st.markdown("#### Step 3 — Import TCP Results → eBay Listing CSV")
+                st.caption("Upload the priced CSV you downloaded from TradingCardPricer.com. The app builds a ready-to-upload eBay Add CSV with prices filled in.")
+                _ab_tcp_result_file = st.file_uploader(
+                    "TCP results CSV (from TradingCardPricer.com)",
+                    type=["csv"],
+                    key="ab_tcp_result_upload",
+                    label_visibility="visible",
+                )
+                if _ab_tcp_result_file:
+                    _ab_tcp_result_bytes = _ab_tcp_result_file.read()
+                    _ab_tcp_result_text  = _ab_tcp_result_bytes.decode('utf-8-sig')
+                    # TCP result CSVs have an Info header row — skip it
+                    _ab_tcp_result_lines = _ab_tcp_result_text.splitlines()
+                    _ab_tcp_skip = 0
+                    if _ab_tcp_result_lines and _ab_tcp_result_lines[0].startswith('Info,'):
+                        _ab_tcp_skip = 1
+                    _ab_tcp_result_rows = list(csv.DictReader(_ab_tcp_result_lines[_ab_tcp_skip:]))
+                    if _ab_tcp_result_rows:
+                        # Build preview table
+                        _ab_prev_cols = ['CustomLabel', '*Title', '*StartPrice', 'Confidence', 'PricingPulledFrom']
+                        _ab_prev_data = [
+                            {c: row.get(c, '') for c in _ab_prev_cols}
+                            for row in _ab_tcp_result_rows
+                        ]
+                        st.dataframe(
+                            pd.DataFrame(_ab_prev_data),
+                            hide_index=True,
+                            use_container_width=True,
+                            height=min(400, 45 + len(_ab_prev_data) * 36),
+                            column_config={
+                                'CustomLabel':      st.column_config.TextColumn('SKU',          width='small'),
+                                '*Title':           st.column_config.TextColumn('Title',         width='large'),
+                                '*StartPrice':      st.column_config.TextColumn('Price',         width='small'),
+                                'Confidence':       st.column_config.TextColumn('Confidence',    width='small'),
+                                'PricingPulledFrom':st.column_config.TextColumn('Priced From',   width='medium'),
+                            },
+                        )
+                        # Build eBay Add CSV — pass through TCP result columns, force *Action=Add and BestOfferEnabled=1
+                        _ab_ebay_rows = []
+                        for _tcp_r in _ab_tcp_result_rows:
+                            _ebay_r = {k: '' for k in _AB_TCP_HEADER}
+                            for k in _AB_TCP_HEADER:
+                                if k in _tcp_r:
+                                    _ebay_r[k] = _tcp_r[k]
+                            _ebay_r['*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)'] = 'Add'
+                            _ebay_r['BestOfferEnabled'] = '1'
+                            _ab_ebay_rows.append(_ebay_r)
+                        _ab_ebay_csv = _ab_make_tcp_csv(_ab_ebay_rows)
+                        st.download_button(
+                            "📥 Download eBay Listing CSV",
+                            _ab_ebay_csv,
+                            "lot_scan_ebay_add.csv",
+                            "text/csv",
+                            key="ab_ebay_add_dl",
+                            type="primary",
+                        )
+                        st.caption(f"{len(_ab_ebay_rows)} listings ready · upload to eBay File Exchange to list all at once")
+                    else:
+                        st.warning("No rows found in TCP results CSV — make sure you uploaded the file returned by TradingCardPricer.com.")
 
         with scan_cert:
             st.caption("Enter the cert number printed on the slab label to pull the card + recent sold prices and buy signal.")
