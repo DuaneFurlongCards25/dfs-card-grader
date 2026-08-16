@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.00"
+APP_VERSION = "1.6.01"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -9769,6 +9769,19 @@ alter table lot_cards add constraint if not exists lot_cards_prefix_sku_unique u
                                 if alias:
                                     known_prefixes[alias] = l["lot_prefix"]
                         lot_card_count = {l["lot_prefix"].upper(): int(l.get("card_count") or 0) for l in lots_data}
+
+                        # Re-derive prefix using longest-match against known lot prefixes.
+                        # Needed when lot prefix has >2 dash segments (e.g. CURTDAWG-08-15-26).
+                        # The initial _pur_prefix() call only extracted 2 segments.
+                        def _longest_known(sku, kpfx):
+                            su = str(sku or "").strip().upper()
+                            for p in sorted(kpfx, key=len, reverse=True):
+                                if su == p or su.startswith(p + "-"):
+                                    return kpfx[p]
+                            return _pur_prefix(sku)  # fallback: unknown group, show as-is
+                        card_df_raw["_prefix"] = card_df_raw[sku_col].apply(
+                            lambda s: _longest_known(s, known_prefixes)
+                        )
 
                         matched   = card_df_raw["_prefix"].str.upper().isin(known_prefixes).sum()
                         unmatched = len(card_df_raw) - matched
