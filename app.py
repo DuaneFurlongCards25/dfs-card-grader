@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.84"
+APP_VERSION = "1.5.85"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4487,30 +4487,28 @@ if _active_tab == 2:
 
         # ── AI BATCH SCANNER ──────────────────────────────────────────────────
         with scan_ai_batch:
-            st.caption("Upload front photos — Claude identifies each card and pulls CardHedger comps. Optionally add backs to auto-generate eBay corner crops. ~1¢ per card.")
+            st.caption("Drop all card photos into one box — interleaved front/back (front1, back1, front2, back2…). Claude reads the fronts, backs become corner crops. ~1¢ per card.")
 
             if not ANTHROPIC_KEY:
                 st.warning("⚠️ Add your Anthropic API key to `.streamlit/secrets.toml` under `[anthropic] api_key = \"sk-ant-...\"` to enable AI card recognition.")
 
-            _ab_col1, _ab_col2 = st.columns(2)
-            with _ab_col1:
-                st.markdown("**Front images** *(required — Claude reads these)*")
-                _ab_files = st.file_uploader(
-                    "Front images",
-                    type=["jpg", "jpeg", "png", "webp"],
-                    accept_multiple_files=True,
-                    key="ai_batch_files",
-                    label_visibility="collapsed",
-                )
-            with _ab_col2:
-                st.markdown("**Back images** *(optional — for eBay corner crops only, not scanned)*")
-                _ab_back_files = st.file_uploader(
-                    "Back images",
-                    type=["jpg", "jpeg", "png", "webp"],
-                    accept_multiple_files=True,
-                    key="ai_batch_back_files",
-                    label_visibility="collapsed",
-                )
+            _ab_all_files = st.file_uploader(
+                "Drop all card photos here — front1, back1, front2, back2… (or fronts only)",
+                type=["jpg", "jpeg", "png", "webp"],
+                accept_multiple_files=True,
+                key="ai_batch_files",
+            )
+
+            # Split interleaved into fronts + backs
+            if _ab_all_files and len(_ab_all_files) > 1 and len(_ab_all_files) % 2 == 0:
+                _ab_files      = _ab_all_files[0::2]   # even indices = fronts
+                _ab_back_files = _ab_all_files[1::2]   # odd indices  = backs
+                st.caption(f"✅ {len(_ab_files)} fronts + {len(_ab_back_files)} backs detected (interleaved)")
+            else:
+                _ab_files      = _ab_all_files or []
+                _ab_back_files = []
+                if _ab_all_files and len(_ab_all_files) % 2 != 0:
+                    st.caption(f"📷 {len(_ab_files)} front(s) only — add a back for every front to enable corner crops")
 
             # imgbb key — stored in secrets.toml or entered here
             if not IMGBB_KEY:
