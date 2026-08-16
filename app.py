@@ -5353,9 +5353,9 @@ if _active_tab == 2:
                         key="bxw_drip_hrs",
                         help="App auto-calculates cards per hour. 40 cards over 8 hrs = 5/hr.")
                     st.session_state["bx_drip_start"] = _dsc2.text_input(
-                        "Start time (YYYY-MM-DD HH:MM, 24h local)",
+                        "Start time (YYYY-MM-DD HH:MM AM/PM)",
                         value=st.session_state.get("bx_drip_start", ""),
-                        placeholder="e.g. 2026-08-10 09:00",
+                        placeholder="e.g. 2026-08-10 9:00 AM",
                         key="bxw_drip_start",
                         help="Leave blank to start from the next full hour.")
                     # Live schedule preview based on current batch
@@ -5368,9 +5368,12 @@ if _active_tab == 2:
                         _drip_start_str = st.session_state.get("bx_drip_start", "").strip()
                         if _drip_start_str:
                             try:
-                                _drip_base_p = _dtp.datetime.strptime(_drip_start_str, "%Y-%m-%d %H:%M")
+                                _drip_base_p = _dtp.datetime.strptime(_drip_start_str, "%Y-%m-%d %I:%M %p")
                             except ValueError:
-                                _drip_base_p = (_dtp.datetime.now() + _dtp.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+                                try:
+                                    _drip_base_p = _dtp.datetime.strptime(_drip_start_str, "%Y-%m-%d %H:%M")
+                                except ValueError:
+                                    _drip_base_p = (_dtp.datetime.now() + _dtp.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
                         else:
                             _drip_base_p = (_dtp.datetime.now() + _dtp.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
                         _drip_end_p = _drip_base_p + _dtp.timedelta(hours=_slots_est - 1)
@@ -6323,9 +6326,12 @@ alter table scan_cards disable row level security;"""
                             _drip_start_str = st.session_state.get("bx_drip_start", "").strip()
                             if _drip_start_str:
                                 try:
-                                    _drip_base = _dt_drip.datetime.strptime(_drip_start_str, "%Y-%m-%d %H:%M")
+                                    _drip_base = _dt_drip.datetime.strptime(_drip_start_str, "%Y-%m-%d %I:%M %p")
                                 except ValueError:
-                                    _drip_base = (_dt_drip.datetime.now() + _dt_drip.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+                                    try:
+                                        _drip_base = _dt_drip.datetime.strptime(_drip_start_str, "%Y-%m-%d %H:%M")
+                                    except ValueError:
+                                        _drip_base = (_dt_drip.datetime.now() + _dt_drip.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
                             else:
                                 _drip_base = (_dt_drip.datetime.now() + _dt_drip.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
                             # Count how many cards will actually be included
