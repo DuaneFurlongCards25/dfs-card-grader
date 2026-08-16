@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.99"
+APP_VERSION = "1.6.00"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4190,32 +4190,77 @@ if _active_tab == 2:
             else:
                 return "$501-600"
 
+        # Marquee players get name-first treatment in non-soccer titles
+        _AB_MARQUEE = {
+            "ohtani","shohei","lebron","james","mahomes","messi","ronaldo",
+            "trout","jordan","curry","durant","jeter","griffey","ruth",
+            "mantle","aaron","wembanyama","doncic","luka","yamal","haaland",
+            "vinicius","vini","soto","judge","vlad","guerrero",
+        }
+
+        def _ab_build_title(player, year, set_, card_num, parallel, sport, team, is_rc, numbered):
+            """Build eBay listing title following DFS rules, targeting ~78 chars.
+            Soccer & marquee: NAME FIRST in ALL CAPS. Others: year first."""
+            p_up = (player or "").strip().upper()
+            yr   = (year or "").strip()
+            sn   = (set_ or "").strip()
+            par  = (parallel or "").strip()
+            if par.lower() in ("base", "base set", ""):
+                par = ""
+            num_s = (f"#{card_num}" if str(card_num or "").strip() else "")
+            sp    = (sport or "").strip()
+            tm    = (team or "").strip()
+            numb  = (numbered or "").strip()
+
+            sp_lo = sp.lower()
+            is_soccer  = sp_lo == "soccer"
+            is_wnba    = "wnba" in sp_lo or "women" in sp_lo
+            is_marquee = any(kw in (player or "").lower() for kw in _AB_MARQUEE)
+
+            if is_soccer:
+                # NAME FIRST in ALL CAPS, then year, set, card#, parallel, team/country
+                core = [p_up, yr, sn, num_s, par, tm]
+            elif is_marquee:
+                # NAME FIRST in ALL CAPS, then year, set, parallel, card#, team
+                core = [p_up, yr, sn, par, num_s, tm]
+            else:
+                # Year first, player name in ALL CAPS after set info
+                core = [yr, sn, par, num_s, p_up, tm]
+
+            title = " ".join(p for p in core if p).strip()
+
+            # Pad toward 78 chars in priority order
+            padders = []
+            if is_wnba and "WNBA" not in title.upper():
+                padders.append("WNBA")
+            if is_rc and not re.search(r'\bRC\b|\bRookie\b', title, re.I):
+                padders.append("RC")
+            if numb and numb not in title:
+                padders.append(numb)
+            if not is_soccer and sp and sp.lower() not in title.lower():
+                padders.append(sp)
+            if is_soccer and "Soccer" not in title:
+                padders.append("Soccer")
+
+            for pad in padders:
+                candidate = title + " " + pad
+                if len(candidate) <= 78:
+                    title = candidate
+
+            return title[:80]
+
         def _ab_expand_title(base_title, r, target=78):
-            """Pad eBay title toward target chars using card metadata."""
+            """Final pad: add 'Card' or other filler only if space remains."""
             t = base_title.strip()
-            team     = str(r.get('Team', '') or '').strip()
-            sport    = str(r.get('Sport', '') or '').strip()
-            numbered = str(r.get('Numbered', '') or '').strip()
-            is_rc    = bool(r.get('Rookie', False))
-            notes    = str(r.get('Notes', '') or '').strip()
-            extras = []
-            if is_rc and 'Rookie' not in t:
-                extras.append('Rookie Card')
-            if team and team.upper() not in t.upper():
-                extras.append(team)
-            if numbered and numbered not in t:
-                extras.append(numbered)
-            if sport and sport.upper() not in t.upper():
-                extras.append(sport)
-            if notes and len(notes) <= 25 and notes.upper() not in t.upper():
-                extras.append(notes)
-            extras += ['Sports Trading Card', 'Mint']
-            for extra in extras:
-                candidate = t + ' ' + extra
+            notes = str(r.get('Notes', '') or '').strip()
+            fillers = []
+            if notes and len(notes) <= 20 and notes.upper() not in t.upper():
+                fillers.append(notes)
+            fillers.append('Card')
+            for filler in fillers:
+                candidate = t + ' ' + filler
                 if len(candidate) <= target:
                     t = candidate
-                elif len(t) >= target:
-                    break
             return t[:80]
 
         def _ab_make_tcp_row(r, idx):
@@ -4229,8 +4274,12 @@ if _active_tab == 2:
             pic_urls  = str(r.get('PicURLs', '') or '')   # real uploaded photos (pipe-sep)
             front_url = str(r.get('FrontURL', '') or '')   # front only, for description img
             card_img  = front_url or str(r.get('CH Image', '') or '')  # fallback to CH ref image
-            parts = [p for p in [year, set_, player, parallel, f'#{card_num}' if card_num else ''] if p.strip()]
-            title = ' '.join(parts)[:80]
+            title = _ab_build_title(
+                player, year, set_, card_num, parallel, sport_s,
+                str(r.get('Team', '') or ''),
+                bool(r.get('Rookie', False)),
+                str(r.get('Numbered', '') or ''),
+            )
             sport_col, league_col = _ab_tcp_sport(sport_s)
             sku = f'LOT{idx:03d}'
             mfr = next((m for m in _AB_TCP_MFRS if re.search(r'\b'+re.escape(m)+r'\b', set_, re.I)), '')
