@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.86"
+APP_VERSION = "1.5.87"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4141,6 +4141,27 @@ if _active_tab == 2:
                     return val
             return ('BASEBALL', 'MLB')
 
+        def _ab_shipping_policy(price_str):
+            """Return the eBay ShippingProfileName for a given price."""
+            try:
+                p = float(str(price_str).replace(',', '').strip() or 0)
+            except (ValueError, TypeError):
+                p = 0
+            if p < 20:
+                return "Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)"
+            elif p <= 50:
+                return "$15 to $50 Ground"
+            elif p <= 100:
+                return "$51 to $100 - box"
+            elif p <= 200:
+                return "$100-$200"
+            elif p <= 300:
+                return "$201-$300"
+            elif p <= 400:
+                return "$301-$400"
+            else:
+                return "$401-500"
+
         def _ab_make_tcp_row(r, idx):
             """Build a TCP/eBay row dict from a Vision scan result dict."""
             player    = str(r.get('Player', '') or '')
@@ -4198,14 +4219,18 @@ if _active_tab == 2:
                 '*Quantity':                         '1',
                 'PayPalAccepted':                    '1',
                 'ImmediatePayRequired':              '1',
-                '*Location':                         'United States',
-                'ShippingType':                      'Flat',
-                'ShippingService-1:Option':          'USPSFirstClass',
-                'ShippingService-1:FreeShipping':    '1',
-                'ShippingService-1:Cost':            '0',
-                'ShippingService-1:AdditionalCost':  '0',
+                '*Location':                         'Scottsdale, AZ',
+                'PostalCode':                        '85255',
+                'ShippingType':                      '',
+                'ShippingService-1:Option':          '',
+                'ShippingService-1:FreeShipping':    '',
+                'ShippingService-1:Cost':            '',
+                'ShippingService-1:AdditionalCost':  '',
                 '*DispatchTimeMax':                  '1',
                 '*ReturnsAcceptedOption':            'ReturnsNotAccepted',
+                'ShippingProfileName':               '',
+                'ReturnProfileName':                 'Returns',
+                'PaymentProfileName':                'BIN',
                 'BestOfferEnabled':                  '1',
                 '*C:Rookie':                         rookie,
                 '*C:Memorabilia':                    'No',
@@ -4851,6 +4876,18 @@ if _active_tab == 2:
                             _ebay_r['GalleryType']   = 'Gallery' if _ebay_r['PicURL'] else ''
                             _ebay_r['*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)'] = 'Add'
                             _ebay_r['BestOfferEnabled'] = '1'
+                            # Business policies — shipping tier based on TCP price
+                            _ab_price_r = str(_tcp_r.get('*StartPrice', '') or '')
+                            _ebay_r['ShippingProfileName']              = _ab_shipping_policy(_ab_price_r)
+                            _ebay_r['ReturnProfileName']                = 'Returns'
+                            _ebay_r['PaymentProfileName']               = 'BIN'
+                            _ebay_r['*Location']                        = 'Scottsdale, AZ'
+                            _ebay_r['PostalCode']                       = '85255'
+                            _ebay_r['ShippingType']                     = ''
+                            _ebay_r['ShippingService-1:Option']         = ''
+                            _ebay_r['ShippingService-1:FreeShipping']   = ''
+                            _ebay_r['ShippingService-1:Cost']           = ''
+                            _ebay_r['ShippingService-1:AdditionalCost'] = ''
                             _ab_ebay_rows.append(_ebay_r)
                         _ab_ebay_csv = _ab_make_tcp_csv(_ab_ebay_rows)
                         st.download_button(
@@ -8102,15 +8139,15 @@ if _active_tab == 4:
                     'C:Custom Bundle':'','C:Insert Set':'','C:Print Run':pr,'PicURL':'','GalleryType':'',
                     '*Description':desc,'*Format':'FixedPrice','*Duration':'GTC','*StartPrice':price,
                     'BuyItNowPrice':'','*Quantity':'1','PayPalAccepted':'1','PayPalEmailAddress':'',
-                    'ImmediatePayRequired':'1','PaymentInstructions':'','*Location':'United States',
-                    'PostalCode':'','ShippingType':'Flat','ShippingService-1:Option':'USPSFirstClass',
-                    'ShippingService-1:FreeShipping':'1','ShippingService-1:Cost':'0',
-                    'ShippingService-1:AdditionalCost':'0','ShippingService-2:Option':'',
+                    'ImmediatePayRequired':'1','PaymentInstructions':'','*Location':'Scottsdale, AZ',
+                    'PostalCode':'85255','ShippingType':'','ShippingService-1:Option':'',
+                    'ShippingService-1:FreeShipping':'','ShippingService-1:Cost':'',
+                    'ShippingService-1:AdditionalCost':'','ShippingService-2:Option':'',
                     'ShippingService-2:Cost':'','*DispatchTimeMax':'1',
                     'PromotionalShippingDiscount':'','ShippingDiscountProfileID':'',
                     '*ReturnsAcceptedOption':'ReturnsNotAccepted','ReturnsWithinOption':'',
                     'RefundOption':'','ShippingCostPaidByOption':'','AdditionalDetails':'',
-                    'ShippingProfileName':'','ReturnProfileName':'','PaymentProfileName':'',
+                    'ShippingProfileName':_ab_shipping_policy(price),'ReturnProfileName':'Returns','PaymentProfileName':'BIN',
                     'TakeBackPolicyID':'','ProductCompliancePolicyID':'','ScheduleTime':'',
                     'BestOfferEnabled':'','MinimumBestOfferPrice':'','BestOfferAutoAcceptPrice':'',
                     '*C:Rookie':rookie,'*C:Memorabilia':'No',
