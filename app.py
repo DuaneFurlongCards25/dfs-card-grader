@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.5.82"
+APP_VERSION = "1.5.83"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -381,6 +381,7 @@ DEFAULT_EBAY_KEY = get_secret("ebay", "app_id")
 CARDHEDGER_KEY = get_secret("cardhedger", "api_key")
 CARDHEDGER_BASE = "https://api.cardhedger.com"
 ANTHROPIC_KEY = get_secret("anthropic", "api_key")
+IMGBB_KEY = get_secret("imgbb", "api_key")
 WP_PROXY_URL   = "https://duanefurlongstudios.com/wp-admin/admin-ajax.php?action=dfs_gemrate"
 
 # ─── Page config ──────────────────────────────────────────────────────────────
@@ -1806,6 +1807,22 @@ def ch_image_match_url(image_url: str):
 def ch_image_match_raw(image_url: str, k: int = 5):
     """image-match with k candidates — primary identification for raw cards."""
     return _ch_post("/v1/cards/image-match", {"image_url": image_url, "k": k}) or {}
+
+def imgbb_upload(b64_bytes: bytes, name: str = "card") -> str:
+    """Upload image bytes to imgbb (free host). Returns permanent public URL or ''."""
+    key = IMGBB_KEY or st.session_state.get("imgbb_key_input", "")
+    if not key:
+        return ""
+    try:
+        import urllib.parse as _up
+        b64_str = base64.b64encode(b64_bytes).decode() if isinstance(b64_bytes, (bytes, bytearray)) else b64_bytes
+        payload = _up.urlencode({"key": key, "image": b64_str, "name": name[:100]}).encode()
+        req = urllib.request.Request("https://api.imgbb.com/1/upload", data=payload)
+        with urllib.request.urlopen(req, timeout=30) as r:
+            d = json.loads(r.read().decode())
+        return d.get("data", {}).get("url", "") or ""
+    except Exception:
+        return ""
 
 def ch_fmv_batch(items: list):
     """card-fmv-batch: price up to 100 card/grade combos in one call."""
@@ -4126,13 +4143,15 @@ if _active_tab == 2:
 
         def _ab_make_tcp_row(r, idx):
             """Build a TCP/eBay row dict from a Vision scan result dict."""
-            player   = str(r.get('Player', '') or '')
-            year     = str(r.get('Year', '') or '')
-            set_     = str(r.get('Set', '') or '')
-            card_num = str(r.get('Card #', '') or '')
-            parallel = str(r.get('Parallel', '') or '')
-            sport_s  = str(r.get('Sport', '') or '')
-            card_img = str(r.get('CH Image', '') or '')
+            player    = str(r.get('Player', '') or '')
+            year      = str(r.get('Year', '') or '')
+            set_      = str(r.get('Set', '') or '')
+            card_num  = str(r.get('Card #', '') or '')
+            parallel  = str(r.get('Parallel', '') or '')
+            sport_s   = str(r.get('Sport', '') or '')
+            pic_urls  = str(r.get('PicURLs', '') or '')   # real uploaded photos (pipe-sep)
+            front_url = str(r.get('FrontURL', '') or '')   # front only, for description img
+            card_img  = front_url or str(r.get('CH Image', '') or '')  # fallback to CH ref image
             parts = [p for p in [year, set_, player, parallel, f'#{card_num}' if card_num else ''] if p.strip()]
             title = ' '.join(parts)[:80]
             sport_col, league_col = _ab_tcp_sport(sport_s)
@@ -4170,8 +4189,8 @@ if _active_tab == 2:
                 '*C:Type':                           'Sports Trading Card',
                 'C:Year Manufactured':               year,
                 'C:Print Run':                       '',
-                'PicURL':                            card_img,
-                'GalleryType':                       'Gallery' if card_img else '',
+                'PicURL':                            pic_urls or card_img,
+                'GalleryType':                       'Gallery' if (pic_urls or card_img) else '',
                 '*Description':                      desc,
                 '*Format':                           'FixedPrice',
                 '*Duration':                         'GTC',
@@ -4493,6 +4512,15 @@ if _active_tab == 2:
                     label_visibility="collapsed",
                 )
 
+            # imgbb key — stored in secrets.toml or entered here
+            if not IMGBB_KEY:
+                with st.expander("📸 imgbb auto-upload (free — required for automatic eBay photo URLs)"):
+                    st.markdown("Get a free API key at [imgbb.com/api](https://api.imgbb.com/) — takes 30 seconds.")
+                    st.text_input("imgbb API key", key="imgbb_key_input", type="password",
+                                  placeholder="Paste key here — or add to secrets.toml under [imgbb] api_key")
+            else:
+                st.success("📸 imgbb connected — all 8 photos per card will auto-upload to imgbb and land in the eBay CSV", icon="✅")
+
             _ab_grade = st.radio("Grade for comps", ["Raw", "PSA 10", "PSA 9", "PSA 8"], horizontal=True, key="ai_batch_grade")
             _ab_run_comps = st.checkbox("Pull CardHedger comps + trend after scan", value=True, key="ai_batch_comps_chk")
 
@@ -4501,7 +4529,10 @@ if _active_tab == 2:
                 _ab_n_back = len(_ab_back_files) if _ab_back_files else 0
                 _ab_cost_lo = _ab_n * 0.007
                 _ab_cost_hi = _ab_n * 0.014
-                _ab_img_note = f" · {_ab_n_back} back{'s' if _ab_n_back != 1 else ''} → will generate eBay image ZIPs" if _ab_n_back else " · No backs uploaded — add backs to get eBay corner crops"
+                _ab_has_imgbb = bool(IMGBB_KEY or st.session_state.get("imgbb_key_input", ""))
+                _ab_img_note = (f" · {_ab_n_back} back{'s' if _ab_n_back != 1 else ''} → 8 photos/card auto-uploaded to imgbb + ZIP" if (_ab_n_back and _ab_has_imgbb)
+                                else f" · {_ab_n_back} back{'s' if _ab_n_back != 1 else ''} → ZIP only (add imgbb key to auto-upload)" if _ab_n_back
+                                else " · No backs uploaded — add backs for corner crops + imgbb upload")
                 st.info(
                     f"**{_ab_n} front{'s' if _ab_n != 1 else ''}** · Claude Vision cost: ~${_ab_cost_lo:.2f}–${_ab_cost_hi:.2f}{_ab_img_note}"
                 )
@@ -4595,8 +4626,11 @@ if _active_tab == 2:
                                     elif _ab_dir is not None:
                                         _ab_trend = f"→ {_ab_pct:+.0f}%"
 
-                        # Step 3: eBay image pack (front + back corners)
+                        # Step 3: eBay image pack (front + back corners) + imgbb auto-upload
                         _ab_has_images = False
+                        _ab_pic_urls   = ""   # pipe-separated for eBay PicURL column
+                        _ab_front_url  = ""   # just the front, for description <img>
+                        _ab_use_imgbb  = bool(IMGBB_KEY or st.session_state.get("imgbb_key_input", ""))
                         if _abimg_front and _ab_back_files and _abi < len(_ab_back_files):
                             try:
                                 _ab_status.markdown(f"Generating images **{_abi + 1}/{_ab_n}**: `{_abf.name}`")
@@ -4609,19 +4643,37 @@ if _active_tab == 2:
                                 _ab_front_corners = _ab_corner_bytes(_abimg_front, "front")
                                 _ab_back_corners  = _ab_corner_bytes(_abimg_back,  "back")
 
+                                # Build ordered list of (filename, bytes) — same order = eBay display order
+                                _ab_img_files = [
+                                    (f"{_ab_prefix}_1_front.jpg",    _ab_img_to_bytes(_abimg_front)),
+                                    (f"{_ab_prefix}_2_back.jpg",     _ab_img_to_bytes(_abimg_back)),
+                                    (f"{_ab_prefix}_3_front_tl.jpg", _ab_front_corners["front_tl"]),
+                                    (f"{_ab_prefix}_4_front_tr.jpg", _ab_front_corners["front_tr"]),
+                                    (f"{_ab_prefix}_5_front_bl.jpg", _ab_front_corners["front_bl"]),
+                                    (f"{_ab_prefix}_6_front_br.jpg", _ab_front_corners["front_br"]),
+                                    (f"{_ab_prefix}_7_back_tl.jpg",  _ab_back_corners["back_tl"]),
+                                    (f"{_ab_prefix}_8_back_tr.jpg",  _ab_back_corners["back_tr"]),
+                                ]
+
                                 _ab_zip_buf = _aio.BytesIO()
                                 with _ab_zipmod.ZipFile(_ab_zip_buf, "w", _ab_zipmod.ZIP_DEFLATED) as _abzf:
-                                    _abzf.writestr(f"{_ab_prefix}_1_front.jpg",        _ab_img_to_bytes(_abimg_front))
-                                    _abzf.writestr(f"{_ab_prefix}_2_back.jpg",         _ab_img_to_bytes(_abimg_back))
-                                    _abzf.writestr(f"{_ab_prefix}_3_front_tl.jpg",     _ab_front_corners["front_tl"])
-                                    _abzf.writestr(f"{_ab_prefix}_4_front_tr.jpg",     _ab_front_corners["front_tr"])
-                                    _abzf.writestr(f"{_ab_prefix}_5_front_bl.jpg",     _ab_front_corners["front_bl"])
-                                    _abzf.writestr(f"{_ab_prefix}_6_front_br.jpg",     _ab_front_corners["front_br"])
-                                    _abzf.writestr(f"{_ab_prefix}_7_back_tl.jpg",      _ab_back_corners["back_tl"])
-                                    _abzf.writestr(f"{_ab_prefix}_8_back_tr.jpg",      _ab_back_corners["back_tr"])
+                                    for _fn, _fb in _ab_img_files:
+                                        _abzf.writestr(_fn, _fb)
                                 _ab_zip_buf.seek(0)
                                 _ab_img_zips[_abi] = (_ab_prefix, _ab_zip_buf.getvalue())
                                 _ab_has_images = True
+
+                                # Auto-upload all 8 to imgbb → public URLs for eBay CSV
+                                if _ab_use_imgbb:
+                                    _ab_status.markdown(f"Uploading images **{_abi + 1}/{_ab_n}** to imgbb…")
+                                    _uploaded_urls = []
+                                    for _fn, _fb in _ab_img_files:
+                                        _u = imgbb_upload(_fb, name=_fn.rsplit(".",1)[0])
+                                        if _u:
+                                            _uploaded_urls.append(_u)
+                                    if _uploaded_urls:
+                                        _ab_front_url = _uploaded_urls[0]
+                                        _ab_pic_urls  = "|".join(_uploaded_urls)
                             except Exception:
                                 pass
 
@@ -4637,6 +4689,8 @@ if _active_tab == 2:
                             "Sport":       _abcv.get("sport", ""),
                             "CH Match":    _ab_ch_match,
                             "CH Image":    (_abm.get("image", "") if _abm else ""),
+                            "PicURLs":     _ab_pic_urls,
+                            "FrontURL":    _ab_front_url,
                             "FMV":         _ab_fmv,
                             "Comp Avg":    _ab_comp_avg,
                             "Low":         _ab_low,
