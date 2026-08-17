@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.07"
+APP_VERSION = "1.6.08"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4873,6 +4873,7 @@ if _active_tab == 2:
                         _ab_high = ""
                         _ab_trend = ""
                         _ab_alts = []          # alternative CH matches user can swap to
+                        _abm     = None        # CardHedger best match (may stay None if no key / no query)
 
                         if not _abcv.get("_error") and _ab_run_comps and _ab_query and CARDHEDGER_KEY:
                             _ab_status.markdown(f"Pricing **{_abi + 1}/{_ab_n}**: `{_abf.name}`")
