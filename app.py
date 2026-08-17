@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.06"
+APP_VERSION = "1.6.07"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4419,6 +4419,41 @@ if _active_tab == 2:
             w.writerows(rows)
             return buf.getvalue().encode('utf-8')
 
+        def _ab_make_labels_pdf(card_list, sku_list):
+            """Generate 2"×1" thermal label PDF — one label per card with Code128 barcode."""
+            try:
+                import io as _io2
+                from reportlab.lib.units import inch as _inch
+                from reportlab.pdfgen.canvas import Canvas as _CV
+                from reportlab.graphics.barcode.code128 import Code128 as _BC128
+            except ImportError:
+                return None
+            W, H = 2 * _inch, 1 * _inch  # 144pt × 72pt
+            buf = _io2.BytesIO()
+            c = _CV(buf, pagesize=(W, H))
+            for card, sku in zip(card_list, sku_list):
+                player = (card.get("Player") or "Unknown")[:24]
+                year   = str(card.get("Year") or "")
+                set_s  = (card.get("Set") or "")[:18]
+                top_line = f"{player}  {year} {set_s}".strip()[:36]
+                # Barcode
+                bc  = _BC128(sku or "NOSSKU", barHeight=34, barWidth=0.72, humanReadable=False, quiet=False)
+                bw  = bc.width
+                x_bc = max(2, (W - bw) / 2)
+                bc.drawOn(c, x_bc, 13)
+                # SKU text — bottom
+                c.setFont("Courier-Bold", 7.5)
+                c.drawCentredString(W / 2, 3.5, sku or "")
+                # Player / year / set — top
+                c.setFont("Helvetica", 5.5)
+                c.setFillColorRGB(0.38, 0.38, 0.38)
+                c.drawCentredString(W / 2, H - 8, top_line)
+                c.setFillColorRGB(0, 0, 0)
+                c.showPage()
+            c.save()
+            buf.seek(0)
+            return buf.read()
+
         scan_search, scan_raw, scan_ai_batch, scan_cert, scan_batch, scan_grade = st.tabs(["🔍 Title Search", "🃏 Raw card photo", "🤖 AI Batch", "🎫 Graded slab (cert #)", "📦 Batch → eBay", "🔬 Grade Predictor"])
 
         # ── TITLE SEARCH ──────────────────────────────────────────────────────
@@ -5251,6 +5286,27 @@ if _active_tab == 2:
                                 if _un_cols[_ui % 6].button(f"↩ #{_mi+1}", key=f"ab_unmatch_{_mi}", help=_ab_res[_mi].get('Player','')):
                                     st.session_state["ai_batch_results"][_mi]["_matched"] = False
                                     st.rerun()
+
+                        # Print SKU labels
+                        with st.expander(f"🖨️ Print SKU labels — {len(_ab_tcp_rows)} label{'s' if len(_ab_tcp_rows) != 1 else ''} (2×1 thermal)", expanded=False):
+                            st.caption("One label per card: barcode + SKU + player name. Download the PDF then open in Preview → Print → select your thermal printer.")
+                            _lbl_skus  = [r.get('CustomLabel','') for r in _ab_tcp_rows]
+                            _lbl_cards = [_ab_res[_mi] for _mi in _matched_idxs]
+                            _lbl_pdf   = _ab_make_labels_pdf(_lbl_cards, _lbl_skus)
+                            if _lbl_pdf:
+                                _lbl_c1, _lbl_c2 = st.columns([2, 3])
+                                _lbl_c1.download_button(
+                                    f"⬇️ Download {len(_lbl_skus)}-label PDF",
+                                    _lbl_pdf, "sku_labels.pdf", "application/pdf",
+                                    key="ab_dl_labels", type="primary",
+                                )
+                                _lbl_c2.markdown(
+                                    "**macOS:** open PDF in Preview → File → Print  \n"
+                                    "Set paper size to **2\" × 1\"** (add in Page Setup if missing)  \n"
+                                    "Scale: 100%, no margins, portrait"
+                                )
+                            else:
+                                st.error("reportlab not installed — run: `pip install reportlab`")
 
                         st.markdown("---")
 
