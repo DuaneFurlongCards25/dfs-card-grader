@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.02"
+APP_VERSION = "1.6.03"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -1587,11 +1587,11 @@ Return ONLY a valid JSON object with these exact fields — no prose, no markdow
   "player": "Full player/subject name exactly as printed on the card",
   "year": "4-digit release year",
   "brand": "Manufacturer (Topps, Panini, Bowman, Upper Deck, Fleer, etc.)",
-  "set": "Full set name (e.g. Bowman Chrome, Topps Heritage, Panini Prizm, Topps Update)",
-  "card_number": "Card number with any prefix (e.g. #187, BCP-53, TOG-14)",
-  "parallel": "Parallel or refractor type (e.g. Silver Prizm, Gold Refractor, Wave Prizm). Empty string for base cards.",
+  "set": "Full set name — be specific: 'Bowman Chrome' vs 'Bowman' vs 'Bowman Draft'; 'Topps Chrome' vs 'Topps Update' vs 'Topps Heritage'. The set name is printed on the card.",
+  "card_number": "LOOK CAREFULLY at the bottom-left and bottom-right corners, and along the edges — card numbers are often tiny. Formats: plain number (187), hashtag (#187), or letter-prefix code (BCP-53, CPA-DF, TOG-14, BDC-162, PA-RC1). Include any prefix letters. Return empty string ONLY if truly not visible after careful inspection.",
+  "parallel": "Parallel or refractor type (e.g. Silver Prizm, Gold Refractor, Purple Wave, Orange, /99 Refractor). Empty string for standard base cards with no color variant.",
   "sport": "Baseball, Basketball, Football, Soccer, or Hockey",
-  "numbered": "Print run if visible on card (e.g. /99, /250). Empty string if not visible.",
+  "numbered": "Print run stamped on card (e.g. /99, /250, /10). Empty string if not stamped.",
   "rookie": true or false,
   "team": "Team name as shown on card",
   "notes": "Any other notable details: RC, 1st Bowman, autograph, relic, etc.",
@@ -1601,9 +1601,9 @@ Return ONLY a valid JSON object with these exact fields — no prose, no markdow
   "cert_number": "Certification/serial number printed on the slab label. Empty string if not graded or not visible."
 }
 
-Read the card carefully — player name, year, set name, card number are usually printed directly on the card.
+Read the card carefully. Card numbers are small print — zoom your attention to all four corners and the bottom edge before reporting empty.
 For graded slabs: the grader logo (PSA/BGS/SGC/CGC) and grade number appear prominently on the label; the cert number is a long numeric code (e.g. 12345678).
-Only report what you can actually see. Use empty string for anything you cannot read clearly."""
+Only report what you can actually see. Use empty string for anything genuinely unreadable."""
 
 def claude_identify_card(image_b64: str, media_type: str = "image/jpeg") -> dict:
     """Identify a trading card using Claude Vision. Returns structured card data."""
@@ -1646,6 +1646,55 @@ def claude_identify_card(image_b64: str, media_type: str = "image/jpeg") -> dict
         return {"_error": f"HTTP {e.code}", "_raw": body}
     except Exception as e:
         return {"_error": str(e)}
+
+_CLAUDE_CARDNUM_PROMPT = """Find the card number printed on this trading card.
+
+Card numbers are often tiny and located at the bottom-left corner, bottom-right corner, or along a side edge.
+Common formats:
+- Plain number: 187 or #187
+- Prefixed code: BCP-53, CPA-DF, TOG-14, BDC-162, PA-RC1, BVP-1 (letters + hyphen + digits)
+
+Scan every corner and every edge carefully before answering.
+Return ONLY valid JSON: {"card_number": "BCP-53"}
+If you truly cannot see a card number anywhere, return: {"card_number": ""}"""
+
+
+def claude_extract_card_number(image_b64: str, media_type: str = "image/jpeg") -> str:
+    """Targeted second-pass Vision call to extract card number when the main scan missed it."""
+    if not ANTHROPIC_KEY:
+        return ""
+    payload = {
+        "model": "claude-sonnet-5",
+        "max_tokens": 64,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": image_b64}},
+                {"type": "text", "text": _CLAUDE_CARDNUM_PROMPT},
+            ],
+        }],
+    }
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=data,
+        headers={
+            "x-api-key": ANTHROPIC_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=20) as r:
+            resp = json.loads(r.read().decode())
+        text = resp["content"][0]["text"].strip()
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if m:
+            return json.loads(m.group(0)).get("card_number", "")
+        return ""
+    except Exception:
+        return ""
+
 
 _CLAUDE_GRADE_PROMPT = """You are a PSA expert grader with 20+ years of experience. Analyze the trading card image(s) and return a grading assessment.
 
@@ -4734,8 +4783,13 @@ if _active_tab == 2:
                             _abmime = "image/jpeg"
                             _abimg_front = None
 
-                        # Step 1: Claude Vision — front only, no tokens wasted on back
+                        # Step 1: Claude Vision — front only
                         _abcv = claude_identify_card(_abb64, _abmime)
+                        if not _abcv.get("_error") and not str(_abcv.get("card_number") or "").strip():
+                            # Step 1b: card number retry — cheap second pass focused on corners/edges
+                            _cn_retry = claude_extract_card_number(_abb64, _abmime)
+                            if _cn_retry:
+                                _abcv["card_number"] = _cn_retry
                         _ab_query = build_card_query(_abcv) if not _abcv.get("_error") else ""
 
                         # Step 2: CardHedger comps + trend
@@ -4751,6 +4805,22 @@ if _active_tab == 2:
                         if not _abcv.get("_error") and _ab_run_comps and _ab_query and CARDHEDGER_KEY:
                             _ab_status.markdown(f"Pricing **{_abi + 1}/{_ab_n}**: `{_abf.name}`")
                             _abm = ch_card_match(_ab_query)
+                            # Fallback 1: retry without parallel (parallel text often doesn't match CH's wording)
+                            if not _abm and _abcv.get("parallel") and str(_abcv.get("parallel") or "").strip():
+                                _ab_q2 = build_card_query(_abcv, include_parallel=False)
+                                if _ab_q2 and _ab_q2 != _ab_query:
+                                    _abm = ch_card_match(_ab_q2)
+                            # Fallback 2: minimal query — year + player + card number only
+                            if not _abm:
+                                _ab_min_parts = [p for p in [
+                                    str(_abcv.get("year") or "").strip(),
+                                    str(_abcv.get("player") or "").strip(),
+                                    str(_abcv.get("card_number") or "").strip(),
+                                ] if p]
+                                if len(_ab_min_parts) >= 2:
+                                    _ab_q3 = " ".join(_ab_min_parts)
+                                    if _ab_q3 != _ab_query:
+                                        _abm = ch_card_match(_ab_q3)
                             if _abm:
                                 _ab_ch_id  = _abm.get("card_id") or _abm.get("id") or ""
                                 _ab_ch_title = (_abm.get("description") or _abm.get("name") or _abm.get("title") or "")
