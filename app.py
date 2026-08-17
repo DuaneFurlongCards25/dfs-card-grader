@@ -5355,9 +5355,11 @@ if _active_tab == 2:
                 with _tab_all:
                     _ab_df = pd.DataFrame(_ab_res)
                     # Inject SKU + Status columns computed fresh
-                    _ab_sku_prefix = st.session_state.get("ab_sku_prefix", st.session_state.get("sku_prefix", "CARD"))
-                    _ab_sku_start  = int(st.session_state.get("ab_sku_start", st.session_state.get("sku_start_at", 1)))
-                    _ab_df["SKU"]    = [f"{_ab_sku_prefix}-{i + _ab_sku_start - 1:05d}" for i in range(1, len(_ab_df) + 1)]
+                    _ab_sku_prefix = (st.session_state.get("ai_batch_lot_prefix", "") or "").strip().upper()
+                    _ab_sku_start  = int(st.session_state.get("ai_batch_start_at", 1))
+                    def _all_sku(i):
+                        return f"{_ab_sku_prefix}-{i + _ab_sku_start - 1:05d}" if _ab_sku_prefix else f"LOT{i:03d}"
+                    _ab_df["SKU"]    = [_all_sku(i) for i in range(1, len(_ab_df) + 1)]
                     _ab_df["Status"] = _ab_df.get("_matched", pd.Series([False]*len(_ab_df))).apply(
                         lambda m: "✅ Matched" if m else "⏳ Unmatched"
                     )
