@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.03"
+APP_VERSION = "1.6.04"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -1431,6 +1431,21 @@ def ch_card_match(query: str):
     if not result or "match" not in result:
         return None
     return result["match"]
+
+
+def ch_card_match_with_alts(query: str):
+    """Like ch_card_match but also returns the alternative candidates list.
+    Returns (best_match_or_None, [alt1, alt2, ...])."""
+    result = _ch_post("/v1/cards/card-match", {"query": query, "page": 1, "page_size": 5})
+    if not result:
+        return None, []
+    best  = result.get("match")
+    # Alternatives: CH may return 'results', 'cards', or 'matches' — try all
+    alts_raw = result.get("results") or result.get("cards") or result.get("matches") or []
+    # Remove the best match from alts to avoid duplication
+    best_id = (best or {}).get("card_id") or (best or {}).get("id")
+    alts = [a for a in alts_raw if a.get("card_id") != best_id and a.get("id") != best_id]
+    return best, alts
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def ch_comps(card_id, grade: str):
@@ -4672,6 +4687,27 @@ if _active_tab == 2:
         with scan_ai_batch:
             st.caption("Drop all card photos into one box — interleaved front/back (front1, back1, front2, back2…). Claude reads the fronts, backs become corner crops. ~1¢ per card.")
 
+            with st.expander("📖 How to scan quickly (replace Haystack/CDP)", expanded=False):
+                st.markdown("""
+**Workflow — shoot → drop → download CSV → list on eBay**
+
+| Step | What to do |
+|------|-----------|
+| 1 · Shoot | Phone camera on a clean background. One card at a time — front only if you want speed, front + back for corner crop images. |
+| 2 · Upload from Google Drive | Open Google Drive on desktop → right-click photo → **Download**. Batch-select all cards in one folder and download as ZIP, or share the folder and download individually. Then drag the JPEGs here. |
+| 3 · Set lot prefix | Type your lot prefix (e.g. `CURTDAWG-08-15-26`) so SKUs auto-link to the Purchases lot. Set **Start # at** to 1 (or wherever the lot left off). |
+| 4 · Hit Scan | Progress bar runs — Claude reads every card (~3 sec each), CardHedger prices it automatically. |
+| 5 · Review | Check the results table. Wrong match? Use the **"🔄 Wrong match?"** picker (appears below the card preview) to swap to an alternative or search manually. |
+| 6 · Fix titles | Edit any title in the **Step 2** grid — click the cell. Char count shows live. |
+| 7 · Download | Click **⚡ Download eBay CSV** → upload to eBay File Exchange. Done. |
+
+**Tips for faster scanning**
+- Shoot all cards in one Google Drive folder named after the lot, then select all → Download → unzip → drag into this uploader.
+- If the card number is small or on the card back, the scanner does a second focused pass automatically — no extra effort needed.
+- Cards CardHedger doesn't price automatically get an eBay sold link (🔍 Sold column) — click it, copy the price, paste into the Price cell in Step 2.
+- If Claude misreads the set name, just fix the Title in Step 2 — the title is what eBay shows, not the internal fields.
+""")
+
             if not ANTHROPIC_KEY:
                 st.warning("⚠️ Add your Anthropic API key to `.streamlit/secrets.toml` under `[anthropic] api_key = \"sk-ant-...\"` to enable AI card recognition.")
 
@@ -4801,15 +4837,16 @@ if _active_tab == 2:
                         _ab_low = ""
                         _ab_high = ""
                         _ab_trend = ""
+                        _ab_alts = []          # alternative CH matches user can swap to
 
                         if not _abcv.get("_error") and _ab_run_comps and _ab_query and CARDHEDGER_KEY:
                             _ab_status.markdown(f"Pricing **{_abi + 1}/{_ab_n}**: `{_abf.name}`")
-                            _abm = ch_card_match(_ab_query)
+                            _abm, _ab_alts = ch_card_match_with_alts(_ab_query)
                             # Fallback 1: retry without parallel (parallel text often doesn't match CH's wording)
                             if not _abm and _abcv.get("parallel") and str(_abcv.get("parallel") or "").strip():
                                 _ab_q2 = build_card_query(_abcv, include_parallel=False)
                                 if _ab_q2 and _ab_q2 != _ab_query:
-                                    _abm = ch_card_match(_ab_q2)
+                                    _abm, _ab_alts = ch_card_match_with_alts(_ab_q2)
                             # Fallback 2: minimal query — year + player + card number only
                             if not _abm:
                                 _ab_min_parts = [p for p in [
@@ -4820,7 +4857,7 @@ if _active_tab == 2:
                                 if len(_ab_min_parts) >= 2:
                                     _ab_q3 = " ".join(_ab_min_parts)
                                     if _ab_q3 != _ab_query:
-                                        _abm = ch_card_match(_ab_q3)
+                                        _abm, _ab_alts = ch_card_match_with_alts(_ab_q3)
                             if _abm:
                                 _ab_ch_id  = _abm.get("card_id") or _abm.get("id") or ""
                                 _ab_ch_title = (_abm.get("description") or _abm.get("name") or _abm.get("title") or "")
@@ -4941,6 +4978,8 @@ if _active_tab == 2:
                             "🔍 Sold":     _ab_sold_url,
                             "Query":       _ab_query,
                             "Status":      ("Error: " + _abcv["_error"]) if _abcv.get("_error") else "OK",
+                            "_ch_id":      (_abm.get("card_id") or _abm.get("id") or "") if _abm else "",
+                            "_ch_alts":    _ab_alts,
                         })
 
                         _ab_bar.progress((_abi + 1) / _ab_n, text=f"Done {_abi + 1}/{_ab_n}")
@@ -4985,6 +5024,68 @@ if _active_tab == 2:
                     _ab_pcols[2].image(_ab_prev_ch, caption=f"📚 CH: {_ab_prev_r.get('CH Match','Reference')[:40]}", use_container_width=True)
                 elif _ab_prev_ch and not _ab_prev_back:
                     _ab_pcols[1].image(_ab_prev_ch, caption=f"📚 CH: {_ab_prev_r.get('CH Match','Reference')[:40]}", use_container_width=True)
+                # ── Fix Match picker (alternatives for selected card) ────────
+                _ab_prev_alts = _ab_prev_r.get("_ch_alts") or []
+                _ab_prev_ch_id = _ab_prev_r.get("_ch_id") or ""
+                if _ab_alts_label := ("🔄 Wrong match? Pick a better one" if _ab_prev_alts else ("🔍 No CH match — search manually" if not _ab_prev_ch_id else None)):
+                    with st.expander(_ab_alts_label, expanded=False):
+                        if _ab_prev_alts:
+                            st.caption(f"CardHedger returned {len(_ab_prev_alts)} alternative(s) — click one to apply it to card #{_ab_prev_r['#']}")
+                            for _alt_i, _alt in enumerate(_ab_prev_alts):
+                                _alt_id    = _alt.get("card_id") or _alt.get("id") or ""
+                                _alt_label = (_alt.get("description") or _alt.get("name") or _alt.get("title") or f"Alt {_alt_i+1}")[:80]
+                                _alt_img   = _alt.get("image") or _alt.get("image_url") or ""
+                                _alt_cols  = st.columns([1, 5, 2])
+                                if _alt_img:
+                                    _alt_cols[0].image(_alt_img, width=60)
+                                _alt_cols[1].markdown(f"**{_alt_label}**")
+                                if _alt_id and _alt_cols[2].button(f"✅ Use this", key=f"ab_alt_{_ab_prev_idx}_{_alt_i}"):
+                                    # Fetch pricing for the chosen alt and update the result row
+                                    _alt_fmv_r  = ch_fmv(_alt_id, _ab_grade)
+                                    _alt_comp_r = ch_comps(_alt_id, _ab_grade)
+                                    _alt_fmv_v  = fmv_price(_alt_fmv_r)
+                                    _alt_avg_v  = _alt_comp_r.get("comp_price") or _alt_comp_r.get("average")
+                                    _alt_prices = [float(p) for p in [x.get("price") or x.get("sale_price") for x in (_alt_comp_r.get("raw_prices") or _alt_comp_r.get("sales") or [])] if p]
+                                    st.session_state["ai_batch_results"][_ab_prev_idx].update({
+                                        "CH Match":    _alt_label[:50],
+                                        "CH Image":    _alt_img,
+                                        "_ch_id":      _alt_id,
+                                        "_ch_alts":    [a for a in _ab_prev_alts if a.get("card_id") != _alt_id and a.get("id") != _alt_id],
+                                        "FMV":         f"${_alt_fmv_v:,.2f}" if _alt_fmv_v else "",
+                                        "FMV_raw":     f"{_alt_fmv_v:.2f}" if _alt_fmv_v else "",
+                                        "Comp Avg":    f"${float(_alt_avg_v):,.2f}" if _alt_avg_v else "",
+                                        "Low":         f"${min(_alt_prices):,.2f}" if _alt_prices else "",
+                                        "High":        f"${max(_alt_prices):,.2f}" if _alt_prices else "",
+                                    })
+                                    st.rerun()
+                        else:
+                            _ab_manual_q = st.text_input("Search CardHedger", value=_ab_prev_r.get("Query",""), key=f"ab_manual_q_{_ab_prev_idx}")
+                            if st.button("🔍 Search", key=f"ab_manual_srch_{_ab_prev_idx}") and _ab_manual_q:
+                                _man_m, _man_alts = ch_card_match_with_alts(_ab_manual_q)
+                                if _man_m:
+                                    _man_id    = _man_m.get("card_id") or _man_m.get("id") or ""
+                                    _man_title = (_man_m.get("description") or _man_m.get("name") or _man_m.get("title") or "")
+                                    _man_fmv_r  = ch_fmv(_man_id, _ab_grade) if _man_id else {}
+                                    _man_comp_r = ch_comps(_man_id, _ab_grade) if _man_id else {}
+                                    _man_fmv_v  = fmv_price(_man_fmv_r)
+                                    _man_avg_v  = _man_comp_r.get("comp_price") or _man_comp_r.get("average")
+                                    _man_prices = [float(p) for p in [x.get("price") or x.get("sale_price") for x in (_man_comp_r.get("raw_prices") or _man_comp_r.get("sales") or [])] if p]
+                                    st.session_state["ai_batch_results"][_ab_prev_idx].update({
+                                        "CH Match": _man_title[:50],
+                                        "CH Image": _man_m.get("image",""),
+                                        "_ch_id":   _man_id,
+                                        "_ch_alts": _man_alts,
+                                        "FMV":      f"${_man_fmv_v:,.2f}" if _man_fmv_v else "",
+                                        "FMV_raw":  f"{_man_fmv_v:.2f}" if _man_fmv_v else "",
+                                        "Comp Avg": f"${float(_man_avg_v):,.2f}" if _man_avg_v else "",
+                                        "Low":      f"${min(_man_prices):,.2f}" if _man_prices else "",
+                                        "High":     f"${max(_man_prices):,.2f}" if _man_prices else "",
+                                        "Query":    _ab_manual_q,
+                                    })
+                                    st.rerun()
+                                else:
+                                    st.warning("No match found — try different terms")
+
                 st.markdown("---")
 
                 # ── Results table ───────────────────────────────────────────────
