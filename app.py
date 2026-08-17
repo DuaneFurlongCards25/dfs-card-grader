@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.04"
+APP_VERSION = "1.6.05"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -1436,7 +1436,7 @@ def ch_card_match(query: str):
 def ch_card_match_with_alts(query: str):
     """Like ch_card_match but also returns the alternative candidates list.
     Returns (best_match_or_None, [alt1, alt2, ...])."""
-    result = _ch_post("/v1/cards/card-match", {"query": query, "page": 1, "page_size": 5})
+    result = _ch_post("/v1/cards/card-match", {"query": query, "page": 1, "page_size": 20})
     if not result:
         return None, []
     best  = result.get("match")
@@ -4980,6 +4980,7 @@ if _active_tab == 2:
                             "Status":      ("Error: " + _abcv["_error"]) if _abcv.get("_error") else "OK",
                             "_ch_id":      (_abm.get("card_id") or _abm.get("id") or "") if _abm else "",
                             "_ch_alts":    _ab_alts,
+                            "_matched":    bool((_abm.get("card_id") or _abm.get("id")) if _abm else False),
                         })
 
                         _ab_bar.progress((_abi + 1) / _ab_n, text=f"Done {_abi + 1}/{_ab_n}")
@@ -4994,332 +4995,346 @@ if _active_tab == 2:
             if st.session_state.get("ai_batch_results"):
                 _ab_res      = st.session_state["ai_batch_results"]
                 _ab_img_zips = st.session_state.get("ai_batch_img_zips", {})
-                _ab_df  = pd.DataFrame(_ab_res)
-                st.markdown(f"### Results — {len(_ab_res)} cards · grade: {_ab_grade}")
 
-                # ── Card Image Preview ──────────────────────────────────────────
-                _ab_prev_opts = [
-                    f"#{r['#']} — {r.get('Player','?')}  {r.get('Year','')}  {r.get('Set','')}"
-                    for r in _ab_res
-                ]
-                _ab_prev_idx = st.selectbox(
-                    "📸 Card Preview", _ab_prev_opts, index=0,
-                    key="ab_preview_sel",
-                ).split("—")[0].strip().lstrip("#")
-                try:
-                    _ab_prev_idx = int(_ab_prev_idx) - 1
-                except Exception:
-                    _ab_prev_idx = 0
-                _ab_prev_r     = _ab_res[_ab_prev_idx]
-                _ab_prev_pics  = [u.strip() for u in str(_ab_prev_r.get("PicURLs","")).split("|") if u.strip()]
-                _ab_prev_front = _ab_prev_r.get("FrontURL","") or (_ab_prev_pics[0] if _ab_prev_pics else "")
-                _ab_prev_back  = _ab_prev_pics[1] if len(_ab_prev_pics) > 1 else ""
-                _ab_prev_ch    = _ab_prev_r.get("CH Image","")
-                _ab_pcols = st.columns(3 if (_ab_prev_front and _ab_prev_back and _ab_prev_ch) else 2 if (_ab_prev_front and _ab_prev_back) else 1)
-                if _ab_prev_front:
-                    _ab_pcols[0].image(_ab_prev_front, caption="Front ↕ click to expand", use_container_width=True)
-                if _ab_prev_back and len(_ab_pcols) > 1:
-                    _ab_pcols[1].image(_ab_prev_back, caption="Back ↕ click to expand", use_container_width=True)
-                if _ab_prev_ch and len(_ab_pcols) > 2:
-                    _ab_pcols[2].image(_ab_prev_ch, caption=f"📚 CH: {_ab_prev_r.get('CH Match','Reference')[:40]}", use_container_width=True)
-                elif _ab_prev_ch and not _ab_prev_back:
-                    _ab_pcols[1].image(_ab_prev_ch, caption=f"📚 CH: {_ab_prev_r.get('CH Match','Reference')[:40]}", use_container_width=True)
-                # ── Fix Match picker (alternatives for selected card) ────────
-                _ab_prev_alts = _ab_prev_r.get("_ch_alts") or []
-                _ab_prev_ch_id = _ab_prev_r.get("_ch_id") or ""
-                if _ab_alts_label := ("🔄 Wrong match? Pick a better one" if _ab_prev_alts else ("🔍 No CH match — search manually" if not _ab_prev_ch_id else None)):
-                    with st.expander(_ab_alts_label, expanded=False):
-                        if _ab_prev_alts:
-                            st.caption(f"CardHedger returned {len(_ab_prev_alts)} alternative(s) — click one to apply it to card #{_ab_prev_r['#']}")
-                            for _alt_i, _alt in enumerate(_ab_prev_alts):
-                                _alt_id    = _alt.get("card_id") or _alt.get("id") or ""
-                                _alt_label = (_alt.get("description") or _alt.get("name") or _alt.get("title") or f"Alt {_alt_i+1}")[:80]
-                                _alt_img   = _alt.get("image") or _alt.get("image_url") or ""
-                                _alt_cols  = st.columns([1, 5, 2])
-                                if _alt_img:
-                                    _alt_cols[0].image(_alt_img, width=60)
-                                _alt_cols[1].markdown(f"**{_alt_label}**")
-                                if _alt_id and _alt_cols[2].button(f"✅ Use this", key=f"ab_alt_{_ab_prev_idx}_{_alt_i}"):
-                                    # Fetch pricing for the chosen alt and update the result row
-                                    _alt_fmv_r  = ch_fmv(_alt_id, _ab_grade)
-                                    _alt_comp_r = ch_comps(_alt_id, _ab_grade)
-                                    _alt_fmv_v  = fmv_price(_alt_fmv_r)
-                                    _alt_avg_v  = _alt_comp_r.get("comp_price") or _alt_comp_r.get("average")
-                                    _alt_prices = [float(p) for p in [x.get("price") or x.get("sale_price") for x in (_alt_comp_r.get("raw_prices") or _alt_comp_r.get("sales") or [])] if p]
-                                    st.session_state["ai_batch_results"][_ab_prev_idx].update({
-                                        "CH Match":    _alt_label[:50],
-                                        "CH Image":    _alt_img,
-                                        "_ch_id":      _alt_id,
-                                        "_ch_alts":    [a for a in _ab_prev_alts if a.get("card_id") != _alt_id and a.get("id") != _alt_id],
-                                        "FMV":         f"${_alt_fmv_v:,.2f}" if _alt_fmv_v else "",
-                                        "FMV_raw":     f"{_alt_fmv_v:.2f}" if _alt_fmv_v else "",
-                                        "Comp Avg":    f"${float(_alt_avg_v):,.2f}" if _alt_avg_v else "",
-                                        "Low":         f"${min(_alt_prices):,.2f}" if _alt_prices else "",
-                                        "High":        f"${max(_alt_prices):,.2f}" if _alt_prices else "",
-                                    })
-                                    st.rerun()
-                        else:
-                            _ab_manual_q = st.text_input("Search CardHedger", value=_ab_prev_r.get("Query",""), key=f"ab_manual_q_{_ab_prev_idx}")
-                            if st.button("🔍 Search", key=f"ab_manual_srch_{_ab_prev_idx}") and _ab_manual_q:
-                                _man_m, _man_alts = ch_card_match_with_alts(_ab_manual_q)
-                                if _man_m:
-                                    _man_id    = _man_m.get("card_id") or _man_m.get("id") or ""
-                                    _man_title = (_man_m.get("description") or _man_m.get("name") or _man_m.get("title") or "")
-                                    _man_fmv_r  = ch_fmv(_man_id, _ab_grade) if _man_id else {}
-                                    _man_comp_r = ch_comps(_man_id, _ab_grade) if _man_id else {}
-                                    _man_fmv_v  = fmv_price(_man_fmv_r)
-                                    _man_avg_v  = _man_comp_r.get("comp_price") or _man_comp_r.get("average")
-                                    _man_prices = [float(p) for p in [x.get("price") or x.get("sale_price") for x in (_man_comp_r.get("raw_prices") or _man_comp_r.get("sales") or [])] if p]
-                                    st.session_state["ai_batch_results"][_ab_prev_idx].update({
-                                        "CH Match": _man_title[:50],
-                                        "CH Image": _man_m.get("image",""),
-                                        "_ch_id":   _man_id,
-                                        "_ch_alts": _man_alts,
-                                        "FMV":      f"${_man_fmv_v:,.2f}" if _man_fmv_v else "",
-                                        "FMV_raw":  f"{_man_fmv_v:.2f}" if _man_fmv_v else "",
-                                        "Comp Avg": f"${float(_man_avg_v):,.2f}" if _man_avg_v else "",
-                                        "Low":      f"${min(_man_prices):,.2f}" if _man_prices else "",
-                                        "High":     f"${max(_man_prices):,.2f}" if _man_prices else "",
-                                        "Query":    _ab_manual_q,
-                                    })
-                                    st.rerun()
-                                else:
-                                    st.warning("No match found — try different terms")
+                _n_matched   = sum(1 for r in _ab_res if r.get("_matched"))
+                _n_unmatched = len(_ab_res) - _n_matched
 
-                st.markdown("---")
-
-                # ── Results table ───────────────────────────────────────────────
-                _ab_table_cols = ["#","FrontURL","Player","Year","Set","Card #","Parallel","Sport","FMV","Comp Avg","Low","High","Trend (90d)","Images","🔍 Sold","Status"]
-                _ab_df_disp = _ab_df[[c for c in _ab_table_cols if c in _ab_df.columns]]
-                st.dataframe(
-                    _ab_df_disp,
-                    hide_index=True,
-                    use_container_width=True,
-                    height=min(600, 45 + len(_ab_res) * 36),
-                    column_config={
-                        "#":           st.column_config.NumberColumn("#",           width="small"),
-                        "FrontURL":    st.column_config.ImageColumn("📸",           width="small"),
-                        "Player":      st.column_config.TextColumn("Player",        width="medium"),
-                        "Year":        st.column_config.TextColumn("Year",          width="small"),
-                        "Set":         st.column_config.TextColumn("Set",           width="medium"),
-                        "Card #":      st.column_config.TextColumn("Card #",        width="small"),
-                        "Parallel":    st.column_config.TextColumn("Parallel",      width="medium"),
-                        "Sport":       st.column_config.TextColumn("Sport",         width="small"),
-                        "FMV":         st.column_config.TextColumn("FMV",           width="small"),
-                        "Comp Avg":    st.column_config.TextColumn("Comp Avg",      width="small"),
-                        "Low":         st.column_config.TextColumn("Low",           width="small"),
-                        "High":        st.column_config.TextColumn("High",          width="small"),
-                        "Trend (90d)": st.column_config.TextColumn("Trend (90d)",   width="small"),
-                        "Images":      st.column_config.TextColumn("Images",        width="small"),
-                        "🔍 Sold":     st.column_config.LinkColumn("🔍 Sold", display_text="eBay ↗", width="small"),
-                        "Status":      st.column_config.TextColumn("Status",        width="small"),
-                    },
-                )
-
-                # ── Download row ───────────────────────────────────────────
-                _ab_btn_cols = st.columns([1, 1, 3])
-                _ab_csv = _ab_df.to_csv(index=False)
-                _ab_btn_cols[0].download_button("📥 Export CSV", _ab_csv, "ai_batch_scan.csv", "text/csv", key="ai_batch_dl")
-
-                if _ab_img_zips:
-                    # Bundle all per-card ZIPs into one master ZIP
-                    import io as _abio2
-                    import zipfile as _abzm2
-                    _ab_master_buf = _abio2.BytesIO()
-                    with _abzm2.ZipFile(_ab_master_buf, "w", _abzm2.ZIP_DEFLATED) as _ab_mzf:
-                        for _ab_idx, (_ab_pfx, _ab_zbytes) in _ab_img_zips.items():
-                            # Each card's 8 images go into their own sub-folder
-                            import zipfile as _abzm3
-                            _ab_inner = _abio2.BytesIO(_ab_zbytes)
-                            with _abzm3.ZipFile(_ab_inner, "r") as _ab_inner_zf:
-                                for _ab_inner_name in _ab_inner_zf.namelist():
-                                    _ab_mzf.writestr(
-                                        f"{_ab_pfx}/{_ab_inner_name}",
-                                        _ab_inner_zf.read(_ab_inner_name)
-                                    )
-                    _ab_master_buf.seek(0)
-                    _ab_btn_cols[1].download_button(
-                        f"📸 Download {len(_ab_img_zips)} eBay image packs",
-                        _ab_master_buf.getvalue(),
-                        "ebay_images_all_cards.zip",
-                        "application/zip",
-                        key="ai_batch_img_dl",
-                        type="primary",
-                    )
-                    st.caption("ZIP contains one folder per card, each with 8 images: front, back, 4 front corners, 2 back corners. Unzip → open card folder → drag all 8 into eBay.")
-
-                if _ab_btn_cols[2].button("🗑 Clear results", key="ai_batch_clear"):
-                    st.session_state.pop("ai_batch_results", None)
-                    st.session_state.pop("ai_batch_img_zips", None)
+                # Top bar: counts + clear
+                _ab_hdr_c = st.columns([1, 1, 1, 4, 1])
+                _ab_hdr_c[0].metric("Total",     len(_ab_res))
+                _ab_hdr_c[1].metric("✅ Matched",  _n_matched)
+                _ab_hdr_c[2].metric("⏳ Unmatched", _n_unmatched)
+                if _ab_hdr_c[4].button("🗑 Clear", key="ai_batch_clear"):
+                    for _k in ("ai_batch_results","ai_batch_img_zips","ab_unmatched_nav"):
+                        st.session_state.pop(_k, None)
                     st.rerun()
 
-                # ── Step 2 — Pricing ──────────────────────────────────────────
-                st.markdown("---")
-                st.markdown("#### Step 2 — Pricing")
-                _ab_tcp_rows   = [_ab_make_tcp_row(r, i + 1) for i, r in enumerate(_ab_res)]
-                # Auto-expand all titles to ~80 chars
-                for _i2, (_r2, _row2) in enumerate(zip(_ab_res, _ab_tcp_rows)):
-                    _row2['*Title'] = _ab_expand_title(_row2.get('*Title', ''), _r2)
+                _tab_um, _tab_m, _tab_all = st.tabs([
+                    f"⏳ Unmatched ({_n_unmatched})",
+                    f"✅ Matched ({_n_matched})",
+                    f"📋 All ({len(_ab_res)})",
+                ])
 
-                # ── Editable title + price review ─────────────────────────────
-                st.markdown("**Review titles & prices before downloading** (click any cell to edit)")
-                _ab_edit_df = pd.DataFrame([{
-                    'SKU':   row.get('CustomLabel', f'LOT{i+1:03d}'),
-                    'Title': row.get('*Title', ''),
-                    'Chars': len(row.get('*Title', '')),
-                    'Price': row.get('*StartPrice', ''),
-                    'Source': 'CH ✅' if _ab_res[i].get('FMV_raw') else '— needs TCP',
-                } for i, row in enumerate(_ab_tcp_rows)])
-                _ab_edited_df = st.data_editor(
-                    _ab_edit_df,
-                    hide_index=True,
-                    use_container_width=True,
-                    height=min(500, 55 + len(_ab_tcp_rows) * 40),
-                    column_config={
-                        'SKU':    st.column_config.TextColumn('SKU',     width='small',  disabled=True),
-                        'Title':  st.column_config.TextColumn('Title (80 max)', width='large'),
-                        'Chars':  st.column_config.NumberColumn('Chars', width='small',  disabled=True),
-                        'Price':  st.column_config.NumberColumn('$ Price', width='small', format='$%.2f'),
-                        'Source': st.column_config.TextColumn('Priced By', width='small', disabled=True),
-                    },
-                    key='ab_title_editor',
-                )
-                # Apply edited titles and prices back to tcp_rows
-                for _ei, _erow in _ab_edited_df.iterrows():
-                    if _ei < len(_ab_tcp_rows):
-                        _new_title = str(_erow.get('Title') or _ab_tcp_rows[_ei].get('*Title', ''))[:80]
-                        _ab_tcp_rows[_ei]['*Title'] = _new_title
-                        _new_price = _erow.get('Price')
-                        if _new_price is not None and str(_new_price).strip() not in ('', 'nan', 'None'):
-                            _ab_tcp_rows[_ei]['*StartPrice'] = f"{float(_new_price):.2f}"
-
-                _ab_ch_priced  = sum(1 for row in _ab_tcp_rows if str(row.get('*StartPrice') or '').strip())
-                _ab_ch_missing = len(_ab_tcp_rows) - _ab_ch_priced
-
-                # ── Option A: CardHedger prices → direct eBay CSV ─────────────
-                if _ab_ch_priced > 0:
-                    if _ab_ch_priced == len(_ab_res):
-                        st.success(f"✅ All {len(_ab_res)} cards priced by CardHedger — ready to list directly!")
+                # ── UNMATCHED TAB ─────────────────────────────────────────────
+                with _tab_um:
+                    _unmatched_idxs = [i for i, r in enumerate(_ab_res) if not r.get("_matched")]
+                    if not _unmatched_idxs:
+                        st.success("🎉 All cards matched! Switch to the ✅ Matched tab to review prices and download your eBay CSV.")
                     else:
-                        st.success(f"✅ {_ab_ch_priced}/{len(_ab_res)} cards priced by CardHedger")
-                        st.warning(f"⚠️ {_ab_ch_missing} card(s) not found in CardHedger — use Option B below for those")
-                    # Build eBay-ready CSV using CH prices for all CH-priced cards
-                    _ab_ch_ebay_rows = [row for row in _ab_tcp_rows if row.get('*StartPrice')]
-                    _ab_ch_ebay_csv  = _ab_make_tcp_csv(_ab_ch_ebay_rows)
-                    st.download_button(
-                        f"⚡ Download eBay CSV — {_ab_ch_priced} cards (CardHedger prices)",
-                        _ab_ch_ebay_csv,
-                        "lot_scan_ebay_ch_prices.csv",
-                        "text/csv",
-                        key="ab_ch_ebay_dl",
-                        type="primary",
-                    )
-                    st.caption("Prices from CardHedger FMV · shipping policy auto-set by price tier · upload directly to eBay File Exchange")
-                else:
-                    st.warning("CardHedger couldn't price any cards in this batch — use TradingCardPricer.com below")
+                        _cur_umi = st.session_state.get("ab_unmatched_nav", 0)
+                        if _cur_umi >= len(_unmatched_idxs):
+                            _cur_umi = 0
+                        _cur_idx = _unmatched_idxs[_cur_umi]
+                        _cur_r   = _ab_res[_cur_idx]
 
-                # ── Option B: TradingCardPricer fallback ──────────────────────
-                if _ab_ch_missing > 0 or _ab_ch_priced == 0:
-                    st.markdown(f"**{'Option B' if _ab_ch_priced > 0 else 'Option A'} — TradingCardPricer.com** ({_ab_ch_missing if _ab_ch_priced > 0 else len(_ab_res)} cards need pricing)")
-                    # Export only unpriced cards to TCP
-                    _ab_tcp_unpriced = [row for row in _ab_tcp_rows if not row.get('*StartPrice')]
-                    _ab_tcp_csv = _ab_make_tcp_csv(_ab_tcp_unpriced if _ab_tcp_unpriced else _ab_tcp_rows)
-                    st.download_button(
-                        "📊 Download TCP Upload CSV",
-                        _ab_tcp_csv,
-                        "lot_scan_tcp_upload.csv",
-                        "text/csv",
-                        key="ab_tcp_dl",
-                    )
-                    st.caption(f"{len(_ab_tcp_unpriced or _ab_tcp_rows)} cards · upload to [tradingcardpricer.com](https://tradingcardpricer.com) · TCP fills in *StartPrice and returns a priced CSV")
+                        # Navigator row
+                        _nav_c = st.columns([1, 6, 1])
+                        if _nav_c[0].button("← Prev", key="ab_nav_prev", disabled=(_cur_umi == 0)):
+                            st.session_state["ab_unmatched_nav"] = _cur_umi - 1
+                            st.rerun()
+                        _nav_c[1].markdown(
+                            f"<div style='text-align:center;padding:6px 0'>"
+                            f"<b>Card {_cur_umi+1} of {len(_unmatched_idxs)}</b> unmatched · "
+                            f"{_cur_r.get('Player','?')} {_cur_r.get('Year','')} #{_cur_r.get('Card #','?')}</div>",
+                            unsafe_allow_html=True,
+                        )
+                        if _nav_c[2].button("Next →", key="ab_nav_next", disabled=(_cur_umi >= len(_unmatched_idxs)-1)):
+                            st.session_state["ab_unmatched_nav"] = _cur_umi + 1
+                            st.rerun()
 
-                # ── Step 3 — Import TCP Results → eBay Listing CSV ────────────
-                st.markdown("---")
-                st.markdown("#### Step 3 — Import TCP Results → eBay Listing CSV")
-                st.caption("Upload the priced CSV you downloaded from TradingCardPricer.com. The app builds a ready-to-upload eBay Add CSV with prices filled in.")
-                _ab_tcp_result_file = st.file_uploader(
-                    "TCP results CSV (from TradingCardPricer.com)",
-                    type=["csv"],
-                    key="ab_tcp_result_upload",
-                    label_visibility="visible",
-                )
-                if _ab_tcp_result_file:
-                    _ab_tcp_result_bytes = _ab_tcp_result_file.read()
-                    _ab_tcp_result_text  = _ab_tcp_result_bytes.decode('utf-8-sig')
-                    # TCP result CSVs have an Info header row — skip it
-                    _ab_tcp_result_lines = _ab_tcp_result_text.splitlines()
-                    _ab_tcp_skip = 0
-                    if _ab_tcp_result_lines and _ab_tcp_result_lines[0].startswith('Info,'):
-                        _ab_tcp_skip = 1
-                    _ab_tcp_result_rows = list(csv.DictReader(_ab_tcp_result_lines[_ab_tcp_skip:]))
-                    if _ab_tcp_result_rows:
-                        # Build preview table
-                        _ab_prev_cols = ['CustomLabel', '*Title', '*StartPrice', 'Confidence', 'PricingPulledFrom']
-                        _ab_prev_data = [
-                            {c: row.get(c, '') for c in _ab_prev_cols}
-                            for row in _ab_tcp_result_rows
-                        ]
-                        st.dataframe(
-                            pd.DataFrame(_ab_prev_data),
+                        # Two-column layout: card image left, match list right
+                        _img_col, _list_col = st.columns([2, 3])
+
+                        with _img_col:
+                            _pic_urls  = [u.strip() for u in str(_cur_r.get("PicURLs","")).split("|") if u.strip()]
+                            _front_url = _cur_r.get("FrontURL","") or (_pic_urls[0] if _pic_urls else "")
+                            _back_url  = _pic_urls[1] if len(_pic_urls) > 1 else ""
+                            if _front_url:
+                                st.image(_front_url, caption=f"#{_cur_r.get('#','')} · {_cur_r.get('Player','?')}", use_container_width=True)
+                            else:
+                                st.info("No image uploaded for this card — front/back uploads needed for images.")
+                            if _back_url:
+                                st.image(_back_url, caption="Back", use_container_width=True)
+                            # Card details
+                            st.markdown(f"""
+**Year:** {_cur_r.get('Year','')}
+**Set:** {_cur_r.get('Set','')}
+**Card #:** {_cur_r.get('Card #','—')}
+**Parallel:** {_cur_r.get('Parallel','Base')}
+**Print run:** {_cur_r.get('Numbered','—')}
+**Sport:** {_cur_r.get('Sport','')}
+""")
+
+                        with _list_col:
+                            # Search / re-query
+                            _ab_srch_default = st.session_state.get(f"ab_srch_q_{_cur_idx}", _cur_r.get("Query",""))
+                            _ab_srch_val = st.text_input(
+                                "Search CardHedger",
+                                value=_ab_srch_default,
+                                key=f"ab_srch_input_{_cur_idx}",
+                                placeholder="e.g. 2026 Bowman Fernandez CPA-DF Blue Refractor",
+                            )
+                            if st.button("🔍 Search", key=f"ab_srch_btn_{_cur_idx}"):
+                                _s_m, _s_alts = ch_card_match_with_alts(_ab_srch_val)
+                                _s_all = ([_s_m] if _s_m else []) + (_s_alts or [])
+                                st.session_state[f"ab_alts_override_{_cur_idx}"] = _s_all
+                                st.rerun()
+
+                            # Determine which alternatives list to show
+                            _display_alts = (
+                                st.session_state.get(f"ab_alts_override_{_cur_idx}")
+                                or _cur_r.get("_ch_alts")
+                                or []
+                            )
+
+                            if not _display_alts:
+                                st.info("No matches found. Try editing the search above — remove the parallel name or print run, e.g. just: `2026 Bowman Fernandez CPA-DF`")
+                            else:
+                                st.caption(f"{len(_display_alts)} option(s) — click **Select** on the correct variant")
+                                for _ai, _alt in enumerate(_display_alts):
+                                    _alt_id    = _alt.get("card_id") or _alt.get("id") or ""
+                                    _alt_title = (_alt.get("description") or _alt.get("name") or _alt.get("title") or f"Option {_ai+1}")
+                                    _alt_img   = _alt.get("image") or _alt.get("image_url") or ""
+                                    _alt_par   = str(_alt.get("parallel") or _alt.get("variety") or "")
+                                    _alt_run   = str(_alt.get("numbered") or _alt.get("print_run") or "")
+                                    _alt_score = _alt.get("score") or _alt.get("confidence") or ""
+
+                                    _row_c = st.columns([1, 5, 1])
+                                    if _alt_img:
+                                        _row_c[0].image(_alt_img, width=55)
+                                    else:
+                                        _row_c[0].markdown("⬜")
+
+                                    _label = _alt_title[:70]
+                                    if _alt_run:
+                                        _label += f"  /{_alt_run}"
+                                    _row_c[1].markdown(f"**{_label}**")
+                                    if _alt_par:
+                                        _row_c[1].caption(_alt_par)
+                                    if _alt_score:
+                                        _row_c[1].caption(f"Score: {_alt_score}")
+
+                                    if _alt_id and _row_c[2].button("Select", key=f"ab_sel_{_cur_idx}_{_ai}", type="primary"):
+                                        # Fetch FMV + comps for selected card
+                                        _sel_fmv_r  = ch_fmv(_alt_id, _ab_grade)
+                                        _sel_comp_r = ch_comps(_alt_id, _ab_grade)
+                                        _sel_hist_r = ch_price_history(_alt_id, _ab_grade, 90)
+                                        _sel_fmv_v  = fmv_price(_sel_fmv_r)
+                                        _sel_avg_v  = _sel_comp_r.get("comp_price") or _sel_comp_r.get("average")
+                                        _sel_prices = [float(p) for p in [x.get("price") or x.get("sale_price") for x in (_sel_comp_r.get("raw_prices") or _sel_comp_r.get("sales") or [])] if p]
+                                        _sel_dir, _sel_pct = calculate_trend(_sel_hist_r)
+                                        _sel_trend = (f"↑ {_sel_pct:+.0f}%" if _sel_dir=="up" else f"↓ {_sel_pct:.0f}%" if _sel_dir=="down" else f"→ {_sel_pct:+.0f}%" if _sel_dir else "")
+                                        st.session_state["ai_batch_results"][_cur_idx].update({
+                                            "CH Match":    _alt_title[:50],
+                                            "CH Image":    _alt_img,
+                                            "_ch_id":      _alt_id,
+                                            "_ch_alts":    [a for a in _display_alts if a.get("card_id") != _alt_id and a.get("id") != _alt_id],
+                                            "_matched":    True,
+                                            "FMV":         f"${_sel_fmv_v:,.2f}" if _sel_fmv_v else "",
+                                            "FMV_raw":     f"{_sel_fmv_v:.2f}" if _sel_fmv_v else "",
+                                            "Comp Avg":    f"${float(_sel_avg_v):,.2f}" if _sel_avg_v else "",
+                                            "Low":         f"${min(_sel_prices):,.2f}" if _sel_prices else "",
+                                            "High":        f"${max(_sel_prices):,.2f}" if _sel_prices else "",
+                                            "Trend (90d)": _sel_trend,
+                                        })
+                                        # Auto-advance navigator to next unmatched card
+                                        _next_nav = min(_cur_umi, len(_unmatched_idxs) - 2)
+                                        st.session_state["ab_unmatched_nav"] = max(0, _next_nav)
+                                        # Clear any override alts for this card
+                                        st.session_state.pop(f"ab_alts_override_{_cur_idx}", None)
+                                        st.rerun()
+
+                                    st.divider()
+
+                # ── MATCHED TAB ───────────────────────────────────────────────
+                with _tab_m:
+                    _matched_idxs = [i for i, r in enumerate(_ab_res) if r.get("_matched")]
+                    if not _matched_idxs:
+                        st.info("No cards matched yet — go to the ⏳ Unmatched tab to select the correct card for each one.")
+                    else:
+                        # Build TCP rows for matched cards only
+                        _ab_tcp_rows = [_ab_make_tcp_row(_ab_res[_mi], _mi + 1) for _mi in _matched_idxs]
+                        for _i2, _mi in enumerate(_matched_idxs):
+                            _ab_tcp_rows[_i2]['*Title'] = _ab_expand_title(_ab_tcp_rows[_i2].get('*Title',''), _ab_res[_mi])
+
+                        # Editable pricing table
+                        st.markdown("**Review titles & prices** (click any cell to edit)")
+                        _ab_edit_data = []
+                        for _i2, _mi in enumerate(_matched_idxs):
+                            _r   = _ab_res[_mi]
+                            _row = _ab_tcp_rows[_i2]
+                            _ab_edit_data.append({
+                                'SKU':   _row.get('CustomLabel', f'CARD{_mi+1:03d}'),
+                                '📸':   _r.get('FrontURL',''),
+                                'Title': _row.get('*Title',''),
+                                'Chars': len(_row.get('*Title','')),
+                                'CH FMV': _r.get('FMV','—'),
+                                'Price': _row.get('*StartPrice',''),
+                                'Match': (_r.get('CH Match','')[:35] if _r.get('CH Match') else '?'),
+                            })
+                        _ab_edit_df   = pd.DataFrame(_ab_edit_data)
+                        _ab_edited_df = st.data_editor(
+                            _ab_edit_df,
                             hide_index=True,
                             use_container_width=True,
-                            height=min(400, 45 + len(_ab_prev_data) * 36),
+                            height=min(600, 55 + len(_ab_edit_data) * 42),
                             column_config={
-                                'CustomLabel':      st.column_config.TextColumn('SKU',          width='small'),
-                                '*Title':           st.column_config.TextColumn('Title',         width='large'),
-                                '*StartPrice':      st.column_config.TextColumn('Price',         width='small'),
-                                'Confidence':       st.column_config.TextColumn('Confidence',    width='small'),
-                                'PricingPulledFrom':st.column_config.TextColumn('Priced From',   width='medium'),
+                                'SKU':    st.column_config.TextColumn('SKU',          width='small',  disabled=True),
+                                '📸':    st.column_config.ImageColumn('📸',           width='small'),
+                                'Title':  st.column_config.TextColumn('Title (80 max)', width='large'),
+                                'Chars':  st.column_config.NumberColumn('Ch',         width='small',  disabled=True),
+                                'CH FMV': st.column_config.TextColumn('CH FMV',       width='small',  disabled=True),
+                                'Price':  st.column_config.NumberColumn('$ Price',    width='small',  format='$%.2f'),
+                                'Match':  st.column_config.TextColumn('CH Match',     width='medium', disabled=True),
                             },
+                            key='ab_match_editor',
                         )
-                        # Build eBay Add CSV — pull price from TCP, rebuild our description (TCP overwrites it)
-                        # Build SKU → scan result lookup so we can restore PicURL + FrontURL
-                        _ab_sku_map = {f"LOT{i+1:03d}": r for i, r in enumerate(_ab_res)}
-                        _ab_ebay_rows = []
-                        for _tcp_r in _ab_tcp_result_rows:
-                            _ebay_r = {k: '' for k in _AB_TCP_HEADER}
-                            for k in _AB_TCP_HEADER:
-                                if k in _tcp_r:
-                                    _ebay_r[k] = _tcp_r[k]
-                            # Restore our branded description — TCP replaces it with their own
-                            _ab_sku       = str(_tcp_r.get('CustomLabel', '') or '').strip().upper()
-                            _ab_orig      = _ab_sku_map.get(_ab_sku, {})
-                            _ab_title_r   = str(_tcp_r.get('*Title', '') or '').strip()
-                            _ab_front_r   = str(_ab_orig.get('FrontURL', '') or _tcp_r.get('PicURL', '') or '').split('|')[0]
-                            _ab_pic_r     = str(_ab_orig.get('PicURLs', '') or _tcp_r.get('PicURL', '') or '')
-                            _ebay_r['*Description']  = _ab_build_desc(_ab_title_r.replace('"', '&quot;'), _ab_front_r)
-                            _ebay_r['PicURL']        = _ab_pic_r or _ebay_r.get('PicURL', '')
-                            _ebay_r['GalleryType']   = 'Gallery' if _ebay_r['PicURL'] else ''
-                            _ebay_r['*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)'] = 'Add'
-                            _ebay_r['BestOfferEnabled'] = '1'
-                            # Business policies — shipping tier based on TCP price
-                            _ab_price_r = str(_tcp_r.get('*StartPrice', '') or '')
-                            _ebay_r['ShippingProfileName']              = _ab_shipping_policy(_ab_price_r)
-                            _ebay_r['ReturnProfileName']                = 'Returns'
-                            _ebay_r['PaymentProfileName']               = 'BIN'
-                            _ebay_r['*Location']                        = 'Scottsdale, AZ'
-                            _ebay_r['PostalCode']                       = '85255'
-                            _ebay_r['WeightMajor']                      = '0'
-                            _ebay_r['WeightMinor']                      = '4'
-                            _ebay_r['CD:Card Condition - (ID: 40001)']  = EBAY_CONDITION_DEFAULT
-                            _ebay_r['ShippingType']                     = ''
-                            _ebay_r['ShippingService-1:Option']         = ''
-                            _ebay_r['ShippingService-1:FreeShipping']   = ''
-                            _ebay_r['ShippingService-1:Cost']           = ''
-                            _ebay_r['ShippingService-1:AdditionalCost'] = ''
-                            _ab_ebay_rows.append(_ebay_r)
-                        _ab_ebay_csv = _ab_make_tcp_csv(_ab_ebay_rows)
-                        st.download_button(
-                            "📥 Download eBay Listing CSV",
-                            _ab_ebay_csv,
-                            "lot_scan_ebay_add.csv",
-                            "text/csv",
-                            key="ab_ebay_add_dl",
-                            type="primary",
-                        )
-                        st.caption(f"{len(_ab_ebay_rows)} listings ready · upload to eBay File Exchange to list all at once")
-                    else:
-                        st.warning("No rows found in TCP results CSV — make sure you uploaded the file returned by TradingCardPricer.com.")
+                        # Apply edits back to tcp_rows
+                        for _ei, _erow in _ab_edited_df.iterrows():
+                            if _ei < len(_ab_tcp_rows):
+                                _new_t = str(_erow.get('Title') or _ab_tcp_rows[_ei].get('*Title','')).strip()[:80]
+                                _ab_tcp_rows[_ei]['*Title'] = _new_t
+                                _np = _erow.get('Price')
+                                if _np is not None and str(_np).strip() not in ('','nan','None'):
+                                    _ab_tcp_rows[_ei]['*StartPrice'] = f"{float(_np):.2f}"
+
+                        # Unmatch buttons (row of pills)
+                        if _matched_idxs:
+                            st.markdown("**Unmatch a card:**")
+                            _un_cols = st.columns(min(6, len(_matched_idxs)))
+                            for _ui, _mi in enumerate(_matched_idxs):
+                                if _un_cols[_ui % 6].button(f"↩ #{_mi+1}", key=f"ab_unmatch_{_mi}", help=_ab_res[_mi].get('Player','')):
+                                    st.session_state["ai_batch_results"][_mi]["_matched"] = False
+                                    st.rerun()
+
+                        st.markdown("---")
+
+                        # Download row
+                        _priced_rows   = [r for r in _ab_tcp_rows if r.get('*StartPrice')]
+                        _unpriced_rows = [r for r in _ab_tcp_rows if not r.get('*StartPrice')]
+                        _dl_c = st.columns([2, 2, 2, 1])
+
+                        if _priced_rows:
+                            _ab_ebay_csv = _ab_make_tcp_csv(_priced_rows)
+                            _dl_c[0].download_button(
+                                f"⚡ Generate eBay CSV — {len(_priced_rows)} cards",
+                                _ab_ebay_csv, "ebay_listing.csv", "text/csv",
+                                key="ab_dl_ebay_matched", type="primary",
+                            )
+                            _dl_c[0].caption("Upload to eBay File Exchange to list all at once")
+
+                        if _unpriced_rows:
+                            _tcp_csv = _ab_make_tcp_csv(_unpriced_rows)
+                            _dl_c[1].download_button(
+                                f"📊 TCP Upload — {len(_unpriced_rows)} unpriced",
+                                _tcp_csv, "tcp_upload.csv", "text/csv",
+                                key="ab_dl_tcp_matched",
+                            )
+                            _dl_c[1].caption("Cards with no CH price — upload to TradingCardPricer.com")
+
+                        if _ab_img_zips:
+                            import io as _abio2, zipfile as _abzm2
+                            _ab_master_buf = _abio2.BytesIO()
+                            with _abzm2.ZipFile(_ab_master_buf, "w", _abzm2.ZIP_DEFLATED) as _ab_mzf:
+                                for _ab_idx2, (_ab_pfx2, _ab_zbytes2) in _ab_img_zips.items():
+                                    import zipfile as _abzm3
+                                    _ab_inner2 = _abio2.BytesIO(_ab_zbytes2)
+                                    with _abzm3.ZipFile(_ab_inner2, "r") as _ab_inner_zf2:
+                                        for _ab_inner_name2 in _ab_inner_zf2.namelist():
+                                            _ab_mzf.writestr(f"{_ab_pfx2}/{_ab_inner_name2}", _ab_inner_zf2.read(_ab_inner_name2))
+                            _ab_master_buf.seek(0)
+                            _dl_c[2].download_button(
+                                f"📸 Download {len(_ab_img_zips)} image packs",
+                                _ab_master_buf.getvalue(), "ebay_images.zip", "application/zip",
+                                key="ab_dl_imgs_matched", type="primary",
+                            )
+                            _dl_c[2].caption("Unzip → each card folder has 8 images for eBay")
+
+                        # TCP import step (for unpriced cards)
+                        if _unpriced_rows:
+                            st.markdown("---")
+                            st.markdown("#### Import TCP Results → eBay CSV")
+                            st.caption("Upload the priced CSV from TradingCardPricer.com to build the final eBay listing CSV.")
+                            _ab_tcp_result_file = st.file_uploader(
+                                "TCP results CSV", type=["csv"], key="ab_tcp_result_upload_m",
+                            )
+                            if _ab_tcp_result_file:
+                                _ab_tcp_result_text  = _ab_tcp_result_file.read().decode('utf-8-sig')
+                                _ab_tcp_result_lines = _ab_tcp_result_text.splitlines()
+                                _ab_tcp_skip = 1 if _ab_tcp_result_lines and _ab_tcp_result_lines[0].startswith('Info,') else 0
+                                _ab_tcp_result_rows  = list(csv.DictReader(_ab_tcp_result_lines[_ab_tcp_skip:]))
+                                if _ab_tcp_result_rows:
+                                    _ab_sku_map = {r.get('CustomLabel','').upper(): r for r in _ab_res}
+                                    _ab_ebay_rows2 = []
+                                    for _tcp_r2 in _ab_tcp_result_rows:
+                                        _ebay_r2 = {k: '' for k in _AB_TCP_HEADER}
+                                        for k in _AB_TCP_HEADER:
+                                            if k in _tcp_r2:
+                                                _ebay_r2[k] = _tcp_r2[k]
+                                        _ab_sku2      = str(_tcp_r2.get('CustomLabel','') or '').strip().upper()
+                                        _ab_orig2     = _ab_sku_map.get(_ab_sku2, {})
+                                        _ab_title_r2  = str(_tcp_r2.get('*Title','') or '').strip()
+                                        _ab_front_r2  = str(_ab_orig2.get('FrontURL','') or _tcp_r2.get('PicURL','') or '').split('|')[0]
+                                        _ab_pic_r2    = str(_ab_orig2.get('PicURLs','') or _tcp_r2.get('PicURL','') or '')
+                                        _ebay_r2['*Description'] = _ab_build_desc(_ab_title_r2.replace('"','&quot;'), _ab_front_r2)
+                                        _ebay_r2['PicURL']       = _ab_pic_r2 or _ebay_r2.get('PicURL','')
+                                        _ebay_r2['GalleryType']  = 'Gallery' if _ebay_r2['PicURL'] else ''
+                                        _ebay_r2['*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)'] = 'Add'
+                                        _ebay_r2['BestOfferEnabled'] = '1'
+                                        _ab_price_r2 = str(_tcp_r2.get('*StartPrice','') or '')
+                                        _ebay_r2['ShippingProfileName'] = _ab_shipping_policy(_ab_price_r2)
+                                        _ebay_r2['ReturnProfileName']   = 'Returns'
+                                        _ebay_r2['PaymentProfileName']  = 'BIN'
+                                        _ebay_r2['*Location']           = 'Scottsdale, AZ'
+                                        _ebay_r2['PostalCode']          = '85255'
+                                        _ebay_r2['WeightMajor']         = '0'
+                                        _ebay_r2['WeightMinor']         = '4'
+                                        _ebay_r2['CD:Card Condition - (ID: 40001)'] = EBAY_CONDITION_DEFAULT
+                                        _ebay_r2['ShippingType'] = ''
+                                        _ebay_r2['ShippingService-1:Option'] = ''
+                                        _ebay_r2['ShippingService-1:FreeShipping'] = ''
+                                        _ebay_r2['ShippingService-1:Cost'] = ''
+                                        _ebay_r2['ShippingService-1:AdditionalCost'] = ''
+                                        _ab_ebay_rows2.append(_ebay_r2)
+                                    _ab_ebay_csv2 = _ab_make_tcp_csv(_ab_ebay_rows2)
+                                    st.download_button(
+                                        "📥 Download eBay Listing CSV",
+                                        _ab_ebay_csv2, "lot_scan_ebay_add.csv", "text/csv",
+                                        key="ab_ebay_add_dl2", type="primary",
+                                    )
+                                    st.caption(f"{len(_ab_ebay_rows2)} listings ready")
+                                else:
+                                    st.warning("No rows found in TCP results CSV.")
+
+                # ── ALL TAB ───────────────────────────────────────────────────
+                with _tab_all:
+                    _ab_df   = pd.DataFrame(_ab_res)
+                    _ab_tcols = ["#","FrontURL","Player","Year","Set","Card #","Parallel","Sport","FMV","Comp Avg","Low","High","Trend (90d)","Images","🔍 Sold","Status"]
+                    _ab_df_d = _ab_df[[c for c in _ab_tcols if c in _ab_df.columns]]
+                    st.dataframe(
+                        _ab_df_d, hide_index=True, use_container_width=True,
+                        height=min(600, 45 + len(_ab_res) * 36),
+                        column_config={
+                            "#":           st.column_config.NumberColumn("#",           width="small"),
+                            "FrontURL":    st.column_config.ImageColumn("📸",           width="small"),
+                            "Player":      st.column_config.TextColumn("Player",        width="medium"),
+                            "Year":        st.column_config.TextColumn("Year",          width="small"),
+                            "Set":         st.column_config.TextColumn("Set",           width="medium"),
+                            "Card #":      st.column_config.TextColumn("Card #",        width="small"),
+                            "Parallel":    st.column_config.TextColumn("Parallel",      width="medium"),
+                            "Sport":       st.column_config.TextColumn("Sport",         width="small"),
+                            "FMV":         st.column_config.TextColumn("FMV",           width="small"),
+                            "Comp Avg":    st.column_config.TextColumn("Comp Avg",      width="small"),
+                            "Low":         st.column_config.TextColumn("Low",           width="small"),
+                            "High":        st.column_config.TextColumn("High",          width="small"),
+                            "Trend (90d)": st.column_config.TextColumn("Trend (90d)",   width="small"),
+                            "Images":      st.column_config.TextColumn("Images",        width="small"),
+                            "🔍 Sold":     st.column_config.LinkColumn("🔍 Sold",       display_text="eBay ↗", width="small"),
+                            "Status":      st.column_config.TextColumn("Status",        width="small"),
+                        },
+                    )
+                    _ab_raw_csv = _ab_df.to_csv(index=False)
+                    st.download_button("📥 Export raw CSV", _ab_raw_csv, "ai_batch_scan.csv", "text/csv", key="ai_batch_dl_all")
 
         with scan_cert:
             st.caption("Enter the cert number printed on the slab label to pull the card + recent sold prices and buy signal.")
