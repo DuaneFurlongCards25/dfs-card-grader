@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.01"
+APP_VERSION = "1.6.02"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4281,7 +4281,9 @@ if _active_tab == 2:
                 str(r.get('Numbered', '') or ''),
             )
             sport_col, league_col = _ab_tcp_sport(sport_s)
-            sku = f'LOT{idx:03d}'
+            _pfx = st.session_state.get("ai_batch_lot_prefix", "").strip().upper()
+            _sn  = int(st.session_state.get("ai_batch_start_at", 1))
+            sku  = f'{_pfx}-{idx + _sn - 1:05d}' if _pfx else f'LOT{idx:03d}'
             mfr = next((m for m in _AB_TCP_MFRS if re.search(r'\b'+re.escape(m)+r'\b', set_, re.I)), '')
             set_name = next((s for s in _AB_TCP_SETS if re.search(r'\b'+re.escape(s)+r'\b', set_, re.I)), set_)
             para_col = next((p for p in _AB_TCP_PARALLELS if re.search(r'\b'+re.escape(p)+r'\b', parallel, re.I)), parallel)
@@ -4650,6 +4652,24 @@ if _active_tab == 2:
                                   placeholder="Paste key here — or add to secrets.toml under [imgbb] api_key")
             else:
                 st.success("📸 imgbb connected — all 8 photos per card will auto-upload to imgbb and land in the eBay CSV", icon="✅")
+
+            _ab_col1, _ab_col2 = st.columns([2, 1])
+            _ab_lot_pfx_val = _ab_col1.text_input(
+                "Lot Prefix (SKU prefix)",
+                value=st.session_state.get("ai_batch_lot_prefix", st.session_state.get("bx_sku_prefix", "")),
+                placeholder="e.g. CURTDAWG-08-15-26",
+                help="Cards get SKUs like PREFIX-00001, PREFIX-00002 — must match your Purchases lot prefix so sales roll up automatically.",
+                key="ai_batch_lot_pfx_input",
+            )
+            _ab_start_at = _ab_col2.number_input(
+                "Start # at", min_value=1,
+                value=st.session_state.get("ai_batch_start_at", 1),
+                step=1, key="ai_batch_start_at_input",
+                help="First card number. Set to 75 if you already uploaded 74 cards from this lot.",
+            )
+            if _ab_lot_pfx_val:
+                st.session_state["ai_batch_lot_prefix"] = _ab_lot_pfx_val.strip().upper()
+            st.session_state["ai_batch_start_at"] = int(_ab_start_at)
 
             _ab_grade = st.radio("Grade for comps", ["Raw", "PSA 10", "PSA 9", "PSA 8"], horizontal=True, key="ai_batch_grade")
             _ab_run_comps = st.checkbox("Pull CardHedger comps + trend after scan", value=True, key="ai_batch_comps_chk")
