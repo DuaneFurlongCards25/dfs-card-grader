@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.08"
+APP_VERSION = "1.6.09"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -1819,8 +1819,8 @@ def claude_grade_card(front_b64: str, back_b64: str | None,
     except Exception as e:
         return {"_error": str(e)}
 
-def build_card_query(info: dict, include_parallel: bool = True) -> str:
-    """Build a precise eBay search query from Claude-identified card fields."""
+def build_card_query(info: dict, include_parallel: bool = True, include_numbered: bool = True) -> str:
+    """Build a precise search query from Claude-identified card fields."""
     parts = []
     year     = (info.get("year")        or "").strip()
     brand    = (info.get("brand")       or "").strip()
@@ -1850,7 +1850,8 @@ def build_card_query(info: dict, include_parallel: bool = True) -> str:
     if include_parallel and parallel and parallel.lower() not in set_name.lower():
         parts.append(parallel)
 
-    if numbered:
+    # numbered (/25 etc) should only be included for eBay searches, not CH matching
+    if include_numbered and numbered:
         parts.append(numbered)
 
     return " ".join(dict.fromkeys(parts))  # deduplicate preserving order
@@ -4877,23 +4878,34 @@ if _active_tab == 2:
 
                         if not _abcv.get("_error") and _ab_run_comps and _ab_query and CARDHEDGER_KEY:
                             _ab_status.markdown(f"Pricing **{_abi + 1}/{_ab_n}**: `{_abf.name}`")
-                            _abm, _ab_alts = ch_card_match_with_alts(_ab_query)
-                            # Fallback 1: retry without parallel (parallel text often doesn't match CH's wording)
-                            if not _abm and _abcv.get("parallel") and str(_abcv.get("parallel") or "").strip():
-                                _ab_q2 = build_card_query(_abcv, include_parallel=False)
-                                if _ab_q2 and _ab_q2 != _ab_query:
+                            # Attempt 1: full query, never include numbered (/25 etc — breaks CH matcher)
+                            _ab_q1 = build_card_query(_abcv, include_numbered=False)
+                            _abm, _ab_alts = ch_card_match_with_alts(_ab_q1)
+                            # Attempt 2: drop parallel too (CH naming differs from vision output)
+                            if not _abm and str(_abcv.get("parallel") or "").strip():
+                                _ab_q2 = build_card_query(_abcv, include_parallel=False, include_numbered=False)
+                                if _ab_q2 and _ab_q2 != _ab_q1:
                                     _abm, _ab_alts = ch_card_match_with_alts(_ab_q2)
-                            # Fallback 2: minimal query — year + player + card number only
+                            # Attempt 3: year + player + card number only
                             if not _abm:
-                                _ab_min_parts = [p for p in [
+                                _ab_q3_parts = [p for p in [
                                     str(_abcv.get("year") or "").strip(),
                                     str(_abcv.get("player") or "").strip(),
                                     str(_abcv.get("card_number") or "").strip(),
                                 ] if p]
-                                if len(_ab_min_parts) >= 2:
-                                    _ab_q3 = " ".join(_ab_min_parts)
-                                    if _ab_q3 != _ab_query:
+                                if len(_ab_q3_parts) >= 2:
+                                    _ab_q3 = " ".join(_ab_q3_parts)
+                                    if _ab_q3 not in (_ab_q1, _ab_q2 if not _abm else ""):
                                         _abm, _ab_alts = ch_card_match_with_alts(_ab_q3)
+                            # Attempt 4: year + player only (broadest — avoids card# misread)
+                            if not _abm:
+                                _ab_q4_parts = [p for p in [
+                                    str(_abcv.get("year") or "").strip(),
+                                    str(_abcv.get("player") or "").strip(),
+                                ] if p]
+                                if len(_ab_q4_parts) == 2:
+                                    _ab_q4 = " ".join(_ab_q4_parts)
+                                    _abm, _ab_alts = ch_card_match_with_alts(_ab_q4)
                             if _abm:
                                 _ab_ch_id  = _abm.get("card_id") or _abm.get("id") or ""
                                 _ab_ch_title = (_abm.get("description") or _abm.get("name") or _abm.get("title") or "")
