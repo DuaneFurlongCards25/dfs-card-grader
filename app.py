@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.05"
+APP_VERSION = "1.6.06"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -5052,29 +5052,63 @@ if _active_tab == 2:
                             if _front_url:
                                 st.image(_front_url, caption=f"#{_cur_r.get('#','')} · {_cur_r.get('Player','?')}", use_container_width=True)
                             else:
-                                st.info("No image uploaded for this card — front/back uploads needed for images.")
+                                # Visual card placeholder
+                                _cp_set   = str(_cur_r.get("Set","")).lower()
+                                _cp_bg    = ("#1a56db" if "chrome" in _cp_set or "refractor" in _cp_set
+                                             else "#b45309" if "prizm" in _cp_set or "optic" in _cp_set
+                                             else "#1e3a5f")
+                                _cp_year  = _cur_r.get("Year","") or "—"
+                                _cp_set_s = (_cur_r.get("Set","") or "Unknown Set")[:28]
+                                _cp_name  = _cur_r.get("Player","Unknown Player")
+                                _cp_num   = _cur_r.get("Card #","") or ""
+                                st.markdown(
+                                    f'<div style="background:{_cp_bg};border-radius:8px;padding:28px 16px 22px;'
+                                    f'text-align:center;font-family:sans-serif;color:#fff;min-height:160px">'
+                                    f'<div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;'
+                                    f'opacity:.7;margin-bottom:8px">{_cp_year} · {_cp_set_s}</div>'
+                                    f'<div style="font-size:18px;font-weight:700;line-height:1.2">{_cp_name}</div>'
+                                    f'{"<div style=\\'font-size:12px;opacity:.65;margin-top:6px\\'>#" + _cp_num + "</div>" if _cp_num else ""}'
+                                    f'<div style="font-size:10px;opacity:.45;margin-top:14px">No image uploaded</div>'
+                                    f'</div>',
+                                    unsafe_allow_html=True,
+                                )
                             if _back_url:
                                 st.image(_back_url, caption="Back", use_container_width=True)
-                            # Card details
-                            st.markdown(f"""
-**Year:** {_cur_r.get('Year','')}
-**Set:** {_cur_r.get('Set','')}
-**Card #:** {_cur_r.get('Card #','—')}
-**Parallel:** {_cur_r.get('Parallel','Base')}
-**Print run:** {_cur_r.get('Numbered','—')}
-**Sport:** {_cur_r.get('Sport','')}
-""")
+                            # Compact metadata table
+                            _cp_par = _cur_r.get("Parallel","") or "Base"
+                            _cp_run = _cur_r.get("Numbered","") or "—"
+                            _cp_rc  = "✅ Yes" if _cur_r.get("Rookie") else "No"
+                            _cp_fmv = _cur_r.get("FMV","") or "—"
+                            st.markdown(
+                                f'<table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:8px">'
+                                f'<tr><td style="color:#64748b;padding:3px 0;width:38%">Card #</td>'
+                                f'<td style="font-weight:600">{_cur_r.get("Card #","—") or "—"}</td></tr>'
+                                f'<tr><td style="color:#64748b;padding:3px 0">Parallel</td>'
+                                f'<td style="font-weight:600;color:#1d4ed8">{_cp_par}</td></tr>'
+                                f'<tr><td style="color:#64748b;padding:3px 0">Print run</td>'
+                                f'<td style="font-weight:600">/{_cp_run}</td></tr>'
+                                f'<tr><td style="color:#64748b;padding:3px 0">Rookie</td>'
+                                f'<td>{_cp_rc}</td></tr>'
+                                f'<tr><td style="color:#64748b;padding:3px 0">Sport</td>'
+                                f'<td>{_cur_r.get("Sport","—") or "—"}</td></tr>'
+                                f'<tr><td style="color:#64748b;padding:3px 0">FMV</td>'
+                                f'<td style="font-weight:700;color:#15803d">{_cp_fmv}</td></tr>'
+                                f'</table>',
+                                unsafe_allow_html=True,
+                            )
 
                         with _list_col:
-                            # Search / re-query
+                            # Inline search bar
+                            _ab_srch_row = st.columns([5, 1])
                             _ab_srch_default = st.session_state.get(f"ab_srch_q_{_cur_idx}", _cur_r.get("Query",""))
-                            _ab_srch_val = st.text_input(
-                                "Search CardHedger",
+                            _ab_srch_val = _ab_srch_row[0].text_input(
+                                "CardHedger search",
                                 value=_ab_srch_default,
                                 key=f"ab_srch_input_{_cur_idx}",
-                                placeholder="e.g. 2026 Bowman Fernandez CPA-DF Blue Refractor",
+                                placeholder="e.g. 2026 Bowman Fernandez CPA-DF",
+                                label_visibility="collapsed",
                             )
-                            if st.button("🔍 Search", key=f"ab_srch_btn_{_cur_idx}"):
+                            if _ab_srch_row[1].button("🔍", key=f"ab_srch_btn_{_cur_idx}", help="Search CardHedger"):
                                 _s_m, _s_alts = ch_card_match_with_alts(_ab_srch_val)
                                 _s_all = ([_s_m] if _s_m else []) + (_s_alts or [])
                                 st.session_state[f"ab_alts_override_{_cur_idx}"] = _s_all
@@ -5088,9 +5122,10 @@ if _active_tab == 2:
                             )
 
                             if not _display_alts:
-                                st.info("No matches found. Try editing the search above — remove the parallel name or print run, e.g. just: `2026 Bowman Fernandez CPA-DF`")
+                                st.info("No matches found. Try removing the parallel or print run from the search above.")
                             else:
-                                st.caption(f"{len(_display_alts)} option(s) — click **Select** on the correct variant")
+                                _n_alts = len(_display_alts)
+                                st.caption(f"{_n_alts} variant{'s' if _n_alts != 1 else ''} in CardHedger — click **Select** on the correct one")
                                 for _ai, _alt in enumerate(_display_alts):
                                     _alt_id    = _alt.get("card_id") or _alt.get("id") or ""
                                     _alt_title = (_alt.get("description") or _alt.get("name") or _alt.get("title") or f"Option {_ai+1}")
@@ -5099,23 +5134,27 @@ if _active_tab == 2:
                                     _alt_run   = str(_alt.get("numbered") or _alt.get("print_run") or "")
                                     _alt_score = _alt.get("score") or _alt.get("confidence") or ""
 
-                                    _row_c = st.columns([1, 5, 1])
-                                    if _alt_img:
-                                        _row_c[0].image(_alt_img, width=55)
-                                    else:
-                                        _row_c[0].markdown("⬜")
+                                    _img_tag  = (f'<img src="{_alt_img}" width="38" style="border-radius:3px;vertical-align:middle;margin-right:8px;flex-shrink:0">'
+                                                 if _alt_img else '')
+                                    _run_html = (f'<span style="color:#94a3b8;font-family:monospace;font-size:10px">&nbsp;/{_alt_run}</span>'
+                                                 if _alt_run else '')
+                                    _par_html = (f'<span style="color:#1d4ed8;font-weight:600">{_alt_par}</span>'
+                                                 if _alt_par else '')
+                                    _sc_html  = (f'<span style="color:#94a3b8">&nbsp;·&nbsp;score&nbsp;{_alt_score}</span>'
+                                                 if _alt_score else '')
+                                    _row_html = (
+                                        f'<div style="display:flex;align-items:flex-start;'
+                                        f'border-bottom:1px solid #e8ecf0;padding:7px 0 6px">'
+                                        f'{_img_tag}'
+                                        f'<div><div style="font-size:12.5px;color:#0f172a;line-height:1.35">'
+                                        f'{_alt_title[:62]}{_run_html}</div>'
+                                        f'<div style="font-size:11px;margin-top:3px">{_par_html}{_sc_html}</div>'
+                                        f'</div></div>'
+                                    )
+                                    _row_c = st.columns([6, 1])
+                                    _row_c[0].markdown(_row_html, unsafe_allow_html=True)
 
-                                    _label = _alt_title[:70]
-                                    if _alt_run:
-                                        _label += f"  /{_alt_run}"
-                                    _row_c[1].markdown(f"**{_label}**")
-                                    if _alt_par:
-                                        _row_c[1].caption(_alt_par)
-                                    if _alt_score:
-                                        _row_c[1].caption(f"Score: {_alt_score}")
-
-                                    if _alt_id and _row_c[2].button("Select", key=f"ab_sel_{_cur_idx}_{_ai}", type="primary"):
-                                        # Fetch FMV + comps for selected card
+                                    if _alt_id and _row_c[1].button("Select", key=f"ab_sel_{_cur_idx}_{_ai}", type="primary"):
                                         _sel_fmv_r  = ch_fmv(_alt_id, _ab_grade)
                                         _sel_comp_r = ch_comps(_alt_id, _ab_grade)
                                         _sel_hist_r = ch_price_history(_alt_id, _ab_grade, 90)
@@ -5137,14 +5176,10 @@ if _active_tab == 2:
                                             "High":        f"${max(_sel_prices):,.2f}" if _sel_prices else "",
                                             "Trend (90d)": _sel_trend,
                                         })
-                                        # Auto-advance navigator to next unmatched card
                                         _next_nav = min(_cur_umi, len(_unmatched_idxs) - 2)
                                         st.session_state["ab_unmatched_nav"] = max(0, _next_nav)
-                                        # Clear any override alts for this card
                                         st.session_state.pop(f"ab_alts_override_{_cur_idx}", None)
                                         st.rerun()
-
-                                    st.divider()
 
                 # ── MATCHED TAB ───────────────────────────────────────────────
                 with _tab_m:
@@ -5164,28 +5199,38 @@ if _active_tab == 2:
                             _r   = _ab_res[_mi]
                             _row = _ab_tcp_rows[_i2]
                             _ab_edit_data.append({
-                                'SKU':   _row.get('CustomLabel', f'CARD{_mi+1:03d}'),
-                                '📸':   _r.get('FrontURL',''),
-                                'Title': _row.get('*Title',''),
-                                'Chars': len(_row.get('*Title','')),
-                                'CH FMV': _r.get('FMV','—'),
-                                'Price': _row.get('*StartPrice',''),
-                                'Match': (_r.get('CH Match','')[:35] if _r.get('CH Match') else '?'),
+                                'SKU':      _row.get('CustomLabel', f'CARD{_mi+1:03d}'),
+                                '📸':      _r.get('FrontURL',''),
+                                'Title':    _row.get('*Title',''),
+                                'Chars':    len(_row.get('*Title','')),
+                                'CH FMV':   _r.get('FMV','—'),
+                                'Price':    _row.get('*StartPrice',''),
+                                'Card #':   _r.get('Card #',''),
+                                'Parallel': _r.get('Parallel',''),
+                                'Print Run':_r.get('Numbered',''),
+                                'RC':       bool(_r.get('Rookie')),
+                                'Notes':    _r.get('Notes',''),
+                                'Match':    (_r.get('CH Match','')[:35] if _r.get('CH Match') else '?'),
                             })
                         _ab_edit_df   = pd.DataFrame(_ab_edit_data)
                         _ab_edited_df = st.data_editor(
                             _ab_edit_df,
                             hide_index=True,
                             use_container_width=True,
-                            height=min(600, 55 + len(_ab_edit_data) * 42),
+                            height=min(700, 55 + len(_ab_edit_data) * 42),
                             column_config={
-                                'SKU':    st.column_config.TextColumn('SKU',          width='small',  disabled=True),
-                                '📸':    st.column_config.ImageColumn('📸',           width='small'),
-                                'Title':  st.column_config.TextColumn('Title (80 max)', width='large'),
-                                'Chars':  st.column_config.NumberColumn('Ch',         width='small',  disabled=True),
-                                'CH FMV': st.column_config.TextColumn('CH FMV',       width='small',  disabled=True),
-                                'Price':  st.column_config.NumberColumn('$ Price',    width='small',  format='$%.2f'),
-                                'Match':  st.column_config.TextColumn('CH Match',     width='medium', disabled=True),
+                                'SKU':      st.column_config.TextColumn('SKU',          width='small',  disabled=True),
+                                '📸':      st.column_config.ImageColumn('📸',           width='small'),
+                                'Title':    st.column_config.TextColumn('Title (80 max)', width='large'),
+                                'Chars':    st.column_config.NumberColumn('Ch',         width='small',  disabled=True),
+                                'CH FMV':   st.column_config.TextColumn('CH FMV',       width='small',  disabled=True),
+                                'Price':    st.column_config.NumberColumn('$ Price',    width='small',  format='$%.2f'),
+                                'Card #':   st.column_config.TextColumn('Card #',       width='small'),
+                                'Parallel': st.column_config.TextColumn('Parallel',     width='medium'),
+                                'Print Run':st.column_config.TextColumn('Print Run',    width='small'),
+                                'RC':       st.column_config.CheckboxColumn('RC',        width='small'),
+                                'Notes':    st.column_config.TextColumn('Notes',         width='medium'),
+                                'Match':    st.column_config.TextColumn('CH Match',     width='medium', disabled=True),
                             },
                             key='ab_match_editor',
                         )
@@ -5308,13 +5353,21 @@ if _active_tab == 2:
 
                 # ── ALL TAB ───────────────────────────────────────────────────
                 with _tab_all:
-                    _ab_df   = pd.DataFrame(_ab_res)
-                    _ab_tcols = ["#","FrontURL","Player","Year","Set","Card #","Parallel","Sport","FMV","Comp Avg","Low","High","Trend (90d)","Images","🔍 Sold","Status"]
+                    _ab_df = pd.DataFrame(_ab_res)
+                    # Inject SKU + Status columns computed fresh
+                    _ab_sku_prefix = st.session_state.get("ab_sku_prefix", st.session_state.get("sku_prefix", "CARD"))
+                    _ab_sku_start  = int(st.session_state.get("ab_sku_start", st.session_state.get("sku_start_at", 1)))
+                    _ab_df["SKU"]    = [f"{_ab_sku_prefix}-{i + _ab_sku_start - 1:05d}" for i in range(1, len(_ab_df) + 1)]
+                    _ab_df["Status"] = _ab_df.get("_matched", pd.Series([False]*len(_ab_df))).apply(
+                        lambda m: "✅ Matched" if m else "⏳ Unmatched"
+                    )
+                    _ab_tcols = ["SKU","#","FrontURL","Player","Year","Set","Card #","Parallel","Sport","FMV","Comp Avg","Low","High","Trend (90d)","Images","🔍 Sold","Status"]
                     _ab_df_d = _ab_df[[c for c in _ab_tcols if c in _ab_df.columns]]
                     st.dataframe(
                         _ab_df_d, hide_index=True, use_container_width=True,
                         height=min(600, 45 + len(_ab_res) * 36),
                         column_config={
+                            "SKU":         st.column_config.TextColumn("SKU",           width="small"),
                             "#":           st.column_config.NumberColumn("#",           width="small"),
                             "FrontURL":    st.column_config.ImageColumn("📸",           width="small"),
                             "Player":      st.column_config.TextColumn("Player",        width="medium"),
