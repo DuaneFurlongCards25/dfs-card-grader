@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.22"
+APP_VERSION = "1.6.24"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4910,7 +4910,10 @@ if _active_tab == 2:
                 if _ab_n_back and _ab_n_back != _ab_n:
                     st.warning(f"⚠️ {_ab_n} fronts but {_ab_n_back} backs — they must match in count and order. Extra backs will be ignored.", icon="⚠️")
 
-                if ANTHROPIC_KEY and st.button("🤖 Scan All Cards", type="primary", key="ai_batch_go"):
+                _can_scan = bool(CARDHEDGER_KEY or ANTHROPIC_KEY)
+                if not _can_scan:
+                    st.warning("⚠️ Add a CardHedger key (primary) or Anthropic key (fallback) to scan cards.")
+                if _can_scan and st.button("🤖 Scan All Cards", type="primary", key="ai_batch_go"):
                     import io as _aio
                     import zipfile as _ab_zipmod
                     from PIL import Image as _PILB
@@ -5134,23 +5137,61 @@ if _active_tab == 2:
                                 _ab_img_zips[_abi] = (_ab_prefix, _ab_zip_buf.getvalue())
                                 _ab_has_images = True
 
-                                # Auto-upload all 8 to imgbb in parallel → public URLs for eBay CSV
-                                if _ab_use_imgbb:
-                                    _ab_status.markdown(f"Uploading images **{_abi + 1}/{_ab_n}** to imgbb…")
+                                # Auto-upload all 8 to Supabase (primary) → 1-year signed URLs for eBay CSV
+                                # Falls back to imgbb if Supabase upload fails
+                                if SUPABASE_URL and SUPABASE_KEY:
+                                    _ab_status.markdown(f"Uploading images **{_abi + 1}/{_ab_n}** to Supabase…")
                                     _slot_results = [None] * len(_ab_img_files)
-                                    def _do_upload(_idx_fn_fb):
+                                    def _do_sup_upload(_idx_fn_fb):
                                         _si, _sfn, _sfb = _idx_fn_fb
-                                        return _si, imgbb_upload(_sfb, name=_sfn.rsplit(".",1)[0])
+                                        try:
+                                            _url, _ = _scan_upload_to_supabase(_sfb, _sfn)
+                                            return _si, _url
+                                        except Exception:
+                                            return _si, ""
                                     with ThreadPoolExecutor(max_workers=8) as _iex:
-                                        for _si, _su in _iex.map(_do_upload, [(_i,_fn,_fb) for _i,(_fn,_fb) in enumerate(_ab_img_files)]):
+                                        for _si, _su in _iex.map(_do_sup_upload, [(_i,_fn,_fb) for _i,(_fn,_fb) in enumerate(_ab_img_files)]):
                                             if _su:
                                                 _slot_results[_si] = _su
                                     _uploaded_urls = [u for u in _slot_results if u]
                                     if _uploaded_urls:
                                         _ab_front_url = _slot_results[0] or _uploaded_urls[0]
                                         _ab_pic_urls  = "|".join(u for u in _slot_results if u)
-                            except Exception:
-                                pass
+                                elif _ab_use_imgbb:
+                                    # imgbb fallback (may be rate-limited on free tier)
+                                    _ab_status.markdown(f"Uploading images **{_abi + 1}/{_ab_n}** to imgbb…")
+                                    _slot_results = [None] * len(_ab_img_files)
+                                    def _do_imgbb_upload(_idx_fn_fb):
+                                        _si, _sfn, _sfb = _idx_fn_fb
+                                        return _si, imgbb_upload(_sfb, name=_sfn.rsplit(".",1)[0])
+                                    with ThreadPoolExecutor(max_workers=8) as _iex:
+                                        for _si, _su in _iex.map(_do_imgbb_upload, [(_i,_fn,_fb) for _i,(_fn,_fb) in enumerate(_ab_img_files)]):
+                                            if _su:
+                                                _slot_results[_si] = _su
+                                    _uploaded_urls = [u for u in _slot_results if u]
+                                    if _uploaded_urls:
+                                        _ab_front_url = _slot_results[0] or _uploaded_urls[0]
+                                        _ab_pic_urls  = "|".join(u for u in _slot_results if u)
+                            except Exception as _img_err:
+                                # Log the imgbb failure so user can see it
+                                st.session_state.setdefault("_ab_imgbb_errors", []).append(
+                                    f"Card {_abi+1} ({_abf.name}): {_img_err}"
+                                )
+
+                        # Store front bytes for local display (no imgbb dependency in card panel)
+                        try:
+                            _ab_front_bytes = _abbuf.getvalue() if '_abbuf' in dir() else _abf.getvalue()
+                        except Exception:
+                            _ab_front_bytes = b""
+
+                        # Detect print-run conflict: CH said one number, card shows another
+                        _ab_ch_numbered = str((_abm.get("variant") or "") if _abm else "").lower()
+                        _ab_cv_numbered = str(_abcv.get("numbered", "") or "").lower()
+                        _ab_numbered_conflict = (
+                            _ab_ch_numbered and _ab_cv_numbered and
+                            _ab_ch_numbered != _ab_cv_numbered and
+                            re.search(r'/\d+', _ab_ch_numbered) and re.search(r'/\d+', _ab_cv_numbered)
+                        )
 
                         # Detect autograph from notes or card-number prefix so eBay sold link filters correctly
                         _ab_notes_lc  = str(_abcv.get("notes","") or "").lower()
@@ -5179,6 +5220,7 @@ if _active_tab == 2:
                             "CH Image":    (_abm.get("image", "") if _abm else ""),
                             "PicURLs":     _ab_pic_urls,
                             "FrontURL":    _ab_front_url,
+                            "_front_bytes": _ab_front_bytes,   # always available, no imgbb needed
                             "FMV":         _ab_fmv,
                             "FMV_raw":     _ab_fmv_raw,
                             "Comp Avg":    _ab_comp_avg,
@@ -5194,6 +5236,7 @@ if _active_tab == 2:
                             "_ch_id":      (_abm.get("card_id") or _abm.get("id") or "") if _abm else "",
                             "_ch_alts":    _ab_alts,
                             "_matched":    bool((_abm.get("card_id") or _abm.get("id")) if _abm else False),
+                            "_numbered_conflict": _ab_numbered_conflict,
                         })
 
                         _ab_bar.progress((_abi + 1) / _ab_n, text=f"Done {_abi + 1}/{_ab_n}")
@@ -5309,10 +5352,24 @@ if _active_tab == 2:
                         with _img_col:
                             _pic_urls  = [u.strip() for u in str(_cur_r.get("PicURLs","")).split("|") if u.strip()]
                             _front_url = _cur_r.get("FrontURL","") or (_pic_urls[0] if _pic_urls else "")
+                            _front_bytes = _cur_r.get("_front_bytes") or b""
                             _back_url  = _pic_urls[1] if len(_pic_urls) > 1 else ""
                             _cp_status = _cur_r.get("Status","")
+                            # Show numbered-parallel conflict warning
+                            if _cur_r.get("_numbered_conflict"):
+                                st.warning(
+                                    f"⚠️ **Print run mismatch** — card shows **{_cur_r.get('Numbered','')}** "
+                                    f"but CardHedger matched a different number. Comps may be wrong. "
+                                    f"Correct the Numbered field and re-search manually.",
+                                    icon="⚠️",
+                                )
                             if _front_url:
                                 st.image(_front_url, caption=f"#{_cur_r.get('#','')} · {_cur_r.get('Player','?')}", use_container_width=True)
+                            elif _front_bytes:
+                                # Show local image directly — no imgbb needed for display
+                                st.image(_front_bytes, caption=f"#{_cur_r.get('#','')} · {_cur_r.get('Player','?')}", use_container_width=True)
+                                if not (IMGBB_KEY or st.session_state.get("imgbb_key_input","")):
+                                    st.caption("📸 Add imgbb key to auto-upload eBay photos")
                             elif _cp_status.startswith("Error"):
                                 _cp_err_msg = _cp_status[7:] if len(_cp_status) > 7 else _cp_status
                                 _cp_raw = _cur_r.get("_raw_err","")
