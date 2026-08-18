@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.18"
+APP_VERSION = "1.6.19"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -5047,7 +5047,15 @@ if _active_tab == 2:
                             except Exception:
                                 pass
 
-                        _ab_ebay_q   = urllib.parse.quote_plus(_ab_query)
+                        # Detect autograph from notes or card-number prefix so eBay sold link filters correctly
+                        _ab_notes_lc  = str(_abcv.get("notes","") or "").lower()
+                        _ab_cardnum_lc = str(_abcv.get("card_number","") or "").lower()
+                        _ab_is_auto = (
+                            "auto" in _ab_notes_lc or "autograph" in _ab_notes_lc or
+                            re.match(r'^(cpa|bca|cga|rpa|pa|bpa|cra|fra|sra)-', _ab_cardnum_lc)
+                        )
+                        _ab_ebay_q_str = _ab_query + (" Auto" if _ab_is_auto and "auto" not in _ab_query.lower() else "")
+                        _ab_ebay_q   = urllib.parse.quote_plus(_ab_ebay_q_str)
                         _ab_sold_url = f"https://www.ebay.com/sch/i.html?_nkw={_ab_ebay_q}&_sacat=261328&LH_Sold=1&LH_Complete=1"
                         _ab_results.append({
                             "#":           _abi + 1,
