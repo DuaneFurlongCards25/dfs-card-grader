@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.27"
+APP_VERSION = "1.6.28"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -5551,10 +5551,35 @@ if _active_tab == 2:
                     if not _matched_idxs:
                         st.info("No cards matched yet — go to the ⏳ Unmatched tab to select the correct card for each one.")
                     else:
-                        # Build TCP rows for matched cards only
-                        _ab_tcp_rows = [_ab_make_tcp_row(_ab_res[_mi], _mi + 1) for _mi in _matched_idxs]
+                        # Read any user edits from the data editor's persisted session state
+                        # so that Print Run / Parallel edits survive re-renders and feed into
+                        # title regeneration before the widget is drawn.
+                        _ab_prev_edits = st.session_state.get('ab_match_editor') or {}
+                        _ab_prev_rows  = (_ab_prev_edits.get('edited_rows') or {}) if isinstance(_ab_prev_edits, dict) else {}
+
+                        # Build TCP rows for matched cards, applying any persisted edits upfront
+                        _ab_tcp_rows = []
                         for _i2, _mi in enumerate(_matched_idxs):
-                            _ab_tcp_rows[_i2]['*Title'] = _ab_expand_title(_ab_tcp_rows[_i2].get('*Title',''), _ab_res[_mi])
+                            _prev = _ab_prev_rows.get(_i2, {})
+                            _r_eff = dict(_ab_res[_mi])
+                            # Overlay user edits so title is built with the corrected values
+                            if 'Print Run' in _prev:
+                                _pr_edit = str(_prev['Print Run'] or '').strip()
+                                if _pr_edit and not _pr_edit.startswith('/'):
+                                    _pr_edit = '/' + _pr_edit
+                                _r_eff['Numbered'] = _pr_edit
+                            if 'Parallel' in _prev and _prev['Parallel']:
+                                _r_eff['Parallel'] = str(_prev['Parallel'])
+                            if 'RC' in _prev:
+                                _r_eff['Rookie'] = bool(_prev['RC'])
+                            if 'Card #' in _prev and _prev['Card #']:
+                                _r_eff['Card #'] = str(_prev['Card #'])
+                            _tcp_row = _ab_make_tcp_row(_r_eff, _i2 + 1)
+                            _tcp_row['*Title'] = _ab_expand_title(_tcp_row.get('*Title', ''), _r_eff)
+                            # If user explicitly edited the Title, honour it
+                            if 'Title' in _prev and _prev['Title']:
+                                _tcp_row['*Title'] = str(_prev['Title'])[:80]
+                            _ab_tcp_rows.append(_tcp_row)
 
                         # Editable pricing table
                         st.markdown("**Review titles & prices** (click any cell to edit)")
@@ -5600,56 +5625,11 @@ if _active_tab == 2:
                             },
                             key='ab_match_editor',
                         )
-                        # Apply edits back to tcp_rows (Title, Price, Print Run, Parallel, RC, Card #)
+                        # Apply edits back to tcp_rows — title/parallel/print-run already
+                        # pre-applied above from persisted session state; only Price needs
+                        # to be synced here since it doesn't affect title generation.
                         for _ei, _erow in _ab_edited_df.iterrows():
                             if _ei < len(_ab_tcp_rows):
-                                _mi2 = _matched_idxs[_ei] if _ei < len(_matched_idxs) else None
-                                _old_pr  = str(_ab_tcp_rows[_ei].get('C:Print Run', '') or '')
-                                _new_pr  = str(_erow.get('Print Run', '') or '').strip().lstrip('/')
-                                _new_par = str(_erow.get('Parallel', '') or '').strip()
-                                _new_num = str(_erow.get('Card #', '') or '').strip()
-                                _new_rc  = bool(_erow.get('RC', False))
-                                # Print Run
-                                if _new_pr:
-                                    _ab_tcp_rows[_ei]['C:Print Run'] = f'/{_new_pr}' if not _new_pr.startswith('/') else _new_pr
-                                # Parallel/Variety
-                                if _new_par:
-                                    _ab_tcp_rows[_ei]['*C:Parallel/Variety'] = _new_par
-                                # Card number
-                                if _new_num:
-                                    _ab_tcp_rows[_ei]['*C:Card Number'] = _new_num
-                                # Title: user's explicit edit always wins; if unchanged, re-generate when print run or parallel changed
-                                _old_t = str(_ab_tcp_rows[_ei].get('*Title', '') or '')
-                                _edited_t = str(_erow.get('Title', '') or '').strip()
-                                _user_changed_title = _edited_t and _edited_t != _old_t
-                                if _user_changed_title:
-                                    _ab_tcp_rows[_ei]['*Title'] = _edited_t[:80]
-                                elif _mi2 is not None and (_new_pr != _old_pr.lstrip('/') or _new_par != str(_ab_res[_mi2].get('Parallel','') or '')):
-                                    # Regenerate title with updated print run / parallel
-                                    _regen_r = dict(_ab_res[_mi2])
-                                    if _new_par: _regen_r['Parallel'] = _new_par
-                                    if _new_num: _regen_r['Card #']   = _new_num
-                                    if _new_rc != _regen_r.get('Rookie'): _regen_r['Rookie'] = _new_rc
-                                    _regen_numb = (f'/{_new_pr}' if _new_pr and not _new_pr.startswith('/') else _new_pr) or str(_regen_r.get('Numbered','') or '')
-                                    _regen_t = _ab_build_title(
-                                        str(_regen_r.get('Player','') or ''),
-                                        str(_regen_r.get('Year','') or ''),
-                                        str(_regen_r.get('Set','') or ''),
-                                        str(_regen_r.get('Card #','') or ''),
-                                        str(_regen_r.get('Parallel','') or ''),
-                                        str(_regen_r.get('Sport','') or ''),
-                                        str(_regen_r.get('Team','') or ''),
-                                        bool(_regen_r.get('Rookie', False)),
-                                        _regen_numb,
-                                    )
-                                    _ab_tcp_rows[_ei]['*Title'] = _ab_expand_title(_regen_t, _regen_r)
-                                    # Also write updated numbered back to session state so panel reflects it
-                                    if _mi2 is not None:
-                                        st.session_state["ai_batch_results"][_mi2]["Numbered"]  = _regen_numb
-                                        st.session_state["ai_batch_results"][_mi2]["Parallel"]  = _new_par or _ab_res[_mi2].get('Parallel','')
-                                        st.session_state["ai_batch_results"][_mi2]["Rookie"]    = _new_rc
-                                else:
-                                    _ab_tcp_rows[_ei]['*Title'] = _old_t
                                 _np = _erow.get('Price')
                                 if _np is not None and str(_np).strip() not in ('','nan','None'):
                                     _ab_tcp_rows[_ei]['*StartPrice'] = f"{float(_np):.2f}"
