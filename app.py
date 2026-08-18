@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.31"
+APP_VERSION = "1.6.32"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -1977,8 +1977,9 @@ def _raw_title(player, set_name, number, variant=""):
     return " ".join(parts)[:80]
 
 def _scan_upload_to_supabase(image_bytes: bytes, filename: str):
-    """Upload a scan to Supabase company-files/scanner/ and return a public URL.
-    Public URL format never expires and needs no auth token — eBay can fetch it directly."""
+    """Upload a scan to Supabase company-files/scanner/ and return a 1-year signed URL.
+    Signed URL is used for in-app display. eBay PicURL uses imgbb (see caller) because
+    eBay's image fetcher cannot access private-bucket Supabase URLs."""
     import time as _t
     path = f"scanner/{int(_t.time())}_{filename}"
     # Upload
@@ -1991,10 +1992,20 @@ def _scan_upload_to_supabase(image_bytes: bytes, filename: str):
             pass
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"Upload failed {e.code}: {e.read().decode()[:200]}")
-    # Public URL — no token, no expiry, eBay image fetcher can access this directly.
-    # The company-files bucket has a public SELECT policy so this works without auth.
-    public_url = f"{SUPABASE_URL}/storage/v1/object/public/company-files/{path}"
-    return public_url, path
+    # Signed URL (1 year) for in-app display — works with private bucket
+    sign_url = f"{SUPABASE_URL}/storage/v1/object/sign/company-files/{path}"
+    sign_payload = json.dumps({"expiresIn": 31536000}).encode()
+    sign_req = urllib.request.Request(sign_url, data=sign_payload, method="POST")
+    sign_req.add_header("Authorization", f"Bearer {SUPABASE_KEY}")
+    sign_req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(sign_req, context=ssl_ctx(), timeout=15) as r:
+        data = json.loads(r.read().decode())
+    signed = data.get("signedURL") or data.get("signedUrl") or ""
+    if not signed:
+        raise RuntimeError("No signed URL returned from Supabase")
+    if signed.startswith("/"):
+        signed = SUPABASE_URL + signed
+    return signed, path
 
 def _scan_shipping(price: float) -> str:
     SHIP_FREE   = "Calculated: US_eBayStandardEnvelope free, 2 bu (315021080021)"
@@ -5141,6 +5152,20 @@ if _active_tab == 2:
                                     def _do_sup_upload(_idx_fn_fb):
                                         _si, _sfn, _sfb = _idx_fn_fb
                                         try:
+                                            # eBay requires ≥500px wide. Corner crops are small
+                                            # zoomed-in crops — scale them up before uploading.
+                                            try:
+                                                from PIL import Image as _PILImg
+                                                import io as _bio
+                                                _pil = _PILImg.open(_bio.BytesIO(_sfb))
+                                                if _pil.width < 500:
+                                                    _sc = 500 / _pil.width
+                                                    _pil = _pil.resize((500, int(_pil.height * _sc)), _PILImg.LANCZOS)
+                                                    _buf2 = _bio.BytesIO()
+                                                    _pil.save(_buf2, format='JPEG', quality=88)
+                                                    _sfb = _buf2.getvalue()
+                                            except Exception:
+                                                pass
                                             _url, _ = _scan_upload_to_supabase(_sfb, _sfn)
                                             return _si, _url
                                         except Exception:
@@ -5152,13 +5177,26 @@ if _active_tab == 2:
                                     _uploaded_urls = [u for u in _slot_results if u]
                                     if _uploaded_urls:
                                         _ab_front_url = _slot_results[0] or _uploaded_urls[0]
-                                        _ab_pic_urls  = "|".join(u for u in _slot_results if u)
+                                        # All 8 images in PicURL — front, back, and 6 corner crops.
+                                        # Corners are resized to ≥500px before upload (see _do_sup_upload).
+                                        _ab_pic_urls = "|".join(u for u in _slot_results if u)
                                 elif _ab_use_imgbb:
-                                    # imgbb fallback (may be rate-limited on free tier)
                                     _ab_status.markdown(f"Uploading images **{_abi + 1}/{_ab_n}** to imgbb…")
                                     _slot_results = [None] * len(_ab_img_files)
                                     def _do_imgbb_upload(_idx_fn_fb):
                                         _si, _sfn, _sfb = _idx_fn_fb
+                                        try:
+                                            from PIL import Image as _PILImg2
+                                            import io as _bio2
+                                            _pil2 = _PILImg2.open(_bio2.BytesIO(_sfb))
+                                            if _pil2.width < 500:
+                                                _sc2 = 500 / _pil2.width
+                                                _pil2 = _pil2.resize((500, int(_pil2.height * _sc2)), _PILImg2.LANCZOS)
+                                                _buf3 = _bio2.BytesIO()
+                                                _pil2.save(_buf3, format='JPEG', quality=88)
+                                                _sfb = _buf3.getvalue()
+                                        except Exception:
+                                            pass
                                         return _si, imgbb_upload(_sfb, name=_sfn.rsplit(".",1)[0])
                                     with ThreadPoolExecutor(max_workers=8) as _iex:
                                         for _si, _su in _iex.map(_do_imgbb_upload, [(_i,_fn,_fb) for _i,(_fn,_fb) in enumerate(_ab_img_files)]):
@@ -5583,9 +5621,11 @@ if _active_tab == 2:
                                 _r_eff['Card #'] = str(_prev['Card #'])
                             _tcp_row = _ab_make_tcp_row(_r_eff, _i2 + 1)
                             _tcp_row['*Title'] = _ab_expand_title(_tcp_row.get('*Title', ''), _r_eff)
-                            # If user explicitly edited the Title, honour it
-                            if 'Title' in _prev and _prev['Title']:
-                                _tcp_row['*Title'] = str(_prev['Title'])[:80]
+                            # Title override stored in ab_title_overrides survives re-renders
+                            # (data_editor state resets when computed title changes; this dict doesn't)
+                            _title_ovr = st.session_state.get('ab_title_overrides', {}).get(_mi)
+                            if _title_ovr:
+                                _tcp_row['*Title'] = _title_ovr
                             _ab_tcp_rows.append(_tcp_row)
 
                         # Editable pricing table
@@ -5594,11 +5634,15 @@ if _active_tab == 2:
                         for _i2, _mi in enumerate(_matched_idxs):
                             _r   = _ab_res[_mi]
                             _row = _ab_tcp_rows[_i2]
+                            # Show title override if set; otherwise show computed title.
+                            # Reading from ab_title_overrides (not from data_editor state)
+                            # keeps the base DataFrame stable so the editor doesn't reset.
+                            _disp_title = st.session_state.get('ab_title_overrides', {}).get(_mi) or _row.get('*Title','')
                             _ab_edit_data.append({
                                 'SKU':      _row.get('CustomLabel', f'CARD{_mi+1:03d}'),
                                 '📸':      _r.get('FrontURL',''),
-                                'Title':    _row.get('*Title',''),
-                                'Chars':    len(_row.get('*Title','')),
+                                'Title':    _disp_title,
+                                'Chars':    len(_disp_title),
                                 'Year':     _r.get('Year',''),
                                 'CH FMV':   _r.get('FMV','—'),
                                 'Price':    _row.get('*StartPrice',''),
@@ -5619,7 +5663,7 @@ if _active_tab == 2:
                             column_config={
                                 'SKU':      st.column_config.TextColumn('SKU',          width='small',  disabled=True),
                                 '📸':      st.column_config.ImageColumn('📸',           width='small'),
-                                'Title':    st.column_config.TextColumn('Title (80 max)', width='large', disabled=True),
+                                'Title':    st.column_config.TextColumn('Title (80 max)', width='large'),
                                 'Chars':    st.column_config.NumberColumn('Ch',         width='small',  disabled=True),
                                 'Year':     st.column_config.TextColumn('Year',          width='small'),
                                 'CH FMV':   st.column_config.TextColumn('CH FMV',       width='small',  disabled=True),
@@ -5634,10 +5678,22 @@ if _active_tab == 2:
                             },
                             key='ab_match_editor',
                         )
-                        # Apply edits back to tcp_rows — title/parallel/print-run/year already
-                        # pre-applied above from persisted session state; Price and shipping
-                        # are synced here. Shipping recalculates from the actual listing price
-                        # so a manually-priced card gets the right tier (not based on FMV).
+                        # Save any explicit Title edits to ab_title_overrides so they survive
+                        # re-renders that would otherwise reset the data editor state.
+                        # Only entries in edited_rows indicate actual user changes.
+                        _cur_edits = (st.session_state.get('ab_match_editor') or {}).get('edited_rows') or {}
+                        for _eidx, _edata in _cur_edits.items():
+                            if isinstance(_eidx, int) and 'Title' in _edata and _eidx < len(_matched_idxs):
+                                _mi_idx = _matched_idxs[_eidx]
+                                _nt = str(_edata.get('Title') or '').strip()
+                                _ovr = st.session_state.setdefault('ab_title_overrides', {})
+                                if _nt:
+                                    _ovr[_mi_idx] = _nt[:80]
+                                else:
+                                    _ovr.pop(_mi_idx, None)
+
+                        # Apply Price edits and recalculate shipping from the actual listing price
+                        # (FMV_raw may be 0 for new cards not yet in CH's database).
                         for _ei, _erow in _ab_edited_df.iterrows():
                             if _ei < len(_ab_tcp_rows):
                                 _np = _erow.get('Price')
@@ -5653,6 +5709,7 @@ if _active_tab == 2:
                             for _ui, _mi in enumerate(_matched_idxs):
                                 if _un_cols[_ui % 6].button(f"↩ #{_mi+1}", key=f"ab_unmatch_{_mi}", help=_ab_res[_mi].get('Player','')):
                                     st.session_state["ai_batch_results"][_mi]["_matched"] = False
+                                    st.session_state.get('ab_title_overrides', {}).pop(_mi, None)
                                     st.rerun()
 
                         # Print SKU labels
