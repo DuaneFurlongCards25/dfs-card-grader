@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.25"
+APP_VERSION = "1.6.26"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4472,7 +4472,7 @@ if _active_tab == 2:
                 'CDA:Certification Number - (ID: 27503)': '',
                 '*C:Type':                           'Sports Trading Card',
                 'C:Year Manufactured':               year,
-                'C:Print Run':                       '',
+                'C:Print Run':                       numb,
                 'PicURL':                            pic_urls or card_img,
                 'GalleryType':                       'Gallery' if (pic_urls or card_img) else '',
                 '*Description':                      desc,
@@ -5600,11 +5600,56 @@ if _active_tab == 2:
                             },
                             key='ab_match_editor',
                         )
-                        # Apply edits back to tcp_rows
+                        # Apply edits back to tcp_rows (Title, Price, Print Run, Parallel, RC, Card #)
                         for _ei, _erow in _ab_edited_df.iterrows():
                             if _ei < len(_ab_tcp_rows):
-                                _new_t = str(_erow.get('Title') or _ab_tcp_rows[_ei].get('*Title','')).strip()[:80]
-                                _ab_tcp_rows[_ei]['*Title'] = _new_t
+                                _mi2 = _matched_idxs[_ei] if _ei < len(_matched_idxs) else None
+                                _old_pr  = str(_ab_tcp_rows[_ei].get('C:Print Run', '') or '')
+                                _new_pr  = str(_erow.get('Print Run', '') or '').strip().lstrip('/')
+                                _new_par = str(_erow.get('Parallel', '') or '').strip()
+                                _new_num = str(_erow.get('Card #', '') or '').strip()
+                                _new_rc  = bool(_erow.get('RC', False))
+                                # Print Run
+                                if _new_pr:
+                                    _ab_tcp_rows[_ei]['C:Print Run'] = f'/{_new_pr}' if not _new_pr.startswith('/') else _new_pr
+                                # Parallel/Variety
+                                if _new_par:
+                                    _ab_tcp_rows[_ei]['*C:Parallel/Variety'] = _new_par
+                                # Card number
+                                if _new_num:
+                                    _ab_tcp_rows[_ei]['*C:Card Number'] = _new_num
+                                # Title: user's explicit edit always wins; if unchanged, re-generate when print run or parallel changed
+                                _old_t = str(_ab_tcp_rows[_ei].get('*Title', '') or '')
+                                _edited_t = str(_erow.get('Title', '') or '').strip()
+                                _user_changed_title = _edited_t and _edited_t != _old_t
+                                if _user_changed_title:
+                                    _ab_tcp_rows[_ei]['*Title'] = _edited_t[:80]
+                                elif _mi2 is not None and (_new_pr != _old_pr.lstrip('/') or _new_par != str(_ab_res[_mi2].get('Parallel','') or '')):
+                                    # Regenerate title with updated print run / parallel
+                                    _regen_r = dict(_ab_res[_mi2])
+                                    if _new_par: _regen_r['Parallel'] = _new_par
+                                    if _new_num: _regen_r['Card #']   = _new_num
+                                    if _new_rc != _regen_r.get('Rookie'): _regen_r['Rookie'] = _new_rc
+                                    _regen_numb = (f'/{_new_pr}' if _new_pr and not _new_pr.startswith('/') else _new_pr) or str(_regen_r.get('Numbered','') or '')
+                                    _regen_t = _ab_build_title(
+                                        str(_regen_r.get('Player','') or ''),
+                                        str(_regen_r.get('Year','') or ''),
+                                        str(_regen_r.get('Set','') or ''),
+                                        str(_regen_r.get('Card #','') or ''),
+                                        str(_regen_r.get('Parallel','') or ''),
+                                        str(_regen_r.get('Sport','') or ''),
+                                        str(_regen_r.get('Team','') or ''),
+                                        bool(_regen_r.get('Rookie', False)),
+                                        _regen_numb,
+                                    )
+                                    _ab_tcp_rows[_ei]['*Title'] = _ab_expand_title(_regen_t, _regen_r)
+                                    # Also write updated numbered back to session state so panel reflects it
+                                    if _mi2 is not None:
+                                        st.session_state["ai_batch_results"][_mi2]["Numbered"]  = _regen_numb
+                                        st.session_state["ai_batch_results"][_mi2]["Parallel"]  = _new_par or _ab_res[_mi2].get('Parallel','')
+                                        st.session_state["ai_batch_results"][_mi2]["Rookie"]    = _new_rc
+                                else:
+                                    _ab_tcp_rows[_ei]['*Title'] = _old_t
                                 _np = _erow.get('Price')
                                 if _np is not None and str(_np).strip() not in ('','nan','None'):
                                     _ab_tcp_rows[_ei]['*StartPrice'] = f"{float(_np):.2f}"
