@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.21"
+APP_VERSION = "1.6.22"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -3231,7 +3231,7 @@ if _active_tab == 0:
                     p = _extract_price(s)
                     if not p:
                         return None
-                    raw_date = s.get("sale_date", "")
+                    raw_date = s.get("sale_date") or s.get("date") or s.get("sold_date") or ""
                     try:
                         import datetime as _dt
                         d = _dt.datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
@@ -3242,15 +3242,42 @@ if _active_tab == 0:
                     type_label = "🏷 BIN" if "bin" in sale_type.lower() or sale_type == "" else \
                                  "🔨 Auction" if "auction" in sale_type.lower() else \
                                  "💬 Offer" if "offer" in sale_type.lower() else sale_type
-                    return {"Price": f"${p:,.2f}", "Date": date_str, "Type": type_label}
+                    # eBay listing URL — try every field name CH might use
+                    _iid = s.get("ebay_item_id") or s.get("item_id") or ""
+                    link = (
+                        s.get("listing_url") or s.get("url") or s.get("ebay_url") or
+                        (f"https://www.ebay.com/itm/{_iid}" if _iid else "")
+                    )
+                    return {"Price": f"${p:,.2f}", "Date": date_str, "Type": type_label, "Link": link}
 
+                # ── Trend callout — show direction BEFORE the comp rows ────────
+                if ch_trend_dir:
+                    _tc1, _tc2 = st.columns([3, 1])
+                    with _tc1:
+                        if ch_trend_dir == "up":
+                            st.success(f"📈 **Price trending UP {ch_trend_pct:+.0f}% over 90 days** — newer sold comps are higher than older ones. The comps below are historical; the market has been moving up.")
+                        elif ch_trend_dir == "down":
+                            st.warning(f"📉 **Price trending DOWN {ch_trend_pct:.0f}% over 90 days** — newer sold comps are lower than older ones. The comps below are historical; expect current prices to be lower.")
+                        else:
+                            st.info(f"➡️ **Price flat ({ch_trend_pct:+.0f}% over 90 days)** — comps have been stable. The historical prices below reflect where the market is now.")
+                    with _tc2:
+                        st.link_button("🔍 PSA 10 sold on eBay →", ebay_graded_sold_url(desc))
+
+                _link_col_cfg = {
+                    "Link": st.column_config.LinkColumn("eBay listing", width="small", display_text="🔗 View"),
+                }
                 fc1, fc2 = st.columns(2)
                 with fc1:
                     st.markdown("**📦 Raw — recent sold comps**")
                     if ch_raw_sales:
                         rows_r = [r for s in ch_raw_sales[:15] if (r := _fmt_sale_row(s))]
                         if rows_r:
-                            st.dataframe(pd.DataFrame(rows_r), use_container_width=True, hide_index=True, height=200)
+                            _has_links_r = any(r.get("Link") for r in rows_r)
+                            st.dataframe(
+                                pd.DataFrame(rows_r),
+                                use_container_width=True, hide_index=True, height=220,
+                                column_config=_link_col_cfg if _has_links_r else None,
+                            )
                     if ch_raw_avg:
                         st.markdown(f"**Comp avg: ${ch_raw_avg:,.2f}**")
                     _rf = fmv_caption(ch_raw_fmv)
@@ -3258,12 +3285,18 @@ if _active_tab == 0:
                         st.markdown(_rf)
                     elif not ch_raw_avg and not ch_raw_sales:
                         st.info("No raw comps found")
+                    st.link_button("📊 Raw sold on eBay →", ebay_raw_sold_all_url(desc))
                 with fc2:
                     st.markdown("**💎 PSA 10 — recent sold comps**")
                     if ch_psa10_sales:
                         rows_g = [r for s in ch_psa10_sales[:15] if (r := _fmt_sale_row(s))]
                         if rows_g:
-                            st.dataframe(pd.DataFrame(rows_g), use_container_width=True, hide_index=True, height=200)
+                            _has_links_g = any(r.get("Link") for r in rows_g)
+                            st.dataframe(
+                                pd.DataFrame(rows_g),
+                                use_container_width=True, hide_index=True, height=220,
+                                column_config=_link_col_cfg if _has_links_g else None,
+                            )
                     if ch_psa10_avg:
                         st.markdown(f"**Comp avg: ${ch_psa10_avg:,.2f}**")
                     _gf = fmv_caption(ch_psa10_fmv)
@@ -3271,6 +3304,7 @@ if _active_tab == 0:
                         st.markdown(_gf)
                     elif not ch_psa10_avg and not ch_psa10_sales:
                         st.info("No PSA 10 comps found")
+                    st.link_button("🔴 PSA 10 sold on eBay →", ebay_graded_sold_url(desc))
             if ch_raw_sales or ch_psa10_sales:
                 st.caption("⚠️ Comp avg includes all sale types. 🏷 BIN = fixed price (most reliable). 💬 Offer = accepted below ask. 🔨 Auction = bidding (use with caution).")
                 st.caption("🎯 **FMV** = Fair Market Value: a statistically cleaned price (Winsorized median, recent sales) with a confidence grade (A best). More reliable than the comp avg — drives the cost/sell pre-fills below.")
