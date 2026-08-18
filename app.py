@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.20"
+APP_VERSION = "1.6.21"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -1576,20 +1576,59 @@ def ch_sales_stats(player, interval="week", periods=8):
 
 @st.cache_data(ttl=900, show_spinner=False)
 def ch_image_match(image_b64):
-    """Identify a raw card from a photo (base64). Returns dict with candidates[]."""
-    # Try both field names the CardHedger API has used across versions
-    for _field in ("image_base64", "image"):
-        _r = _ch_post("/v1/cards/image-match", {_field: image_b64})
-        if _r and not _r.get("_ch_error"):
-            # Check if this response has actual match data (not just an empty success)
-            for _ck in ("candidates", "matches", "cards", "results", "data", "items"):
-                if isinstance((_r or {}).get(_ck), list) and _r[_ck]:
-                    return _r
-            # Non-error response but no list found — return it anyway for inspection
-            if _r:
-                return _r
-    # Return last error so caller can show it
+    """Identify a raw card from a photo (base64). Returns full API response dict.
+
+    API returns:
+      best_match: {card_id, player, set, number, variant, description,
+                   image, category, similarity, confidence, reasoning}
+      candidates: [{same minus confidence/reasoning}, ...]
+    """
+    _r = _ch_post("/v1/cards/image-match", {"image_base64": image_b64, "k": 5})
     return _r or {}
+
+def _ch_imgmatch_best(image_b64: str):
+    """Call image-match and return (best_match_dict, confidence).
+    Returns (None, 0.0) on failure or no match."""
+    _r = ch_image_match(image_b64)
+    if not _r or _r.get("_ch_error"):
+        return None, 0.0
+    bm = _r.get("best_match")
+    if not bm or not bm.get("player"):
+        return None, 0.0
+    conf = float(bm.get("confidence") or bm.get("similarity") or 0)
+    return bm, conf
+
+def _ch_bm_to_cv(bm: dict) -> dict:
+    """Convert a CardHedger best_match dict into the same shape as claude_identify_card().
+    Fields: player, year, brand, set, card_number, parallel, sport, numbered, rookie, team, notes."""
+    desc  = bm.get("description") or ""
+    # Extract year from description string (e.g. "2025 Bowman Chrome ...")
+    _yr_m = re.search(r'\b(20\d{2}|19\d{2})\b', desc)
+    year  = _yr_m.group(1) if _yr_m else ""
+    par   = bm.get("variant") or ""
+    if par.lower() in ("base", "base set"):
+        par = ""
+    # numbered: extract /NNN from variant (e.g. "Gold Refractor /99")
+    _nb_m = re.search(r'/(\d+)', par)
+    numbered = f"/{_nb_m.group(1)}" if _nb_m else ""
+    # sport: category field is usually "Baseball", "Basketball", etc.
+    sport = bm.get("category") or ""
+    return {
+        "player":      bm.get("player") or "",
+        "year":        year,
+        "brand":       "",        # not in CH response; set covers it
+        "set":         bm.get("set") or "",
+        "card_number": bm.get("number") or "",
+        "parallel":    par,
+        "sport":       sport,
+        "numbered":    numbered,
+        "rookie":      False,     # not in CH response
+        "team":        "",        # not in CH response
+        "notes":       bm.get("reasoning") or "",
+        "_ch_id":      bm.get("card_id") or "",   # carry card_id for direct FMV lookup
+        "_ch_conf":    float(bm.get("confidence") or 0),
+        "_source":     "ch_image_match",
+    }
 
 # ─── Claude Vision Card Identification ────────────────────────────────────────
 
@@ -4882,12 +4921,26 @@ if _active_tab == 2:
                             _abmime = "image/jpeg"
                             _abimg_front = None
 
-                        # Step 1: Claude Vision — front image
-                        _abcv = claude_identify_card(_abb64, _abmime)
-
-                        # Step 1a: if front scan failed OR returned no player, retry on back
-                        # (Bowman Chrome autos have name + card# clearly printed on back)
+                        # Step 1: CardHedger image-match (primary — no Claude Vision cost)
                         _ab_back_b64 = ""
+                        _abcv = {}
+                        _ab_ch_imgm_id = ""      # card_id from image-match hit (skip text query)
+                        _ab_id_source  = "?"     # "CH visual" | "Claude Vision" | "failed"
+
+                        if CARDHEDGER_KEY:
+                            _ab_status.markdown(f"Identifying **{_abi + 1}/{_ab_n}** via CardHedger visual match…")
+                            _ab_bm, _ab_bm_conf = _ch_imgmatch_best(_abb64)
+                            if _ab_bm and _ab_bm_conf >= 0.75:
+                                _abcv = _ch_bm_to_cv(_ab_bm)
+                                _ab_ch_imgm_id = _abcv.get("_ch_id", "")
+                                _ab_id_source  = f"CH visual ({_ab_bm_conf:.0%})"
+                            elif _ab_bm:
+                                # Low confidence — keep CH data as a hint but try Vision too
+                                _abcv = _ch_bm_to_cv(_ab_bm)
+                                _ab_ch_imgm_id = _abcv.get("_ch_id", "")
+                                _ab_id_source  = f"CH visual low-conf ({_ab_bm_conf:.0%})"
+
+                        # Step 1a: load back image (for Vision fallback + corner crops later)
                         if _ab_back_files and _abi < len(_ab_back_files):
                             try:
                                 _back_img_v = _PILB.open(_aio.BytesIO(_ab_back_files[_abi].getvalue()))
@@ -4897,66 +4950,78 @@ if _active_tab == 2:
                                 _ab_back_b64 = base64.b64encode(_back_buf_v.getvalue()).decode()
                             except Exception:
                                 pass
-                        _ab_front_scan_ok = not _abcv.get("_error") and bool(str(_abcv.get("player") or "").strip())
-                        if not _ab_front_scan_ok and _ab_back_b64:
-                            _abcv_back = claude_identify_card(_ab_back_b64, "image/jpeg")
-                            if not _abcv_back.get("_error") and str(_abcv_back.get("player") or "").strip():
-                                _abcv = _abcv_back
 
-                        if not _abcv.get("_error") and not str(_abcv.get("card_number") or "").strip():
-                            # Step 1b: card number retry — back image first (most card #s live on the back)
-                            _cn_retry = ""
-                            if _ab_back_b64:
-                                _cn_retry = claude_extract_card_number(_ab_back_b64, "image/jpeg")
-                            if not _cn_retry:
-                                _cn_retry = claude_extract_card_number(_abb64, _abmime)
-                            if _cn_retry:
-                                _abcv["card_number"] = _cn_retry
+                        # Step 1b: Claude Vision fallback — only if CH visual gave no player
+                        _ab_need_vision = not str(_abcv.get("player") or "").strip()
+                        if _ab_need_vision:
+                            _ab_status.markdown(f"Identifying **{_abi + 1}/{_ab_n}** via Claude Vision…")
+                            _abcv = claude_identify_card(_abb64, _abmime)
+                            _ab_id_source = "Claude Vision"
+                            # back-image retry if front Vision failed
+                            if (not _abcv.get("_error") and not str(_abcv.get("player") or "").strip()
+                                    and _ab_back_b64):
+                                _abcv_back = claude_identify_card(_ab_back_b64, "image/jpeg")
+                                if not _abcv_back.get("_error") and str(_abcv_back.get("player") or "").strip():
+                                    _abcv = _abcv_back
+                            # card-number retry on back
+                            if not _abcv.get("_error") and not str(_abcv.get("card_number") or "").strip():
+                                _cn_retry = ""
+                                if _ab_back_b64:
+                                    _cn_retry = claude_extract_card_number(_ab_back_b64, "image/jpeg")
+                                if not _cn_retry:
+                                    _cn_retry = claude_extract_card_number(_abb64, _abmime)
+                                if _cn_retry:
+                                    _abcv["card_number"] = _cn_retry
+                            if _abcv.get("_error"):
+                                _ab_id_source = "failed"
+
                         _ab_query = build_card_query(_abcv) if not _abcv.get("_error") else ""
 
-                        # Step 2: CardHedger comps + trend
+                        # Step 2: CardHedger pricing
                         _ab_ch_match = ""
-                        _ab_ch_card_num = ""   # card number from CH match — fallback when vision misses it
+                        _ab_ch_card_num = ""
                         _ab_fmv = ""
                         _ab_fmv_raw = ""
                         _ab_comp_avg = ""
                         _ab_low = ""
                         _ab_high = ""
                         _ab_trend = ""
-                        _ab_alts = []          # alternative CH matches user can swap to
-                        _abm     = None        # CardHedger best match (may stay None if no key / no query)
+                        _ab_alts = []
+                        _abm     = None
 
-                        if not _abcv.get("_error") and _ab_run_comps and _ab_query and CARDHEDGER_KEY:
+                        if not _abcv.get("_error") and _ab_run_comps and CARDHEDGER_KEY:
                             _ab_status.markdown(f"Pricing **{_abi + 1}/{_ab_n}**: `{_abf.name}`")
-                            _ab_q2 = ""  # initialise so fallbacks can safely reference it
-                            # Attempt 1: full query, no numbered (/25 breaks CH matcher)
-                            _ab_q1 = build_card_query(_abcv, include_numbered=False)
-                            _abm, _ab_alts = ch_card_match_with_alts(_ab_q1)
-                            # Attempt 2: drop parallel too (CH naming often differs from Vision output)
-                            if not _abm and str(_abcv.get("parallel") or "").strip():
-                                _ab_q2 = build_card_query(_abcv, include_parallel=False, include_numbered=False)
-                                if _ab_q2 and _ab_q2 != _ab_q1:
-                                    _abm, _ab_alts = ch_card_match_with_alts(_ab_q2)
-                            # Attempt 3: year + player + card number only
-                            if not _abm:
-                                _ab_q3_parts = [p for p in [
-                                    str(_abcv.get("year") or "").strip(),
-                                    str(_abcv.get("player") or "").strip(),
-                                    str(_abcv.get("card_number") or "").strip(),
-                                ] if p]
-                                if len(_ab_q3_parts) >= 2:
-                                    _ab_q3 = " ".join(_ab_q3_parts)
-                                    if _ab_q3 not in (_ab_q1, _ab_q2):
-                                        _abm, _ab_alts = ch_card_match_with_alts(_ab_q3)
-                            # Attempt 4: year + player only (broadest — avoids card# misread)
-                            if not _abm:
-                                _ab_q4_parts = [p for p in [
-                                    str(_abcv.get("year") or "").strip(),
-                                    str(_abcv.get("player") or "").strip(),
-                                ] if p]
-                                if len(_ab_q4_parts) == 2:
-                                    _ab_q4 = " ".join(_ab_q4_parts)
-                                    _abm, _ab_alts = ch_card_match_with_alts(_ab_q4)
+
+                            if _ab_ch_imgm_id:
+                                # Image-match gave us card_id directly — skip text query cascade
+                                _abm = _ab_bm   # reuse the best_match dict as _abm
+                            elif _ab_query:
+                                # Text query cascade (Vision path)
+                                _ab_q2 = ""
+                                _ab_q1 = build_card_query(_abcv, include_numbered=False)
+                                _abm, _ab_alts = ch_card_match_with_alts(_ab_q1)
+                                if not _abm and str(_abcv.get("parallel") or "").strip():
+                                    _ab_q2 = build_card_query(_abcv, include_parallel=False, include_numbered=False)
+                                    if _ab_q2 and _ab_q2 != _ab_q1:
+                                        _abm, _ab_alts = ch_card_match_with_alts(_ab_q2)
+                                if not _abm:
+                                    _ab_q3_parts = [p for p in [
+                                        str(_abcv.get("year") or "").strip(),
+                                        str(_abcv.get("player") or "").strip(),
+                                        str(_abcv.get("card_number") or "").strip(),
+                                    ] if p]
+                                    if len(_ab_q3_parts) >= 2:
+                                        _ab_q3 = " ".join(_ab_q3_parts)
+                                        if _ab_q3 not in (_ab_q2, _ab_q1):
+                                            _abm, _ab_alts = ch_card_match_with_alts(_ab_q3)
+                                if not _abm:
+                                    _ab_q4_parts = [p for p in [
+                                        str(_abcv.get("year") or "").strip(),
+                                        str(_abcv.get("player") or "").strip(),
+                                    ] if p]
+                                    if len(_ab_q4_parts) == 2:
+                                        _ab_q4 = " ".join(_ab_q4_parts)
+                                        _abm, _ab_alts = ch_card_match_with_alts(_ab_q4)
                             if _abm:
                                 _ab_ch_id  = _abm.get("card_id") or _abm.get("id") or ""
                                 _ab_ch_title = (_abm.get("description") or _abm.get("name") or _abm.get("title") or "")
@@ -5090,6 +5155,7 @@ if _active_tab == 2:
                             "🔍 Sold":     _ab_sold_url,
                             "Query":       _ab_query,
                             "Status":      ("Error: " + _abcv["_error"]) if _abcv.get("_error") else "OK",
+                            "_id_source":  _ab_id_source,
                             "_raw_err":    _abcv.get("_raw",""),
                             "_ch_id":      (_abm.get("card_id") or _abm.get("id") or "") if _abm else "",
                             "_ch_alts":    _ab_alts,
@@ -5580,8 +5646,9 @@ if _active_tab == 2:
                     def _all_sku(i):
                         return f"{_ab_sku_prefix}-{i + _ab_sku_start - 1:05d}" if _ab_sku_prefix else f"LOT{i:03d}"
                     _ab_df["SKU"]    = [_all_sku(i) for i in range(1, len(_ab_df) + 1)]
-                    _ab_df["Status"] = _ab_df.get("_matched", pd.Series([False]*len(_ab_df))).apply(
-                        lambda m: "✅ Matched" if m else "⏳ Unmatched"
+                    _ab_df["Status"] = _ab_df.apply(
+                        lambda row: ("✅ " + str(row.get("_id_source","CH"))) if row.get("_matched") else "⏳ Unmatched",
+                        axis=1
                     )
                     _ab_tcols = ["SKU","#","FrontURL","Player","Year","Set","Card #","Parallel","Sport","FMV","Comp Avg","Low","High","Trend (90d)","Images","🔍 Sold","Status"]
                     _ab_df_d = _ab_df[[c for c in _ab_tcols if c in _ab_df.columns]]
