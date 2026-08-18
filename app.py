@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.16"
+APP_VERSION = "1.6.17"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -1622,7 +1622,7 @@ Only report what you can actually see. Use empty string for anything genuinely u
 
 def claude_identify_card(image_b64: str, media_type: str = "image/jpeg", _api_key: str = "") -> dict:
     """Identify a trading card using Claude Vision. Returns structured card data."""
-    _key = _api_key or ANTHROPIC_KEY or st.session_state.get("anthropic_key_input","")
+    _key = (_api_key or st.session_state.get("anthropic_key_input","") or ANTHROPIC_KEY).strip()
     if not _key:
         return {"_error": "Anthropic API key not configured"}
     payload = {
@@ -5076,6 +5076,7 @@ if _active_tab == 2:
                             "🔍 Sold":     _ab_sold_url,
                             "Query":       _ab_query,
                             "Status":      ("Error: " + _abcv["_error"]) if _abcv.get("_error") else "OK",
+                            "_raw_err":    _abcv.get("_raw",""),
                             "_ch_id":      (_abm.get("card_id") or _abm.get("id") or "") if _abm else "",
                             "_ch_alts":    _ab_alts,
                             "_matched":    bool((_abm.get("card_id") or _abm.get("id")) if _abm else False),
@@ -5200,12 +5201,19 @@ if _active_tab == 2:
                                 st.image(_front_url, caption=f"#{_cur_r.get('#','')} · {_cur_r.get('Player','?')}", use_container_width=True)
                             elif _cp_status.startswith("Error"):
                                 _cp_err_msg = _cp_status[7:] if len(_cp_status) > 7 else _cp_status
+                                _cp_raw = _cur_r.get("_raw_err","")
+                                try:
+                                    import json as _jerr
+                                    _cp_raw_parsed = _jerr.loads(_cp_raw)
+                                    _cp_raw_detail = (_cp_raw_parsed.get("error",{}).get("message","") or str(_cp_raw_parsed))[:200]
+                                except Exception:
+                                    _cp_raw_detail = str(_cp_raw)[:200]
                                 st.markdown(
                                     f'<div style="background:#7f1d1d;border-radius:8px;padding:24px 16px 20px;'
                                     f'text-align:center;font-family:sans-serif;color:#fff;min-height:140px">'
                                     f'<div style="font-size:22px;margin-bottom:8px">⚠️</div>'
-                                    f'<div style="font-size:13px;font-weight:700">Vision API Error</div>'
-                                    f'<div style="font-size:11px;opacity:.8;margin-top:6px;word-break:break-all">{_cp_err_msg[:120]}</div>'
+                                    f'<div style="font-size:13px;font-weight:700">Vision API Error — {_cp_err_msg}</div>'
+                                    f'{"<div style=\\'font-size:11px;opacity:.8;margin-top:6px;word-break:break-all\\'>" + _cp_raw_detail + "</div>" if _cp_raw_detail else ""}'
                                     f'<div style="font-size:10px;opacity:.55;margin-top:10px">Use 🔁 Rescan Failed above or search manually →</div>'
                                     f'</div>',
                                     unsafe_allow_html=True,
