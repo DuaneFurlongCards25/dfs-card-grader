@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.09"
+APP_VERSION = "1.6.10"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4858,8 +4858,21 @@ if _active_tab == 2:
                         # Step 1: Claude Vision — front only
                         _abcv = claude_identify_card(_abb64, _abmime)
                         if not _abcv.get("_error") and not str(_abcv.get("card_number") or "").strip():
-                            # Step 1b: card number retry — cheap second pass focused on corners/edges
-                            _cn_retry = claude_extract_card_number(_abb64, _abmime)
+                            # Step 1b: card number retry — try back image first (most card #s live on the back)
+                            # then fall back to front if no back uploaded
+                            _cn_retry = ""
+                            if _ab_back_files and _abi < len(_ab_back_files):
+                                try:
+                                    _back_img = _PILB.open(_aio.BytesIO(_ab_back_files[_abi].getvalue()))
+                                    _back_img.thumbnail((1600, 1600), _PILB.LANCZOS)
+                                    _back_buf = _aio.BytesIO()
+                                    _back_img.save(_back_buf, format="JPEG", quality=90)
+                                    _back_b64 = base64.b64encode(_back_buf.getvalue()).decode()
+                                    _cn_retry = claude_extract_card_number(_back_b64, "image/jpeg")
+                                except Exception:
+                                    pass
+                            if not _cn_retry:
+                                _cn_retry = claude_extract_card_number(_abb64, _abmime)
                             if _cn_retry:
                                 _abcv["card_number"] = _cn_retry
                         _ab_query = build_card_query(_abcv) if not _abcv.get("_error") else ""
