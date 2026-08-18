@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.17"
+APP_VERSION = "1.6.18"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -5388,6 +5388,7 @@ if _active_tab == 2:
                                 'Chars':    len(_row.get('*Title','')),
                                 'CH FMV':   _r.get('FMV','—'),
                                 'Price':    _row.get('*StartPrice',''),
+                                '🔍 Sold':  _r.get('🔍 Sold',''),
                                 'Card #':   _r.get('Card #',''),
                                 'Parallel': _r.get('Parallel',''),
                                 'Print Run':_r.get('Numbered',''),
@@ -5408,6 +5409,7 @@ if _active_tab == 2:
                                 'Chars':    st.column_config.NumberColumn('Ch',         width='small',  disabled=True),
                                 'CH FMV':   st.column_config.TextColumn('CH FMV',       width='small',  disabled=True),
                                 'Price':    st.column_config.NumberColumn('$ Price',    width='small',  format='$%.2f'),
+                                '🔍 Sold':  st.column_config.LinkColumn('🔍 Sold',      width='small',  display_text='eBay →', disabled=True),
                                 'Card #':   st.column_config.TextColumn('Card #',       width='small'),
                                 'Parallel': st.column_config.TextColumn('Parallel',     width='medium'),
                                 'Print Run':st.column_config.TextColumn('Print Run',    width='small'),
