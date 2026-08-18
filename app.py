@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.29"
+APP_VERSION = "1.6.30"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4444,6 +4444,11 @@ if _active_tab == 2:
             set_name = next((s for s in _AB_TCP_SETS if re.search(r'\b'+re.escape(s)+r'\b', set_, re.I)), set_)
             para_col = next((p for p in _AB_TCP_PARALLELS if re.search(r'\b'+re.escape(p)+r'\b', parallel, re.I)), parallel)
             rookie = 'Yes' if re.search(r'\bRC\b|\bRookie\b|\(RC\)', title, re.I) else 'No'
+            try:
+                _fmv_f = float(r.get('FMV_raw', 0) or 0)
+            except Exception:
+                _fmv_f = 0.0
+            ship_profile = _scan_shipping(_fmv_f)
             desc = _ab_build_desc(title.replace('"', '&quot;'), card_img)
             row = {k: '' for k in _AB_TCP_HEADER}
             row.update({
@@ -4493,7 +4498,7 @@ if _active_tab == 2:
                 'ShippingService-1:AdditionalCost':  '',
                 '*DispatchTimeMax':                  '1',
                 '*ReturnsAcceptedOption':            'ReturnsNotAccepted',
-                'ShippingProfileName':               '',
+                'ShippingProfileName':               ship_profile,
                 'ReturnProfileName':                 'Returns',
                 'PaymentProfileName':                'BIN',
                 'BestOfferEnabled':                  '1',
