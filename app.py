@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.10"
+APP_VERSION = "1.6.11"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4997,17 +4997,21 @@ if _active_tab == 2:
                                 _ab_img_zips[_abi] = (_ab_prefix, _ab_zip_buf.getvalue())
                                 _ab_has_images = True
 
-                                # Auto-upload all 8 to imgbb → public URLs for eBay CSV
+                                # Auto-upload all 8 to imgbb in parallel → public URLs for eBay CSV
                                 if _ab_use_imgbb:
                                     _ab_status.markdown(f"Uploading images **{_abi + 1}/{_ab_n}** to imgbb…")
-                                    _uploaded_urls = []
-                                    for _fn, _fb in _ab_img_files:
-                                        _u = imgbb_upload(_fb, name=_fn.rsplit(".",1)[0])
-                                        if _u:
-                                            _uploaded_urls.append(_u)
+                                    _slot_results = [None] * len(_ab_img_files)
+                                    def _do_upload(_idx_fn_fb):
+                                        _si, _sfn, _sfb = _idx_fn_fb
+                                        return _si, imgbb_upload(_sfb, name=_sfn.rsplit(".",1)[0])
+                                    with ThreadPoolExecutor(max_workers=8) as _iex:
+                                        for _si, _su in _iex.map(_do_upload, [(_i,_fn,_fb) for _i,(_fn,_fb) in enumerate(_ab_img_files)]):
+                                            if _su:
+                                                _slot_results[_si] = _su
+                                    _uploaded_urls = [u for u in _slot_results if u]
                                     if _uploaded_urls:
-                                        _ab_front_url = _uploaded_urls[0]
-                                        _ab_pic_urls  = "|".join(_uploaded_urls)
+                                        _ab_front_url = _slot_results[0] or _uploaded_urls[0]
+                                        _ab_pic_urls  = "|".join(u for u in _slot_results if u)
                             except Exception:
                                 pass
 
