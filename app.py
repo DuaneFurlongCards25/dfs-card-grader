@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.30"
+APP_VERSION = "1.6.31"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -1977,7 +1977,8 @@ def _raw_title(player, set_name, number, variant=""):
     return " ".join(parts)[:80]
 
 def _scan_upload_to_supabase(image_bytes: bytes, filename: str):
-    """Upload a scan to Supabase company-files/scanner/ and return a 1-year signed URL."""
+    """Upload a scan to Supabase company-files/scanner/ and return a public URL.
+    Public URL format never expires and needs no auth token — eBay can fetch it directly."""
     import time as _t
     path = f"scanner/{int(_t.time())}_{filename}"
     # Upload
@@ -1990,21 +1991,10 @@ def _scan_upload_to_supabase(image_bytes: bytes, filename: str):
             pass
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"Upload failed {e.code}: {e.read().decode()[:200]}")
-    # Signed URL (1 year = 31 536 000 s)
-    sign_url = f"{SUPABASE_URL}/storage/v1/object/sign/company-files/{path}"
-    sign_payload = json.dumps({"expiresIn": 31536000}).encode()
-    sign_req = urllib.request.Request(sign_url, data=sign_payload, method="POST")
-    sign_req.add_header("Authorization", f"Bearer {SUPABASE_KEY}")
-    sign_req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(sign_req, context=ssl_ctx(), timeout=15) as r:
-        data = json.loads(r.read().decode())
-    signed = data.get("signedURL") or data.get("signedUrl") or ""
-    if not signed:
-        raise RuntimeError("No signed URL returned from Supabase")
-    # Make absolute if relative
-    if signed.startswith("/"):
-        signed = SUPABASE_URL + signed
-    return signed, path
+    # Public URL — no token, no expiry, eBay image fetcher can access this directly.
+    # The company-files bucket has a public SELECT policy so this works without auth.
+    public_url = f"{SUPABASE_URL}/storage/v1/object/public/company-files/{path}"
+    return public_url, path
 
 def _scan_shipping(price: float) -> str:
     SHIP_FREE   = "Calculated: US_eBayStandardEnvelope free, 2 bu (315021080021)"
@@ -5578,6 +5568,8 @@ if _active_tab == 2:
                             _prev = _ab_prev_rows.get(_i2, {})
                             _r_eff = dict(_ab_res[_mi])
                             # Overlay user edits so title is built with the corrected values
+                            if 'Year' in _prev and _prev['Year']:
+                                _r_eff['Year'] = str(_prev['Year']).strip()
                             if 'Print Run' in _prev:
                                 _pr_edit = str(_prev['Print Run'] or '').strip()
                                 if _pr_edit and not _pr_edit.startswith('/'):
@@ -5607,6 +5599,7 @@ if _active_tab == 2:
                                 '📸':      _r.get('FrontURL',''),
                                 'Title':    _row.get('*Title',''),
                                 'Chars':    len(_row.get('*Title','')),
+                                'Year':     _r.get('Year',''),
                                 'CH FMV':   _r.get('FMV','—'),
                                 'Price':    _row.get('*StartPrice',''),
                                 '🔍 Sold':  _r.get('🔍 Sold',''),
@@ -5626,8 +5619,9 @@ if _active_tab == 2:
                             column_config={
                                 'SKU':      st.column_config.TextColumn('SKU',          width='small',  disabled=True),
                                 '📸':      st.column_config.ImageColumn('📸',           width='small'),
-                                'Title':    st.column_config.TextColumn('Title (80 max)', width='large'),
+                                'Title':    st.column_config.TextColumn('Title (80 max)', width='large', disabled=True),
                                 'Chars':    st.column_config.NumberColumn('Ch',         width='small',  disabled=True),
+                                'Year':     st.column_config.TextColumn('Year',          width='small'),
                                 'CH FMV':   st.column_config.TextColumn('CH FMV',       width='small',  disabled=True),
                                 'Price':    st.column_config.NumberColumn('$ Price',    width='small',  format='$%.2f'),
                                 '🔍 Sold':  st.column_config.LinkColumn('🔍 Sold',      width='small',  display_text='eBay →', disabled=True),
@@ -5640,14 +5634,17 @@ if _active_tab == 2:
                             },
                             key='ab_match_editor',
                         )
-                        # Apply edits back to tcp_rows — title/parallel/print-run already
-                        # pre-applied above from persisted session state; only Price needs
-                        # to be synced here since it doesn't affect title generation.
+                        # Apply edits back to tcp_rows — title/parallel/print-run/year already
+                        # pre-applied above from persisted session state; Price and shipping
+                        # are synced here. Shipping recalculates from the actual listing price
+                        # so a manually-priced card gets the right tier (not based on FMV).
                         for _ei, _erow in _ab_edited_df.iterrows():
                             if _ei < len(_ab_tcp_rows):
                                 _np = _erow.get('Price')
                                 if _np is not None and str(_np).strip() not in ('','nan','None'):
-                                    _ab_tcp_rows[_ei]['*StartPrice'] = f"{float(_np):.2f}"
+                                    _price_v = float(_np)
+                                    _ab_tcp_rows[_ei]['*StartPrice'] = f"{_price_v:.2f}"
+                                    _ab_tcp_rows[_ei]['ShippingProfileName'] = _scan_shipping(_price_v)
 
                         # Unmatch buttons (row of pills)
                         if _matched_idxs:
