@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.13"
+APP_VERSION = "1.6.14"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4865,22 +4865,32 @@ if _active_tab == 2:
                             _abmime = "image/jpeg"
                             _abimg_front = None
 
-                        # Step 1: Claude Vision — front only
+                        # Step 1: Claude Vision — front image
                         _abcv = claude_identify_card(_abb64, _abmime)
+
+                        # Step 1a: if front scan failed OR returned no player, retry on back
+                        # (Bowman Chrome autos have name + card# clearly printed on back)
+                        _ab_back_b64 = ""
+                        if _ab_back_files and _abi < len(_ab_back_files):
+                            try:
+                                _back_img_v = _PILB.open(_aio.BytesIO(_ab_back_files[_abi].getvalue()))
+                                _back_img_v.thumbnail((1600, 1600), _PILB.LANCZOS)
+                                _back_buf_v = _aio.BytesIO()
+                                _back_img_v.save(_back_buf_v, format="JPEG", quality=90)
+                                _ab_back_b64 = base64.b64encode(_back_buf_v.getvalue()).decode()
+                            except Exception:
+                                pass
+                        _ab_front_scan_ok = not _abcv.get("_error") and bool(str(_abcv.get("player") or "").strip())
+                        if not _ab_front_scan_ok and _ab_back_b64:
+                            _abcv_back = claude_identify_card(_ab_back_b64, "image/jpeg")
+                            if not _abcv_back.get("_error") and str(_abcv_back.get("player") or "").strip():
+                                _abcv = _abcv_back
+
                         if not _abcv.get("_error") and not str(_abcv.get("card_number") or "").strip():
-                            # Step 1b: card number retry — try back image first (most card #s live on the back)
-                            # then fall back to front if no back uploaded
+                            # Step 1b: card number retry — back image first (most card #s live on the back)
                             _cn_retry = ""
-                            if _ab_back_files and _abi < len(_ab_back_files):
-                                try:
-                                    _back_img = _PILB.open(_aio.BytesIO(_ab_back_files[_abi].getvalue()))
-                                    _back_img.thumbnail((1600, 1600), _PILB.LANCZOS)
-                                    _back_buf = _aio.BytesIO()
-                                    _back_img.save(_back_buf, format="JPEG", quality=90)
-                                    _back_b64 = base64.b64encode(_back_buf.getvalue()).decode()
-                                    _cn_retry = claude_extract_card_number(_back_b64, "image/jpeg")
-                                except Exception:
-                                    pass
+                            if _ab_back_b64:
+                                _cn_retry = claude_extract_card_number(_ab_back_b64, "image/jpeg")
                             if not _cn_retry:
                                 _cn_retry = claude_extract_card_number(_abb64, _abmime)
                             if _cn_retry:
@@ -5030,6 +5040,7 @@ if _active_tab == 2:
                         _ab_sold_url = f"https://www.ebay.com/sch/i.html?_nkw={_ab_ebay_q}&_sacat=261328&LH_Sold=1&LH_Complete=1"
                         _ab_results.append({
                             "#":           _abi + 1,
+                            "_filename":   _abf.name,
                             "Player":      _abcv.get("player", ""),
                             "Year":        _abcv.get("year", ""),
                             "Set":         _abcv.get("set", ""),
@@ -5237,7 +5248,19 @@ if _active_tab == 2:
                         with _list_col:
                             # Inline search bar
                             _ab_srch_row = st.columns([5, 1])
-                            _ab_srch_default = st.session_state.get(f"ab_srch_q_{_cur_idx}", _cur_r.get("Query",""))
+                            # Derive search hint from filename when Vision has nothing
+                            _ab_fname_hint = ""
+                            if not _cur_r.get("Query",""):
+                                _fn_raw = _cur_r.get("_filename","")
+                                _fn_clean = re.sub(r'\.[^.]+$','',_fn_raw)
+                                _fn_clean = re.sub(r'[_\-]+',' ',_fn_clean)
+                                _fn_clean = re.sub(r'\b(front|back|card|img|image|photo|scan)\b','',_fn_clean,flags=re.I)
+                                _ab_fname_hint = re.sub(r'\s+',' ',_fn_clean).strip()
+                            _ab_srch_default = (
+                                st.session_state.get(f"ab_srch_q_{_cur_idx}")
+                                or _cur_r.get("Query","")
+                                or _ab_fname_hint
+                            )
                             _ab_srch_val = _ab_srch_row[0].text_input(
                                 "CardHedger search",
                                 value=_ab_srch_default,
