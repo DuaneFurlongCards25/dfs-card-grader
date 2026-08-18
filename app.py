@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.19"
+APP_VERSION = "1.6.20"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4278,10 +4278,16 @@ if _active_tab == 2:
         def _ab_build_title(player, year, set_, card_num, parallel, sport, team, is_rc, numbered):
             """Build eBay listing title following DFS rules, targeting ~78 chars.
             Soccer & marquee: NAME FIRST in ALL CAPS. Others: year first."""
+            _KEEP_UPPER = {'RC','SP','SSP','VIP','GU','MEM','AU','AUTO','JSY','RPA','BCA','CPA','RPA','YR',
+                           'BC','BTP','BCP','BDC','TP','KN','PP','ID'}
+            def _smart_case(txt):
+                return ' '.join(w.upper() if w.upper() in _KEEP_UPPER else w.title()
+                                for w in (txt or '').split())
+
             p_up = (player or "").strip().upper()
             yr   = (year or "").strip()
-            sn   = (set_ or "").strip()
-            par  = (parallel or "").strip()
+            sn   = _smart_case((set_ or "").strip())
+            par  = _smart_case((parallel or "").strip())
             if par.lower() in ("base", "base set", ""):
                 par = ""
             num_s = (f"#{card_num}" if str(card_num or "").strip() else "")
