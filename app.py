@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.14"
+APP_VERSION = "1.6.15"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -1620,9 +1620,10 @@ Read the card carefully. Card numbers are small print — zoom your attention to
 For graded slabs: the grader logo (PSA/BGS/SGC/CGC) and grade number appear prominently on the label; the cert number is a long numeric code (e.g. 12345678).
 Only report what you can actually see. Use empty string for anything genuinely unreadable."""
 
-def claude_identify_card(image_b64: str, media_type: str = "image/jpeg") -> dict:
+def claude_identify_card(image_b64: str, media_type: str = "image/jpeg", _api_key: str = "") -> dict:
     """Identify a trading card using Claude Vision. Returns structured card data."""
-    if not ANTHROPIC_KEY:
+    _key = _api_key or ANTHROPIC_KEY or st.session_state.get("anthropic_key_input","")
+    if not _key:
         return {"_error": "Anthropic API key not configured"}
     payload = {
         "model": "claude-sonnet-5",
@@ -1643,7 +1644,7 @@ def claude_identify_card(image_b64: str, media_type: str = "image/jpeg") -> dict
         "https://api.anthropic.com/v1/messages",
         data=data,
         headers={
-            "x-api-key": ANTHROPIC_KEY,
+            "x-api-key": _key,
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
         },
@@ -1684,9 +1685,10 @@ Return ONLY valid JSON: {"card_number": "BCP-53"}
 If you truly cannot see a card number anywhere, return: {"card_number": ""}"""
 
 
-def claude_extract_card_number(image_b64: str, media_type: str = "image/jpeg") -> str:
+def claude_extract_card_number(image_b64: str, media_type: str = "image/jpeg", _api_key: str = "") -> str:
     """Targeted second-pass Vision call to extract card number when the main scan missed it."""
-    if not ANTHROPIC_KEY:
+    _key = _api_key or ANTHROPIC_KEY or st.session_state.get("anthropic_key_input","")
+    if not _key:
         return ""
     payload = {
         "model": "claude-sonnet-5",
@@ -1704,7 +1706,7 @@ def claude_extract_card_number(image_b64: str, media_type: str = "image/jpeg") -
         "https://api.anthropic.com/v1/messages",
         data=data,
         headers={
-            "x-api-key": ANTHROPIC_KEY,
+            "x-api-key": _key,
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
         },
@@ -4774,6 +4776,18 @@ if _active_tab == 2:
                 _ab_back_files = []
                 if _ab_all_files and len(_ab_all_files) % 2 != 0:
                     st.caption(f"📷 {len(_ab_files)} front(s) only — add a back for every front to enable corner crops")
+
+            # Anthropic key — paste here if secrets.toml isn't set or key is wrong
+            _eff_anthropic_key = ANTHROPIC_KEY or st.session_state.get("anthropic_key_input","")
+            if not ANTHROPIC_KEY:
+                with st.expander("🤖 Anthropic API key (required for Claude Vision card scanning)", expanded=not _eff_anthropic_key):
+                    st.markdown("Get your key at [console.anthropic.com](https://console.anthropic.com) → API Keys. Starts with `sk-ant-`.")
+                    st.text_input("Anthropic API key", key="anthropic_key_input", type="password",
+                                  placeholder="sk-ant-api03-...")
+                    if st.session_state.get("anthropic_key_input"):
+                        st.success("✅ Key saved for this session")
+            elif st.session_state.get("anthropic_key_input"):
+                _eff_anthropic_key = st.session_state["anthropic_key_input"]
 
             # imgbb key — stored in secrets.toml or entered here
             if not IMGBB_KEY:
