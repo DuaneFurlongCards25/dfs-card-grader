@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.12"
+APP_VERSION = "1.6.13"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -1648,19 +1648,29 @@ def claude_identify_card(image_b64: str, media_type: str = "image/jpeg") -> dict
             "content-type": "application/json",
         },
     )
-    try:
-        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=30) as r:
-            resp = json.loads(r.read().decode())
-        text = resp["content"][0]["text"].strip()
-        m = re.search(r"\{.*\}", text, re.DOTALL)
-        if m:
-            return json.loads(m.group(0))
-        return {"_error": "No JSON in response", "_raw": text}
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="ignore")
-        return {"_error": f"HTTP {e.code}", "_raw": body}
-    except Exception as e:
-        return {"_error": str(e)}
+    import time as _vtime
+    _v_last_err = None
+    for _vtry in range(3):
+        try:
+            with urllib.request.urlopen(req, context=ssl_ctx(), timeout=45) as r:
+                resp = json.loads(r.read().decode())
+            text = resp["content"][0]["text"].strip()
+            m = re.search(r"\{.*\}", text, re.DOTALL)
+            if m:
+                return json.loads(m.group(0))
+            return {"_error": "No JSON in response", "_raw": text}
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", errors="ignore")
+            _v_last_err = {"_error": f"HTTP {e.code}", "_raw": body[:300]}
+            if e.code in (429, 529, 500, 502, 503) and _vtry < 2:
+                _vtime.sleep(5 * (_vtry + 1))
+                continue
+            return _v_last_err
+        except Exception as e:
+            _v_last_err = {"_error": str(e)}
+            if _vtry < 2:
+                _vtime.sleep(4)
+    return _v_last_err or {"_error": "unknown after 3 retries"}
 
 _CLAUDE_CARDNUM_PROMPT = """Find the card number printed on this trading card.
 
@@ -5087,6 +5097,54 @@ if _active_tab == 2:
                     if not _unmatched_idxs:
                         st.success("🎉 All cards matched! Switch to the ✅ Matched tab to review prices and download your eBay CSV.")
                     else:
+                        # Vision error banner + bulk rescan
+                        _errored_idxs = [i for i in range(len(_ab_res)) if str(_ab_res[i].get("Status","")).startswith("Error")]
+                        if _errored_idxs:
+                            _err_col1, _err_col2 = st.columns([3,1])
+                            _err_col1.warning(
+                                f"⚠️ **{len(_errored_idxs)} card(s) had Vision errors** "
+                                f"({_ab_res[_errored_idxs[0]].get('Status','')}) — "
+                                f"click Rescan to retry or type in the search box manually."
+                            )
+                            if _err_col2.button("🔁 Rescan Failed", key="ab_rescan_failed"):
+                                _all_up = st.session_state.get("ai_batch_files", [])
+                                _rf_fronts = (_all_up[0::2] if (len(_all_up) > 1 and len(_all_up) % 2 == 0) else _all_up) or []
+                                _rscan_bar = st.progress(0, text="Re-scanning…")
+                                import io as _rio
+                                from PIL import Image as _RPIL
+                                for _rn, _ri in enumerate(_errored_idxs):
+                                    _rscan_bar.progress((_rn + 1) / len(_errored_idxs), text=f"Re-scanning {_rn+1}/{len(_errored_idxs)}…")
+                                    if _ri >= len(_rf_fronts):
+                                        continue
+                                    _rfile = _rf_fronts[_ri]
+                                    try:
+                                        _rimg = _RPIL.open(_rio.BytesIO(_rfile.getvalue()))
+                                        _rimg.thumbnail((1600, 1600), _RPIL.LANCZOS)
+                                        _rbuf = _rio.BytesIO()
+                                        _rimg.save(_rbuf, format="JPEG", quality=90)
+                                        _rb64 = base64.b64encode(_rbuf.getvalue()).decode()
+                                    except Exception:
+                                        _rb64 = base64.b64encode(_rfile.getvalue()).decode()
+                                    _rcv = claude_identify_card(_rb64, "image/jpeg")
+                                    if not _rcv.get("_error"):
+                                        _rq = build_card_query(_rcv, include_numbered=False)
+                                        _rm, _ral = (ch_card_match_with_alts(_rq) if (_rq and CARDHEDGER_KEY) else (None, []))
+                                        _ab_res[_ri].update({
+                                            "Player": _rcv.get("player", ""), "Year": _rcv.get("year", ""),
+                                            "Set": _rcv.get("set", ""), "Card #": _rcv.get("card_number", ""),
+                                            "Parallel": _rcv.get("parallel", ""), "Sport": _rcv.get("sport", ""),
+                                            "Team": _rcv.get("team", ""), "Rookie": bool(_rcv.get("rookie", False)),
+                                            "Numbered": str(_rcv.get("numbered", "") or ""), "Notes": str(_rcv.get("notes", "") or ""),
+                                            "Status": "OK", "Query": _rq,
+                                            "CH Match": ((_rm.get("description") or _rm.get("title") or "")[:50] if _rm else ""),
+                                            "_ch_id": ((_rm.get("card_id") or _rm.get("id") or "") if _rm else ""),
+                                            "_ch_alts": _ral,
+                                            "_matched": bool((_rm.get("card_id") or _rm.get("id")) if _rm else False),
+                                        })
+                                st.session_state["ai_batch_results"] = _ab_res
+                                _rscan_bar.empty()
+                                st.rerun()
+
                         _cur_umi = st.session_state.get("ab_unmatched_nav", 0)
                         if _cur_umi >= len(_unmatched_idxs):
                             _cur_umi = 0
@@ -5115,8 +5173,21 @@ if _active_tab == 2:
                             _pic_urls  = [u.strip() for u in str(_cur_r.get("PicURLs","")).split("|") if u.strip()]
                             _front_url = _cur_r.get("FrontURL","") or (_pic_urls[0] if _pic_urls else "")
                             _back_url  = _pic_urls[1] if len(_pic_urls) > 1 else ""
+                            _cp_status = _cur_r.get("Status","")
                             if _front_url:
                                 st.image(_front_url, caption=f"#{_cur_r.get('#','')} · {_cur_r.get('Player','?')}", use_container_width=True)
+                            elif _cp_status.startswith("Error"):
+                                _cp_err_msg = _cp_status[7:] if len(_cp_status) > 7 else _cp_status
+                                st.markdown(
+                                    f'<div style="background:#7f1d1d;border-radius:8px;padding:24px 16px 20px;'
+                                    f'text-align:center;font-family:sans-serif;color:#fff;min-height:140px">'
+                                    f'<div style="font-size:22px;margin-bottom:8px">⚠️</div>'
+                                    f'<div style="font-size:13px;font-weight:700">Vision API Error</div>'
+                                    f'<div style="font-size:11px;opacity:.8;margin-top:6px;word-break:break-all">{_cp_err_msg[:120]}</div>'
+                                    f'<div style="font-size:10px;opacity:.55;margin-top:10px">Use 🔁 Rescan Failed above or search manually →</div>'
+                                    f'</div>',
+                                    unsafe_allow_html=True,
+                                )
                             else:
                                 # Visual card placeholder
                                 _cp_set   = str(_cur_r.get("Set","")).lower()
@@ -5171,7 +5242,7 @@ if _active_tab == 2:
                                 "CardHedger search",
                                 value=_ab_srch_default,
                                 key=f"ab_srch_input_{_cur_idx}",
-                                placeholder="e.g. 2026 Bowman Fernandez CPA-DF",
+                                placeholder="e.g. 2025 Bowman Chrome Player CPA-XX  or  2025 Topps Player #123",
                                 label_visibility="collapsed",
                             )
                             if _ab_srch_row[1].button("🔍", key=f"ab_srch_btn_{_cur_idx}", help="Search CardHedger"):
@@ -5188,7 +5259,11 @@ if _active_tab == 2:
                             )
 
                             if not _display_alts:
-                                st.info("No matches found. Try removing the parallel or print run from the search above.")
+                                if _cur_r.get("Status","").startswith("Error"):
+                                    st.warning("Vision failed — type to search manually above.")
+                                    st.info("**Format:** `2025 Bowman Chrome Player CPA-XX`\nor `2025 Topps Prizm Player #123 Gold /10`")
+                                else:
+                                    st.info("No matches found. Try removing the parallel or print run from the search above.")
                             else:
                                 _n_alts = len(_display_alts)
                                 st.caption(f"{_n_alts} variant{'s' if _n_alts != 1 else ''} in CardHedger — click **Select** on the correct one")
