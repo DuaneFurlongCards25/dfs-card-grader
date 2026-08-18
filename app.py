@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.26"
+APP_VERSION = "1.6.27"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4472,7 +4472,7 @@ if _active_tab == 2:
                 'CDA:Certification Number - (ID: 27503)': '',
                 '*C:Type':                           'Sports Trading Card',
                 'C:Year Manufactured':               year,
-                'C:Print Run':                       numb,
+                'C:Print Run':                       str(r.get('Numbered', '') or ''),
                 'PicURL':                            pic_urls or card_img,
                 'GalleryType':                       'Gallery' if (pic_urls or card_img) else '',
                 '*Description':                      desc,
