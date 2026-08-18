@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.15"
+APP_VERSION = "1.6.16"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4777,17 +4777,14 @@ if _active_tab == 2:
                 if _ab_all_files and len(_ab_all_files) % 2 != 0:
                     st.caption(f"📷 {len(_ab_files)} front(s) only — add a back for every front to enable corner crops")
 
-            # Anthropic key — paste here if secrets.toml isn't set or key is wrong
-            _eff_anthropic_key = ANTHROPIC_KEY or st.session_state.get("anthropic_key_input","")
-            if not ANTHROPIC_KEY:
-                with st.expander("🤖 Anthropic API key (required for Claude Vision card scanning)", expanded=not _eff_anthropic_key):
-                    st.markdown("Get your key at [console.anthropic.com](https://console.anthropic.com) → API Keys. Starts with `sk-ant-`.")
-                    st.text_input("Anthropic API key", key="anthropic_key_input", type="password",
-                                  placeholder="sk-ant-api03-...")
-                    if st.session_state.get("anthropic_key_input"):
-                        st.success("✅ Key saved for this session")
-            elif st.session_state.get("anthropic_key_input"):
-                _eff_anthropic_key = st.session_state["anthropic_key_input"]
+            # Anthropic key — always show override; session-state value beats secrets
+            _eff_anthropic_key = st.session_state.get("anthropic_key_input","") or ANTHROPIC_KEY
+            with st.expander("🤖 Anthropic API key" + (" (override)" if ANTHROPIC_KEY else " — required"), expanded=not _eff_anthropic_key):
+                st.markdown("Get your key at [console.anthropic.com](https://console.anthropic.com) → API Keys. Starts with `sk-ant-`.")
+                st.text_input("Paste key here to override secrets", key="anthropic_key_input", type="password",
+                              placeholder="sk-ant-api03-...")
+                if st.session_state.get("anthropic_key_input"):
+                    st.success("✅ Using pasted key this session")
 
             # imgbb key — stored in secrets.toml or entered here
             if not IMGBB_KEY:
