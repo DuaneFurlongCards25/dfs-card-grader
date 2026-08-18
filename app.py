@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.24"
+APP_VERSION = "1.6.25"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4901,9 +4901,10 @@ if _active_tab == 2:
                 _ab_cost_lo = _ab_n * 0.007
                 _ab_cost_hi = _ab_n * 0.014
                 _ab_has_imgbb = bool(IMGBB_KEY or st.session_state.get("imgbb_key_input", ""))
-                _ab_img_note = (f" · {_ab_n_back} back{'s' if _ab_n_back != 1 else ''} → 8 photos/card auto-uploaded to imgbb + ZIP" if (_ab_n_back and _ab_has_imgbb)
-                                else f" · {_ab_n_back} back{'s' if _ab_n_back != 1 else ''} → ZIP only (add imgbb key to auto-upload)" if _ab_n_back
-                                else " · No backs uploaded — add backs for corner crops + imgbb upload")
+                _ab_has_supa  = bool(SUPABASE_URL and SUPABASE_KEY)
+                _ab_img_note = (f" · {_ab_n_back} back{'s' if _ab_n_back != 1 else ''} → 8 photos/card auto-uploaded to {'Supabase' if _ab_has_supa else 'imgbb'} + ZIP" if (_ab_n_back and (_ab_has_supa or _ab_has_imgbb))
+                                else f" · {_ab_n_back} back{'s' if _ab_n_back != 1 else ''} → ZIP only (no image host configured)" if _ab_n_back
+                                else " · No backs uploaded — add backs for corner crops + eBay photo upload")
                 st.info(
                     f"**{_ab_n} front{'s' if _ab_n != 1 else ''}** · Claude Vision cost: ~${_ab_cost_lo:.2f}–${_ab_cost_hi:.2f}{_ab_img_note}"
                 )
@@ -5178,11 +5179,16 @@ if _active_tab == 2:
                                     f"Card {_abi+1} ({_abf.name}): {_img_err}"
                                 )
 
-                        # Store front bytes for local display (no imgbb dependency in card panel)
+                        # Store front + back bytes for local display (works even when upload fails)
                         try:
-                            _ab_front_bytes = _abbuf.getvalue() if '_abbuf' in dir() else _abf.getvalue()
+                            _ab_front_bytes = _abbuf.getvalue() if '_abbuf' in locals() else _abf.getvalue()
                         except Exception:
                             _ab_front_bytes = b""
+                        try:
+                            # Back bytes live at index 1 of _ab_img_files (built above)
+                            _ab_back_bytes = _ab_img_files[1][1] if '_ab_img_files' in locals() and len(_ab_img_files) > 1 else b""
+                        except Exception:
+                            _ab_back_bytes = b""
 
                         # Detect print-run conflict: CH said one number, card shows another
                         _ab_ch_numbered = str((_abm.get("variant") or "") if _abm else "").lower()
@@ -5220,7 +5226,8 @@ if _active_tab == 2:
                             "CH Image":    (_abm.get("image", "") if _abm else ""),
                             "PicURLs":     _ab_pic_urls,
                             "FrontURL":    _ab_front_url,
-                            "_front_bytes": _ab_front_bytes,   # always available, no imgbb needed
+                            "_front_bytes": _ab_front_bytes,   # always available, no cloud upload needed
+                            "_back_bytes":  _ab_back_bytes,    # always available, no cloud upload needed
                             "FMV":         _ab_fmv,
                             "FMV_raw":     _ab_fmv_raw,
                             "Comp Avg":    _ab_comp_avg,
@@ -5350,10 +5357,11 @@ if _active_tab == 2:
                         _img_col, _list_col = st.columns([2, 3])
 
                         with _img_col:
-                            _pic_urls  = [u.strip() for u in str(_cur_r.get("PicURLs","")).split("|") if u.strip()]
-                            _front_url = _cur_r.get("FrontURL","") or (_pic_urls[0] if _pic_urls else "")
+                            _pic_urls    = [u.strip() for u in str(_cur_r.get("PicURLs","")).split("|") if u.strip()]
+                            _front_url   = _cur_r.get("FrontURL","") or (_pic_urls[0] if _pic_urls else "")
                             _front_bytes = _cur_r.get("_front_bytes") or b""
-                            _back_url  = _pic_urls[1] if len(_pic_urls) > 1 else ""
+                            _back_bytes  = _cur_r.get("_back_bytes") or b""
+                            _back_url    = _pic_urls[1] if len(_pic_urls) > 1 else ""
                             _cp_status = _cur_r.get("Status","")
                             # Show numbered-parallel conflict warning
                             if _cur_r.get("_numbered_conflict"):
@@ -5363,13 +5371,13 @@ if _active_tab == 2:
                                     f"Correct the Numbered field and re-search manually.",
                                     icon="⚠️",
                                 )
-                            if _front_url:
-                                st.image(_front_url, caption=f"#{_cur_r.get('#','')} · {_cur_r.get('Player','?')}", use_container_width=True)
-                            elif _front_bytes:
-                                # Show local image directly — no imgbb needed for display
+                            if _front_bytes:
+                                # Always prefer local bytes — cloud URL may be broken in browser
                                 st.image(_front_bytes, caption=f"#{_cur_r.get('#','')} · {_cur_r.get('Player','?')}", use_container_width=True)
-                                if not (IMGBB_KEY or st.session_state.get("imgbb_key_input","")):
-                                    st.caption("📸 Add imgbb key to auto-upload eBay photos")
+                                if _front_url:
+                                    st.caption("📸 eBay photo URL ready in CSV")
+                            elif _front_url:
+                                st.image(_front_url, caption=f"#{_cur_r.get('#','')} · {_cur_r.get('Player','?')}", use_container_width=True)
                             elif _cp_status.startswith("Error"):
                                 _cp_err_msg = _cp_status[7:] if len(_cp_status) > 7 else _cp_status
                                 _cp_raw = _cur_r.get("_raw_err","")
@@ -5410,11 +5418,13 @@ if _active_tab == 2:
                                     f'</div>',
                                     unsafe_allow_html=True,
                                 )
-                            if _back_url:
+                            if _back_bytes:
+                                st.image(_back_bytes, caption="Back", use_container_width=True)
+                            elif _back_url:
                                 st.image(_back_url, caption="Back", use_container_width=True)
                             # Compact metadata table
                             _cp_par = _cur_r.get("Parallel","") or "Base"
-                            _cp_run = _cur_r.get("Numbered","") or "—"
+                            _cp_run = (_cur_r.get("Numbered","") or "").lstrip("/") or "—"
                             _cp_rc  = "✅ Yes" if _cur_r.get("Rookie") else "No"
                             _cp_fmv = _cur_r.get("FMV","") or "—"
                             st.markdown(
