@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.28"
+APP_VERSION = "1.6.29"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -5527,12 +5527,19 @@ if _active_tab == 2:
                                         _sel_prices = [float(p) for p in [x.get("price") or x.get("sale_price") for x in (_sel_comp_r.get("raw_prices") or _sel_comp_r.get("sales") or [])] if p]
                                         _sel_dir, _sel_pct = calculate_trend(_sel_hist_r)
                                         _sel_trend = (f"↑ {_sel_pct:+.0f}%" if _sel_dir=="up" else f"↓ {_sel_pct:.0f}%" if _sel_dir=="down" else f"→ {_sel_pct:+.0f}%" if _sel_dir else "")
+                                        # Normalise print run to /NNN format
+                                        _sel_numbered = _alt_run.strip()
+                                        if _sel_numbered and not _sel_numbered.startswith('/'):
+                                            _sel_numbered = '/' + _sel_numbered
                                         st.session_state["ai_batch_results"][_cur_idx].update({
                                             "CH Match":    _alt_title[:50],
                                             "CH Image":    _alt_img,
                                             "_ch_id":      _alt_id,
                                             "_ch_alts":    [a for a in _display_alts if a.get("card_id") != _alt_id and a.get("id") != _alt_id],
                                             "_matched":    True,
+                                            # Write parallel + print run from CH so title builds correctly
+                                            "Parallel":    _alt_par or st.session_state["ai_batch_results"][_cur_idx].get("Parallel", ""),
+                                            "Numbered":    _sel_numbered or st.session_state["ai_batch_results"][_cur_idx].get("Numbered", ""),
                                             "FMV":         f"${_sel_fmv_v:,.2f}" if _sel_fmv_v else "",
                                             "FMV_raw":     f"{_sel_fmv_v:.2f}" if _sel_fmv_v else "",
                                             "Comp Avg":    f"${float(_sel_avg_v):,.2f}" if _sel_avg_v else "",
@@ -5543,6 +5550,9 @@ if _active_tab == 2:
                                         _next_nav = min(_cur_umi, len(_unmatched_idxs) - 2)
                                         st.session_state["ab_unmatched_nav"] = max(0, _next_nav)
                                         st.session_state.pop(f"ab_alts_override_{_cur_idx}", None)
+                                        # Clear table editor state so stale edits from a previous
+                                        # match don't overwrite the freshly selected parallel/run
+                                        st.session_state.pop("ab_match_editor", None)
                                         st.rerun()
 
                 # ── MATCHED TAB ───────────────────────────────────────────────
