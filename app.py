@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.11"
+APP_VERSION = "1.6.12"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -4891,10 +4891,11 @@ if _active_tab == 2:
 
                         if not _abcv.get("_error") and _ab_run_comps and _ab_query and CARDHEDGER_KEY:
                             _ab_status.markdown(f"Pricing **{_abi + 1}/{_ab_n}**: `{_abf.name}`")
-                            # Attempt 1: full query, never include numbered (/25 etc — breaks CH matcher)
+                            _ab_q2 = ""  # initialise so fallbacks can safely reference it
+                            # Attempt 1: full query, no numbered (/25 breaks CH matcher)
                             _ab_q1 = build_card_query(_abcv, include_numbered=False)
                             _abm, _ab_alts = ch_card_match_with_alts(_ab_q1)
-                            # Attempt 2: drop parallel too (CH naming differs from vision output)
+                            # Attempt 2: drop parallel too (CH naming often differs from Vision output)
                             if not _abm and str(_abcv.get("parallel") or "").strip():
                                 _ab_q2 = build_card_query(_abcv, include_parallel=False, include_numbered=False)
                                 if _ab_q2 and _ab_q2 != _ab_q1:
@@ -4908,7 +4909,7 @@ if _active_tab == 2:
                                 ] if p]
                                 if len(_ab_q3_parts) >= 2:
                                     _ab_q3 = " ".join(_ab_q3_parts)
-                                    if _ab_q3 not in (_ab_q1, _ab_q2 if not _abm else ""):
+                                    if _ab_q3 not in (_ab_q1, _ab_q2):
                                         _abm, _ab_alts = ch_card_match_with_alts(_ab_q3)
                             # Attempt 4: year + player only (broadest — avoids card# misread)
                             if not _abm:
