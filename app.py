@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.37"
+APP_VERSION = "1.6.38"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -10130,8 +10130,8 @@ if _active_tab == 9:
             except Exception as ex:
                 return 0, str(ex)
 
-        def _pur_prefix(sku):
-            """Extract lot prefix: first 2 dash-separated segments of SKU."""
+        def _pur_prefix_seg2(sku):
+            """Fallback: first 2 dash-separated segments."""
             parts = str(sku or "").strip().split("-")
             return "-".join(parts[:2]) if len(parts) >= 2 else ""
 
@@ -10139,6 +10139,21 @@ if _active_tab == 9:
             st.session_state["pur_lots"] = _pur_get("purchase_lots", "?order=purchase_date.desc")
 
         lots_data = st.session_state["pur_lots"]
+
+        # Build sorted prefix list (longest first) so NATION-08-18-26 beats NATION-08
+        _known_prefixes = sorted(
+            [l["lot_prefix"].upper() for l in (lots_data or []) if l.get("lot_prefix")] +
+            [a.strip().upper() for l in (lots_data or []) for a in (l.get("alias_prefixes") or "").split(",") if a.strip()],
+            key=len, reverse=True
+        )
+
+        def _pur_prefix(sku):
+            """Match SKU to registered lot prefix (longest match wins), fall back to first-2-segments."""
+            s = str(sku or "").strip().upper()
+            for pfx in _known_prefixes:
+                if s.startswith(pfx + "-") or s == pfx:
+                    return pfx
+            return _pur_prefix_seg2(sku)
 
         pur_t1, pur_t2, pur_t3, pur_t4 = st.tabs(["📋 Lots", "⬆️ Import Cards", "📊 P&L by Lot", "🃏 Individual Cards"])
 
