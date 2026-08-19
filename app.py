@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.36"
+APP_VERSION = "1.6.37"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -9475,11 +9475,11 @@ if _active_tab == 4:
 
                     # In-app preview of held rows
                     if _review_all:
+                        import pandas as _pdtcp
                         _hold_rows = [r for r in _review_all if 'HOLD' in r.get('Reason held','')]
                         _flag_rows = [r for r in _review_all if 'HOLD' not in r.get('Reason held','')]
                         if _hold_rows:
                             st.markdown("##### 🚨 Injury HOLD — do NOT reprice")
-                            import pandas as _pdtcp
                             _hold_df = _pdtcp.DataFrame([{
                                 'SKU': r['SKU'], 'Title': r['Title'][:60],
                                 'Old': r['Current price'], 'New': r['TCP price'],
