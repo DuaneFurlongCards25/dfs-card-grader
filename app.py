@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.33"
+APP_VERSION = "1.6.34"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -68,6 +68,16 @@ EBAY_GRADE_VALUES = {
 }
 
 RELEASE_NOTES = {
+    "1.6.34": {
+        "emoji": "📊",
+        "title": "TCP Reprice — delta analysis, injury HOLD, 60-day range",
+        "items": [
+            ("📅", "Step 1 now defaults to 7–60 day range (was 7–30) — catches more stale listings."),
+            ("💵", "New $5 minimum comp threshold in Step 2 — cards with no real market data are excluded from repricing."),
+            ("🚨", "Injury HOLD: ESPN feed flags injured players so you don't accidentally reprice down while they're out."),
+            ("📋", "In-app review tables — see HOLD rows and big movers directly on screen without opening a CSV."),
+        ],
+    },
     "1.5.30": {
         "emoji": "🤖",
         "title": "AI Batch Scanner — scan multiple cards at once",
@@ -9152,7 +9162,7 @@ if _active_tab == 4:
                 return buf.getvalue().encode('utf-8')
 
             def _tcp_make_analysis_csv(rows):
-                fields = ['Item number','SKU','Title','Current price','TCP price','Change $','Change %','Direction','Confidence','Reason held','Matched to']
+                fields = ['Item number','SKU','Title','Current price','TCP price','Change $','Change %','Direction','Confidence','Reason held','Injury','Matched to']
                 buf = _io.StringIO()
                 w = csv.DictWriter(buf, fieldnames=fields)
                 w.writeheader()
@@ -9178,7 +9188,7 @@ if _active_tab == 4:
                 with _tcpc1:
                     _tcp_min_days = st.number_input("Min days listed", min_value=0, max_value=365, value=7, key="tcp_min_days")
                 with _tcpc2:
-                    _tcp_max_days = st.number_input("Max days listed", min_value=1, max_value=730, value=30, key="tcp_max_days")
+                    _tcp_max_days = st.number_input("Max days listed", min_value=1, max_value=730, value=60, key="tcp_max_days")
 
                 _tcp_today = _dt.today()
 
@@ -9254,11 +9264,13 @@ if _active_tab == 4:
                 accept_multiple_files=True, key="tcp_completed_upload"
             )
 
-            _tcps2c1, _tcps2c2 = st.columns(2)
+            _tcps2c1, _tcps2c2, _tcps2c3 = st.columns(3)
             with _tcps2c1:
                 _tcp_conf_thresh = st.number_input("Min confidence to approve (%)", min_value=0, max_value=100, value=85, key="tcp_conf_thresh")
             with _tcps2c2:
                 _tcp_chg_thresh = st.number_input("Max price change to approve (%)", min_value=1, max_value=100, value=20, key="tcp_chg_thresh")
+            with _tcps2c3:
+                _tcp_min_comp = st.number_input("Min comp to reprice ($)", min_value=0, max_value=500, value=5, key="tcp_min_comp")
 
             st.caption("⭐ Ohtani · Messi · Yamal · Haaland — never priced down (up only)")
 
@@ -9272,6 +9284,25 @@ if _active_tab == 4:
 
                 if _ebay_ref:
                     _ebay_by_sku = {r.get('Custom label (SKU)','').strip(): r for r in _ebay_ref if r.get('Custom label (SKU)','')}
+
+                    _tcp_espn_cache = {}
+                    _TCP_ESPN_MAP = {'FOOTBALL':('football','nfl'),'BASKETBALL':('basketball','nba'),
+                                     'BASEBALL':('baseball','mlb'),'HOCKEY':('hockey','nhl')}
+                    def _tcp_injury_for(title):
+                        _sp, _ = _tcp_sport(title)
+                        if _sp not in _TCP_ESPN_MAP: return ''
+                        _es, _el = _TCP_ESPN_MAP[_sp]
+                        _ck = f"{_es}/{_el}"
+                        if _ck not in _tcp_espn_cache:
+                            _tcp_espn_cache[_ck] = espn_injuries_map(_es, _el) or {}
+                        _imap = _tcp_espn_cache[_ck]
+                        if not _imap: return ''
+                        _pl = _tcp_meta(title)[8].lower().strip()
+                        if not _pl: return ''
+                        if _pl in _imap: return _imap[_pl].get('status','Injured')
+                        for _nm, _dat in _imap.items():
+                            if len(_pl) > 5 and _pl in _nm: return _dat.get('status','Injured')
+                        return ''
 
                     _approved_all, _review_all, _analysis_all = [], [], []
                     _batch_stats = []
@@ -9299,6 +9330,7 @@ if _active_tab == 4:
                                 _new_p = float(_new_raw)
                                 if _new_p <= 0: raise ValueError
                             except: _b_skip += 1; continue
+                            if _new_p < _tcp_min_comp: _b_skip += 1; continue
                             if any(_k in _title.lower() for _k in _TCP_POKEMON): _b_skip += 1; continue
                             try: _cur_p = float(_cur_raw)
                             except: _b_skip += 1; continue
@@ -9313,9 +9345,12 @@ if _active_tab == 4:
                             if _star and _dir == 'DOWN': _b_skip += 1; continue
                             if _dir == 'NO CHANGE': _b_skip += 1; continue
 
+                            _injury_status = _tcp_injury_for(_title)
+
                             _reasons = []
                             if _conf < _tcp_conf_thresh: _reasons.append(f"Conf {_conf}%<{_tcp_conf_thresh}%")
                             if abs(_pct) > _tcp_chg_thresh: _reasons.append(f"Chg {_pct:+.1f}%>{_tcp_chg_thresh}%")
+                            if _injury_status: _reasons.append(f"HOLD — Injured ({_injury_status})")
 
                             _row_out = {
                                 'Item number'  : _item_num,
@@ -9328,6 +9363,7 @@ if _active_tab == 4:
                                 'Direction'    : _dir,
                                 'Confidence'   : f"{_conf}%",
                                 'Reason held'  : ' | '.join(_reasons),
+                                'Injury'       : _injury_status,
                                 'Matched to'   : _pulled[:100],
                             }
                             _analysis_all.append(_row_out)
@@ -9386,6 +9422,29 @@ if _active_tab == 4:
                                 file_name=f"eBay_PriceReview_{_tcp_label}.csv",
                                 mime="text/csv", key="tcp_dl_review",
                             )
+
+                    # In-app preview of held rows
+                    if _review_all:
+                        _hold_rows = [r for r in _review_all if 'HOLD' in r.get('Reason held','')]
+                        _flag_rows = [r for r in _review_all if 'HOLD' not in r.get('Reason held','')]
+                        if _hold_rows:
+                            st.markdown("##### 🚨 Injury HOLD — do NOT reprice")
+                            import pandas as _pdtcp
+                            _hold_df = _pdtcp.DataFrame([{
+                                'SKU': r['SKU'], 'Title': r['Title'][:60],
+                                'Old': r['Current price'], 'New': r['TCP price'],
+                                'Chg': r['Change %'], 'Injury': r['Injury'],
+                            } for r in _hold_rows])
+                            st.dataframe(_hold_df, use_container_width=True, hide_index=True)
+                        if _flag_rows:
+                            with st.expander(f"🔍 Big moves / low confidence — {len(_flag_rows)} rows"):
+                                _flag_df = _pdtcp.DataFrame([{
+                                    'SKU': r['SKU'], 'Title': r['Title'][:55],
+                                    'Old': r['Current price'], 'New': r['TCP price'],
+                                    'Chg': r['Change %'], 'Conf': r['Confidence'],
+                                    'Why held': r['Reason held'],
+                                } for r in _flag_rows])
+                                st.dataframe(_flag_df, use_container_width=True, hide_index=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 9 — Consignments (DC Sports)
