@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.32"
+APP_VERSION = "1.6.33"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -2016,6 +2016,29 @@ def _scan_shipping(price: float) -> str:
     if price < 20:
         return SHIP_STD
     return SHIP_GROUND
+
+def _ab_shipping_policy(price_str) -> str:
+    """Return eBay ShippingProfileName for a given price — module-level so TCP repricing can use it."""
+    try:
+        p = float(str(price_str).replace(',', '').strip() or 0)
+    except (ValueError, TypeError):
+        p = 0
+    if p < 20:
+        return "Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)"
+    elif p <= 50:
+        return "$15 to $50 Ground"
+    elif p <= 100:
+        return "$51 to $100 - box"
+    elif p <= 200:
+        return "$100-$200"
+    elif p <= 300:
+        return "$201-$300"
+    elif p <= 400:
+        return "$301-$400"
+    elif p <= 500:
+        return "$401-500"
+    else:
+        return "$501-600"
 
 def _scan_title(player, set_name, number, grade, variant=""):
     player_up = (player or "").upper()
@@ -4318,29 +4341,6 @@ if _active_tab == 2:
             else:
                 return ('PackageThickEnvelope', '4', '6', '4', '2') # $50+: 6x4x2 box, 4 oz
 
-        def _ab_shipping_policy(price_str):
-            """Return the eBay ShippingProfileName for a given price."""
-            try:
-                p = float(str(price_str).replace(',', '').strip() or 0)
-            except (ValueError, TypeError):
-                p = 0
-            if p < 20:
-                return "Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)"
-            elif p <= 50:
-                return "$15 to $50 Ground"
-            elif p <= 100:
-                return "$51 to $100 - box"
-            elif p <= 200:
-                return "$100-$200"
-            elif p <= 300:
-                return "$201-$300"
-            elif p <= 400:
-                return "$301-$400"
-            elif p <= 500:
-                return "$401-500"
-            else:
-                return "$501-600"
-
         # Marquee players get name-first treatment in non-soccer titles
         _AB_MARQUEE = {
             "ohtani","shohei","lebron","james","mahomes","messi","ronaldo",
@@ -4449,7 +4449,7 @@ if _active_tab == 2:
                 _fmv_f = float(r.get('FMV_raw', 0) or 0)
             except Exception:
                 _fmv_f = 0.0
-            ship_profile = _scan_shipping(_fmv_f)
+            ship_profile = _ab_shipping_policy(_fmv_f)
             desc = _ab_build_desc(title.replace('"', '&quot;'), card_img)
             row = {k: '' for k in _AB_TCP_HEADER}
             row.update({
@@ -5700,7 +5700,7 @@ if _active_tab == 2:
                                 if _np is not None and str(_np).strip() not in ('','nan','None'):
                                     _price_v = float(_np)
                                     _ab_tcp_rows[_ei]['*StartPrice'] = f"{_price_v:.2f}"
-                                    _ab_tcp_rows[_ei]['ShippingProfileName'] = _scan_shipping(_price_v)
+                                    _ab_tcp_rows[_ei]['ShippingProfileName'] = _ab_shipping_policy(_price_v)
 
                         # Unmatch buttons (row of pills)
                         if _matched_idxs:
