@@ -11722,13 +11722,42 @@ if _active_tab == 10:
 
             # ── DC Sports import ───────────────────────────────────────────────
             with imp_dc:
+                import difflib as _difflib
+
                 st.markdown("### Import DC Sports Sales")
                 st.caption(
                     "Accepts **two DC Sports export formats** — auto-detected:\n\n"
+                    "• **Financial Ledger** — Payments → Download (TransactionType, Description, GrossAmount, Fees, NetAmount). Only **Sale** rows imported.\n\n"
                     "• **Seller/Consignment CSV** — Seller Dashboard export (Title, Status, SalePrice, Fees, Net, FriendlyPackageId). Only **Paid** rows imported.\n\n"
-                    "• **Financial Ledger** — Payments → Download (TransactionType, Description, GrossAmount, Fees, NetAmount). Only **Sale** rows imported. Uses your actual fees."
+                    "**Recommended:** Also upload your DC Sports Reconcile xlsx to automatically attach Haystack SKUs — "
+                    "without SKUs, sales won't appear in lot P&L."
                 )
-                dc_sal_file = st.file_uploader("DC Sports CSV export", type=["csv"], key="sal_dc_file")
+
+                _dcs_c1, _dcs_c2 = st.columns(2)
+                with _dcs_c1:
+                    dc_sal_file = st.file_uploader("DC Sports CSV / Ledger", type=["csv"], key="sal_dc_file")
+                with _dcs_c2:
+                    dc_recon_file = st.file_uploader(
+                        "DC Sports Reconcile xlsx (optional — for SKU matching)",
+                        type=["xlsx"], key="sal_dc_recon_file",
+                        help="Upload your DCS87_Full_Reconcile_*.xlsx to auto-match titles to Haystack SKUs"
+                    )
+
+                # Build reconcile lookup from xlsx
+                _dcs_recon_lookup = {}  # dc_title_lower → {sku, lot}
+                if dc_recon_file:
+                    try:
+                        _recon_df = pd.read_excel(dc_recon_file, sheet_name=0)
+                        for _, _rr in _recon_df.iterrows():
+                            _rt = str(_rr.get("DC Sports Title", "") or "").strip()
+                            _rs = str(_rr.get("Haystack SKU", "") or "").strip()
+                            _rl = str(_rr.get("Lot", "") or "").strip()
+                            if _rt:
+                                _dcs_recon_lookup[_rt.lower()] = {"sku": _rs if _rs and _rs != "nan" else "", "lot": _rl if _rl != "nan" else ""}
+                        st.success(f"✅ Reconcile file loaded — {len(_dcs_recon_lookup):,} title mappings ({sum(1 for v in _dcs_recon_lookup.values() if v['sku'])} with SKU)")
+                    except Exception as _re6:
+                        st.warning(f"Could not read reconcile file: {_re6}")
+
                 if dc_sal_file:
                     try:
                         raw6 = dc_sal_file.read().decode("utf-8-sig")
@@ -11740,74 +11769,150 @@ if _active_tab == 10:
 
                         if is_ledger6:
                             paid_df6 = dc_df6[dc_df6["TransactionType"].astype(str).str.strip() == "Sale"].copy()
-                            st.info(f"📊 **DC Sports Financial Ledger detected** — using your actual fees.")
-                            st.caption(f"Found **{len(dc_df6):,}** total rows, **{len(paid_df6):,}** Sale rows (will import).")
+                            st.info(f"📊 **Financial Ledger detected** — {len(paid_df6):,} Sale rows")
                         else:
                             paid_df6 = dc_df6[dc_df6.get("Status", dc_df6.iloc[:,1]).astype(str).str.lower() == "paid"].copy() if "Status" in dc_df6.columns else dc_df6
-                            st.caption(f"Found **{len(dc_df6):,}** total rows, **{len(paid_df6):,}** Paid (will import as sales).")
+                            st.caption(f"Found **{len(dc_df6):,}** total rows, **{len(paid_df6):,}** Paid")
 
-                        st.dataframe(paid_df6.head(5), use_container_width=True, hide_index=True)
+                        # ── Build match preview ──────────────────────────────────
+                        _dcs_rows = []
+                        for _, _pr in paid_df6.iterrows():
+                            if is_ledger6:
+                                _pt = str(_pr.get("Description", "") or "").strip()
+                                _pg = _parse_money(_pr.get("GrossAmount", 0))
+                                _pf = abs(_parse_money(_pr.get("Fees", 0)))
+                                _pn = _parse_money(_pr.get("NetAmount", 0))
+                                _po = None
+                                _pd_raw = str(_pr.get("TransactionDate", "") or "").strip()
+                            else:
+                                _pt = str(_pr.get("Title", "") or "").strip()
+                                _pg = _parse_money(_pr.get("SalePrice", 0))
+                                _pf = abs(_parse_money(_pr.get("Fees", 0)))
+                                _pn = _parse_money(_pr.get("Net", 0))
+                                _po = str(_pr.get("FriendlyPackageId", "") or "").strip() or None
+                                _pd_raw = str(_pr.get("EndingDate", "") or "").strip()[:19]
 
-                        if st.button("⬆️ Import DC Sports Sales", type="primary", key="sal_dc_btn"):
+                            # Resolve sale date
+                            try:
+                                _ps_date = pd.to_datetime(_pd_raw).strftime('%Y-%m-%d') if _pd_raw else None
+                            except Exception:
+                                _ps_date = _pd_raw[:10] if _pd_raw else None
+
+                            # Match to reconcile
+                            _ptl = _pt.lower()
+                            _match_type = "No reconcile"
+                            _matched_sku = ""
+                            _matched_lot = ""
+                            if _dcs_recon_lookup:
+                                if _ptl in _dcs_recon_lookup:
+                                    _mv = _dcs_recon_lookup[_ptl]
+                                    _matched_sku = _mv["sku"]
+                                    _matched_lot = _mv["lot"]
+                                    _match_type = "Exact" if _matched_sku else "Exact (no SKU)"
+                                else:
+                                    # Fuzzy fallback using difflib
+                                    _best = _difflib.get_close_matches(_ptl, list(_dcs_recon_lookup.keys()), n=1, cutoff=0.72)
+                                    if _best:
+                                        _mv = _dcs_recon_lookup[_best[0]]
+                                        _matched_sku = _mv["sku"]
+                                        _matched_lot = _mv["lot"]
+                                        _score = int(_difflib.SequenceMatcher(None, _ptl, _best[0]).ratio() * 100)
+                                        _match_type = f"Fuzzy {_score}%" if _matched_sku else f"Fuzzy {_score}% (no SKU)"
+                                    else:
+                                        _match_type = "Unmatched"
+
+                            _dcs_rows.append({
+                                "_title": _pt,
+                                "_gross": _pg,
+                                "_fees": _pf,
+                                "_net": _pn,
+                                "_order_id": _po,
+                                "_sale_date": _ps_date,
+                                "_match_type": _match_type,
+                                "_sku": _matched_sku,
+                                "_lot": _matched_lot,
+                            })
+
+                        if _dcs_recon_lookup:
+                            _n_exact   = sum(1 for r in _dcs_rows if r["_match_type"].startswith("Exact") and r["_sku"])
+                            _n_fuzzy   = sum(1 for r in _dcs_rows if r["_match_type"].startswith("Fuzzy") and r["_sku"])
+                            _n_no_sku  = sum(1 for r in _dcs_rows if r["_sku"] == "")
+                            st.markdown(
+                                f"**Match summary:** ✅ {_n_exact} exact · 🔶 {_n_fuzzy} fuzzy · "
+                                f"❌ {_n_no_sku} need SKU — "
+                                f"**{_n_exact + _n_fuzzy}** will post to lots"
+                            )
+
+                        # ── Review table ─────────────────────────────────────────
+                        with st.expander(f"📋 Review all {len(_dcs_rows)} rows before posting", expanded=(_n_no_sku > 0 if _dcs_recon_lookup else True)):
+                            _preview_data = []
+                            for _ri, _rr in enumerate(_dcs_rows):
+                                _icon = {"Exact": "✅", "Exact (no SKU)": "⚠️", "Unmatched": "❌", "No reconcile": "—"}.get(
+                                    _rr["_match_type"].split(" ")[0] if "Fuzzy" not in _rr["_match_type"] else "Fuzzy", "🔶"
+                                )
+                                _preview_data.append({
+                                    "#": _ri + 1,
+                                    "Status": _icon + " " + _rr["_match_type"],
+                                    "DC Sports Title": _rr["_title"][:70],
+                                    "Haystack SKU": _rr["_sku"] or "(none)",
+                                    "Lot": _rr["_lot"] or "—",
+                                    "Gross": f"${_rr['_gross']:.2f}",
+                                    "Net": f"${_rr['_net']:.2f}",
+                                })
+                            st.dataframe(pd.DataFrame(_preview_data), use_container_width=True, hide_index=True)
+
+                        # ── Manual SKU fixes for unmatched ───────────────────────
+                        _unmatched_rows = [r for r in _dcs_rows if not r["_sku"]]
+                        if _unmatched_rows and _dcs_recon_lookup:
+                            st.markdown(f"#### ✏️ Assign SKUs for {len(_unmatched_rows)} unmatched cards")
+                            st.caption("Enter the Haystack SKU for each — leave blank to skip (will import without SKU, won't appear in lot P&L)")
+                            for _ur in _unmatched_rows:
+                                _uk = f"dcs_manual_sku_{hash(_ur['_title'])}"
+                                _col_t, _col_s = st.columns([3, 2])
+                                _col_t.markdown(f"**{_ur['_title'][:80]}**  \nNet: ${_ur['_net']:.2f}")
+                                _ur["_sku"] = _col_s.text_input("Haystack SKU", value="", key=_uk, placeholder="e.g. VINCEFB-072026-00001-07443").strip()
+
+                        # ── Post button ───────────────────────────────────────────
+                        _with_sku   = sum(1 for r in _dcs_rows if r["_sku"])
+                        _without_sku = len(_dcs_rows) - _with_sku
+                        st.markdown(f"**Ready to post:** {_with_sku} with SKU (→ lot P&L) · {_without_sku} without SKU (→ sales log only)")
+
+                        if st.button("⬆️ Post DC Sports Sales to Lots", type="primary", key="sal_dc_btn"):
                             existing_raw6 = _sal_get("?select=dedup_key&source=eq.dc_sports")
                             existing_keys6 = {r["dedup_key"] for r in existing_raw6 if r.get("dedup_key")}
                             imported6 = skipped6 = failed6 = 0
                             prog6 = st.progress(0)
-                            total6 = len(paid_df6)
 
-                            for _i6, (idx6, row6) in enumerate(paid_df6.iterrows()):
-                                prog6.progress(int((_i6 + 1) / max(total6, 1) * 100))
+                            for _i6, _rr6 in enumerate(_dcs_rows):
+                                prog6.progress(int((_i6 + 1) / max(len(_dcs_rows), 1) * 100))
 
+                                _t6 = _rr6["_title"]
+                                _g6 = _rr6["_gross"]
+                                _sku6 = _rr6["_sku"] or None
                                 if is_ledger6:
-                                    title6  = str(row6.get("Description", "") or "").strip()
-                                    gross6  = _parse_money(row6.get("GrossAmount", 0))
-                                    fees6   = abs(_parse_money(row6.get("Fees", 0)))
-                                    net6    = _parse_money(row6.get("NetAmount", 0))
-                                    dedup6  = f"dc_sports_ledger|{title6}|{round(gross6, 2)}"
-                                    rec6 = {
-                                        "source": "dc_sports",
-                                        "sale_date": None,
-                                        "title": title6 or None,
-                                        "quantity": 1,
-                                        "sale_price": gross6,
-                                        "shipping_collected": 0,
-                                        "gross_revenue": gross6,
-                                        "platform_fee": fees6,
-                                        "net_proceeds": net6,
-                                        "status": "paid",
-                                        "dedup_key": dedup6,
-                                    }
+                                    dedup6 = f"dc_sports_ledger|{_t6}|{round(_g6, 2)}"
                                 else:
-                                    pkg6    = str(row6.get("FriendlyPackageId", "") or "").strip()
-                                    title6  = str(row6.get("Title", "") or "").strip()
-                                    ending6 = str(row6.get("EndingDate", "") or "").strip()[:19]
-                                    dedup6  = f"dc_sports|{pkg6}|{title6}|{ending6}"
-                                    sale_price6 = _parse_money(row6.get("SalePrice"))
-                                    fees6       = _parse_money(row6.get("Fees"))
-                                    net6        = _parse_money(row6.get("Net"))
-                                    try:
-                                        sale_date6 = pd.to_datetime(ending6).strftime('%Y-%m-%d') if ending6 else None
-                                    except Exception:
-                                        sale_date6 = ending6[:10] if ending6 else None
-                                    rec6 = {
-                                        "source": "dc_sports",
-                                        "order_id": pkg6 or None,
-                                        "sale_date": sale_date6,
-                                        "title": title6 or None,
-                                        "item_number": None,
-                                        "quantity": 1,
-                                        "sale_price": sale_price6,
-                                        "shipping_collected": 0,
-                                        "gross_revenue": sale_price6,
-                                        "platform_fee": fees6,
-                                        "net_proceeds": net6,
-                                        "status": "paid",
-                                        "dedup_key": dedup6,
-                                    }
+                                    dedup6 = f"dc_sports|{_rr6['_order_id'] or ''}|{_t6}|{_rr6['_sale_date'] or ''}"
 
                                 if dedup6 in existing_keys6:
                                     skipped6 += 1
                                     continue
+
+                                rec6 = {
+                                    "source": "dc_sports",
+                                    "order_id": _rr6["_order_id"],
+                                    "sale_date": _rr6["_sale_date"],
+                                    "title": _t6 or None,
+                                    "quantity": 1,
+                                    "sale_price": _g6,
+                                    "shipping_collected": 0,
+                                    "gross_revenue": _g6,
+                                    "platform_fee": _rr6["_fees"],
+                                    "net_proceeds": _rr6["_net"],
+                                    "status": "paid",
+                                    "dedup_key": dedup6,
+                                    "sku": _sku6,
+                                }
 
                                 res6 = _sal_post(rec6)
                                 if res6 is not None:
@@ -11817,7 +11922,10 @@ if _active_tab == 10:
                                     failed6 += 1
 
                             prog6.empty()
-                            msg6 = f"✅ Imported **{imported6}** DC Sports sales"
+                            msg6 = f"✅ Posted **{imported6}** DC Sports sales"
+                            _posted_with_sku = sum(1 for r in _dcs_rows if r["_sku"])
+                            if _posted_with_sku:
+                                msg6 += f" (**{_posted_with_sku}** with Haystack SKU → visible in lot P&L)"
                             if skipped6: msg6 += f", skipped **{skipped6}** duplicates"
                             if failed6: msg6 += f", **{failed6}** failed"
                             st.success(msg6 + ".")
@@ -11827,7 +11935,9 @@ if _active_tab == 10:
                                 st.session_state.pop("sal_data", None)
                                 st.rerun()
                     except Exception as e6:
-                        st.error(f"Error reading DC Sports CSV: {e6}")
+                        st.error(f"Error reading DC Sports file: {e6}")
+                        import traceback
+                        st.code(traceback.format_exc())
 
             # ── Manual entry ───────────────────────────────────────────────────
             with imp_manual:
