@@ -11088,6 +11088,25 @@ if _active_tab == 10:
                 _sal_last_error["msg"] = str(ex)
                 return None
 
+        def _sal_patch(filt, payload):
+            data = json.dumps(payload).encode()
+            req = urllib.request.Request(
+                f"{SUPABASE_URL}/rest/v1/sales_records?{filt}",
+                data=data,
+                headers={**sb_headers(), "Prefer": "return=minimal"},
+                method="PATCH",
+            )
+            try:
+                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
+                    return True
+            except urllib.error.HTTPError as e:
+                body = e.read().decode("utf-8", errors="replace")
+                _sal_last_error["msg"] = f"HTTP {e.code}: {body[:300]}"
+                return False
+            except Exception as ex:
+                _sal_last_error["msg"] = str(ex)
+                return False
+
         def _sal_delete(filt):
             req = urllib.request.Request(
                 f"{SUPABASE_URL}/rest/v1/sales_records?{filt}",
@@ -11878,9 +11897,11 @@ if _active_tab == 10:
                         st.markdown(f"**Ready to post:** {_with_sku} with SKU (→ lot P&L) · {_without_sku} without SKU (→ sales log only)")
 
                         if st.button("⬆️ Post DC Sports Sales to Lots", type="primary", key="sal_dc_btn"):
-                            existing_raw6 = _sal_get("?select=dedup_key&source=eq.dc_sports")
-                            existing_keys6 = {r["dedup_key"] for r in existing_raw6 if r.get("dedup_key")}
-                            imported6 = skipped6 = failed6 = 0
+                            # Fetch existing DC Sports records including their current sku
+                            existing_raw6 = _sal_get("?select=id,dedup_key,sku&source=eq.dc_sports&limit=5000")
+                            # Map dedup_key → {id, sku} for update-vs-insert decision
+                            existing_map6 = {r["dedup_key"]: r for r in existing_raw6 if r.get("dedup_key")}
+                            imported6 = updated6 = skipped6 = failed6 = 0
                             prog6 = st.progress(0)
 
                             for _i6, _rr6 in enumerate(_dcs_rows):
@@ -11894,8 +11915,17 @@ if _active_tab == 10:
                                 else:
                                     dedup6 = f"dc_sports|{_rr6['_order_id'] or ''}|{_t6}|{_rr6['_sale_date'] or ''}"
 
-                                if dedup6 in existing_keys6:
-                                    skipped6 += 1
+                                if dedup6 in existing_map6:
+                                    existing_rec = existing_map6[dedup6]
+                                    if _sku6 and not existing_rec.get("sku"):
+                                        # Record exists but has no SKU — patch to add it
+                                        ok = _sal_patch(f"id=eq.{existing_rec['id']}", {"sku": _sku6})
+                                        if ok:
+                                            updated6 += 1
+                                        else:
+                                            failed6 += 1
+                                    else:
+                                        skipped6 += 1
                                     continue
 
                                 rec6 = {
@@ -11917,21 +11947,20 @@ if _active_tab == 10:
                                 res6 = _sal_post(rec6)
                                 if res6 is not None:
                                     imported6 += 1
-                                    existing_keys6.add(dedup6)
                                 else:
                                     failed6 += 1
 
                             prog6.empty()
-                            msg6 = f"✅ Posted **{imported6}** DC Sports sales"
-                            _posted_with_sku = sum(1 for r in _dcs_rows if r["_sku"])
-                            if _posted_with_sku:
-                                msg6 += f" (**{_posted_with_sku}** with Haystack SKU → visible in lot P&L)"
-                            if skipped6: msg6 += f", skipped **{skipped6}** duplicates"
-                            if failed6: msg6 += f", **{failed6}** failed"
-                            st.success(msg6 + ".")
+                            parts = []
+                            if imported6: parts.append(f"**{imported6}** new")
+                            if updated6:  parts.append(f"**{updated6}** updated with SKU")
+                            if skipped6:  parts.append(f"{skipped6} already had SKU")
+                            if failed6:   parts.append(f"**{failed6}** failed")
+                            msg6 = "✅ DC Sports: " + " · ".join(parts) if parts else "✅ Nothing to do"
+                            st.success(msg6)
                             if failed6 and _sal_last_error["msg"]:
                                 st.error(f"Last error: {_sal_last_error['msg']}")
-                            if imported6:
+                            if imported6 or updated6:
                                 st.session_state.pop("sal_data", None)
                                 st.rerun()
                     except Exception as e6:
