@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.35"
+APP_VERSION = "1.6.36"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -68,6 +68,14 @@ EBAY_GRADE_VALUES = {
 }
 
 RELEASE_NOTES = {
+    "1.6.36": {
+        "emoji": "🗑️",
+        "title": "TCP Reprice — Clear button + wrong-file warning",
+        "items": [
+            ("🗑️", "🗑️ Clear button in Step 2 resets the file uploader and session state instantly."),
+            ("⚠️", "Uploader label now warns: use the standard batch file, NOT the _HEYSTACK_READY version."),
+        ],
+    },
     "1.6.35": {
         "emoji": "🔍",
         "title": "TCP Reprice — fix 0-result bug + diagnostic",
@@ -9265,11 +9273,20 @@ if _active_tab == 4:
 
             # ── STEP 2 ────────────────────────────────────────────────────────
             st.markdown("---")
-            st.markdown("#### Step 2 — Analyze TCP Results & Build Upload Files")
+            _s2_hdr, _s2_clr = st.columns([5, 1])
+            with _s2_hdr:
+                st.markdown("#### Step 2 — Analyze TCP Results & Build Upload Files")
+            with _s2_clr:
+                if st.button("🗑️ Clear", key="tcp_s2_clear", help="Clear uploaded files and reset Step 2"):
+                    for _k in ['tcp_completed_upload', 'tcp_ebay_rows', 'tcp_ebay_ref2']:
+                        st.session_state.pop(_k, None)
+                    st.session_state['tcp_s2_reset'] = st.session_state.get('tcp_s2_reset', 0) + 1
+                    st.rerun()
 
+            _tcp_s2_key = f"tcp_completed_upload_{st.session_state.get('tcp_s2_reset', 0)}"
             _tcp_completed_files = st.file_uploader(
-                "Upload TCP completed CSV(s)", type=["csv"],
-                accept_multiple_files=True, key="tcp_completed_upload"
+                "Upload TCP completed CSV(s) — use the standard batch file, NOT the _HEYSTACK_READY version",
+                type=["csv"], accept_multiple_files=True, key=_tcp_s2_key
             )
 
             _tcps2c1, _tcps2c2, _tcps2c3 = st.columns(3)
