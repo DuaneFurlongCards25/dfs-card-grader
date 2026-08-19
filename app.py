@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.34"
+APP_VERSION = "1.6.35"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -68,6 +68,14 @@ EBAY_GRADE_VALUES = {
 }
 
 RELEASE_NOTES = {
+    "1.6.35": {
+        "emoji": "🔍",
+        "title": "TCP Reprice — fix 0-result bug + diagnostic",
+        "items": [
+            ("🔧", "Fixed: Step 2 now matches rows by Item number as well as SKU — items with no custom label no longer silently fail."),
+            ("🔍", "New diagnostic expander shows exactly why rows were skipped (no match, no price, no change, below min)."),
+        ],
+    },
     "1.6.34": {
         "emoji": "📊",
         "title": "TCP Reprice — delta analysis, injury HOLD, 60-day range",
@@ -9283,7 +9291,12 @@ if _active_tab == 4:
                         st.session_state['tcp_ebay_rows'] = _ebay_ref
 
                 if _ebay_ref:
-                    _ebay_by_sku = {r.get('Custom label (SKU)','').strip(): r for r in _ebay_ref if r.get('Custom label (SKU)','')}
+                    _ebay_by_sku = {}
+                    for _er in _ebay_ref:
+                        _er_sku  = _er.get('Custom label (SKU)', '').strip()
+                        _er_item = _er.get('Item number', '').strip()
+                        if _er_sku:  _ebay_by_sku[_er_sku]  = _er
+                        if _er_item: _ebay_by_sku[_er_item] = _er
 
                     _tcp_espn_cache = {}
                     _TCP_ESPN_MAP = {'FOOTBALL':('football','nfl'),'BASKETBALL':('basketball','nba'),
@@ -9306,6 +9319,7 @@ if _active_tab == 4:
 
                     _approved_all, _review_all, _analysis_all = [], [], []
                     _batch_stats = []
+                    _g_no_price = _g_no_match = _g_no_change = _g_min = _g_total = 0
 
                     for _cf in _tcp_completed_files:
                         _cf_lines = _cf.read().decode('utf-8-sig').splitlines()
@@ -9316,6 +9330,8 @@ if _active_tab == 4:
                                 if _k != _k.strip(): _r[_k.strip()] = _r.pop(_k)
 
                         _b_approved = _b_review = _b_skip = 0
+                        _b_skip_no_price = _b_skip_no_match = _b_skip_no_change = _b_skip_min = 0
+                        _g_total += len(_cf_rows)
                         for _r in _cf_rows:
                             _sku      = _r.get('CustomLabel','').strip()
                             _title    = _r.get('*Title','').strip()
@@ -9329,11 +9345,11 @@ if _active_tab == 4:
                             try:
                                 _new_p = float(_new_raw)
                                 if _new_p <= 0: raise ValueError
-                            except: _b_skip += 1; continue
-                            if _new_p < _tcp_min_comp: _b_skip += 1; continue
+                            except: _b_skip += 1; _b_skip_no_price += 1; continue
+                            if _new_p < _tcp_min_comp: _b_skip += 1; _b_skip_min += 1; continue
                             if any(_k in _title.lower() for _k in _TCP_POKEMON): _b_skip += 1; continue
                             try: _cur_p = float(_cur_raw)
-                            except: _b_skip += 1; continue
+                            except: _b_skip += 1; _b_skip_no_match += 1; continue
                             try: _conf = int(_conf_raw) if _conf_raw else 0
                             except: _conf = 0
 
@@ -9343,7 +9359,7 @@ if _active_tab == 4:
                             _star = any(_s in _title.lower() for _s in _TCP_STARS)
 
                             if _star and _dir == 'DOWN': _b_skip += 1; continue
-                            if _dir == 'NO CHANGE': _b_skip += 1; continue
+                            if _dir == 'NO CHANGE': _b_skip += 1; _b_skip_no_change += 1; continue
 
                             _injury_status = _tcp_injury_for(_title)
 
@@ -9373,6 +9389,23 @@ if _active_tab == 4:
                                 _approved_all.append(_row_out); _b_approved += 1
 
                         _batch_stats.append((_cf.name, _b_approved, _b_review, _b_skip))
+                        _g_no_price  += _b_skip_no_price
+                        _g_no_match  += _b_skip_no_match
+                        _g_no_change += _b_skip_no_change
+                        _g_min       += _b_skip_min
+
+                    # Diagnostic (always visible — diagnoses why Total Analyzed = 0)
+                    with st.expander(f"🔍 Diagnostic — {_g_total} rows in TCP file"):
+                        st.caption(f"eBay ref: **{len(_ebay_ref)}** rows → **{len(_ebay_by_sku)}** lookup keys (SKU + Item#)")
+                        _diag_parts = []
+                        if _g_no_match:  _diag_parts.append(f"**{_g_no_match}** — no eBay ref match (SKU/Item# not found)")
+                        if _g_no_price:  _diag_parts.append(f"**{_g_no_price}** — TCP returned no price")
+                        if _g_no_change: _diag_parts.append(f"**{_g_no_change}** — price unchanged")
+                        if _g_min:       _diag_parts.append(f"**{_g_min}** — below ${_tcp_min_comp:.0f} min comp")
+                        for _dp in _diag_parts: st.caption("⏭ " + _dp)
+                        if _g_no_match > 0:
+                            st.warning("SKU/Item# mismatch is the most common cause of 0 results. "
+                                       "Make sure you upload the **same** eBay active-listings CSV you used in Step 1.")
 
                     # Stats display
                     st.markdown("##### Results")
