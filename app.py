@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.38"
+APP_VERSION = "1.6.39"
 
 # Product branding — change APP_NAME on this one line to rebrand the whole app.
 APP_NAME = "The CardPulse™"
@@ -73,7 +73,7 @@ RELEASE_NOTES = {
         "title": "TCP Reprice — Clear button + wrong-file warning",
         "items": [
             ("🗑️", "🗑️ Clear button in Step 2 resets the file uploader and session state instantly."),
-            ("⚠️", "Uploader label now warns: use the standard batch file, NOT the _HEYSTACK_READY version."),
+            ("⚠️", "Uploader label now warns: use the standard batch file, NOT the _HAYSTACK_READY version."),
         ],
     },
     "1.6.35": {
@@ -8622,7 +8622,7 @@ if _active_tab == 4:
                         ebay_rows = [l for l in display_list if l.get("suggested_price")]
                         if ebay_rows:
                             # eBay upload file — price-only, 2 columns
-                            # Uploading any extra columns risks overwriting Heystack formatting
+                            # Uploading any extra columns risks overwriting Haystack formatting
                             ebuf = io.StringIO()
                             pd.DataFrame([{
                                 "Item number": l.get("item_number",""),
@@ -9285,7 +9285,7 @@ if _active_tab == 4:
 
             _tcp_s2_key = f"tcp_completed_upload_{st.session_state.get('tcp_s2_reset', 0)}"
             _tcp_completed_files = st.file_uploader(
-                "Upload TCP completed CSV(s) — use the standard batch file, NOT the _HEYSTACK_READY version",
+                "Upload TCP completed CSV(s) — use the standard batch file, NOT the _HAYSTACK_READY version",
                 type=["csv"], accept_multiple_files=True, key=_tcp_s2_key
             )
 
