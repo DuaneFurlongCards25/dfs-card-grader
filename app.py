@@ -16,10 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.39"
-
-# Product branding — change APP_NAME on this one line to rebrand the whole app.
-APP_NAME = "The CardPulse™"
+APP_VERSION = "1.6.43"
 APP_TAGLINE = "Real-time market intelligence for card sellers."
 
 # Daily cap on live CardHedger look-ups per member (protects the API budget).
@@ -412,14 +409,15 @@ def get_secret(section, key, default=""):
     except Exception:
         return default
 
+APP_NAME = get_secret("app", "name", "CardPulse")
 SUPABASE_URL = get_secret("supabase", "url")
 SUPABASE_KEY = get_secret("supabase", "key")
-WORKER_URL = "https://dfs-api.duane-588.workers.dev"
+WORKER_URL = get_secret("worker", "url")
 DEFAULT_EBAY_KEY = get_secret("ebay", "app_id")
 CARDHEDGER_KEY = get_secret("cardhedger", "api_key")
 CARDHEDGER_BASE = "https://api.cardhedger.com"
 ANTHROPIC_KEY = get_secret("anthropic", "api_key")
-IMGBB_KEY = get_secret("imgbb", "api_key") or "e3909e93e7d7962973b65bdf4bf60f52"
+IMGBB_KEY = get_secret("imgbb", "api_key")
 WP_PROXY_URL   = "https://duanefurlongstudios.com/wp-admin/admin-ajax.php?action=dfs_gemrate"
 
 # ─── Page config ──────────────────────────────────────────────────────────────
