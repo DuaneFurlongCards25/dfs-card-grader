@@ -414,6 +414,7 @@ def get_secret(section, key, default=""):
 
 SUPABASE_URL = get_secret("supabase", "url")
 SUPABASE_KEY = get_secret("supabase", "key")
+WORKER_URL = "https://dfs-api.duane-588.workers.dev"
 DEFAULT_EBAY_KEY = get_secret("ebay", "app_id")
 CARDHEDGER_KEY = get_secret("cardhedger", "api_key")
 CARDHEDGER_BASE = "https://api.cardhedger.com"
@@ -529,118 +530,32 @@ def gen_code():
     return f"DFS-{suffix}"
 
 def admin_get_codes():
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    req = urllib.request.Request(
-        f"{SUPABASE_URL}/rest/v1/access_codes?select=id,code,name,active,usage_count,last_used,created_at,daily_limit&order=id.asc",
-        headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
-    )
-    try:
-        with urllib.request.urlopen(req, context=ctx, timeout=10) as r:
-            return json.loads(r.read().decode())
-    except Exception:
-        return []
+    return _neon_get("access_codes", "?order=id.asc")
 
 def admin_insert_code(code, name, trial_days=None):
     import datetime as _dt
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
     payload = {"code": code, "name": name}
     if trial_days and trial_days > 0:
         exp = _dt.datetime.utcnow() + _dt.timedelta(days=trial_days)
         payload["expires_at"] = exp.strftime("%Y-%m-%dT%H:%M:%SZ")
-    data = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        f"{SUPABASE_URL}/rest/v1/access_codes",
-        data=data,
-        headers={
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
-            "Content-Type": "application/json",
-            "Prefer": "return=minimal",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, context=ctx, timeout=10):
-            return True
-    except Exception:
-        return False
+    result = _neon_post("access_codes", payload)
+    return result is not None
 
 def admin_set_expiry(code_id, days):
     import datetime as _dt_exp
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
     if days and days > 0:
         exp = _dt_exp.datetime.utcnow() + _dt_exp.timedelta(days=days)
         payload = {"expires_at": exp.strftime("%Y-%m-%dT%H:%M:%SZ")}
     else:
         payload = {"expires_at": None}
-    data = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        f"{SUPABASE_URL}/rest/v1/access_codes?id=eq.{code_id}",
-        data=data,
-        headers={
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
-            "Content-Type": "application/json",
-            "Prefer": "return=minimal",
-        },
-        method="PATCH",
-    )
-    try:
-        with urllib.request.urlopen(req, context=ctx, timeout=10):
-            return True
-    except Exception:
-        return False
+    return _neon_patch("access_codes", code_id, payload)
 
 def admin_set_daily_limit(code_id, limit):
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
     payload = {"daily_limit": limit if limit and limit > 0 else None}
-    data = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        f"{SUPABASE_URL}/rest/v1/access_codes?id=eq.{code_id}",
-        data=data,
-        headers={
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
-            "Content-Type": "application/json",
-            "Prefer": "return=minimal",
-        },
-        method="PATCH",
-    )
-    try:
-        with urllib.request.urlopen(req, context=ctx, timeout=10):
-            return True
-    except Exception:
-        return False
+    return _neon_patch("access_codes", code_id, payload)
 
 def admin_toggle_code(code_id, active):
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    data = json.dumps({"active": active}).encode()
-    req = urllib.request.Request(
-        f"{SUPABASE_URL}/rest/v1/access_codes?id=eq.{code_id}",
-        data=data,
-        headers={
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
-            "Content-Type": "application/json",
-            "Prefer": "return=minimal",
-        },
-        method="PATCH",
-    )
-    try:
-        with urllib.request.urlopen(req, context=ctx, timeout=10):
-            return True
-    except Exception:
-        return False
+    return _neon_patch("access_codes", code_id, {"active": active})
 
 if st.query_params.get("admin") == "true":
     if not st.session_state.get("admin_authed"):
@@ -738,74 +653,38 @@ if st.query_params.get("admin") == "true":
 
 # ─── Access code gate ─────────────────────────────────────────────────────────
 def validate_code(code: str):
-    """Returns (name, code_id, error_key) — error_key is None on success, 'expired' or 'invalid' otherwise."""
-    if not SUPABASE_URL:
-        return None, False, "invalid"
+    """Returns (name, code_id, error_key, daily_limit) — error_key is None on success."""
+    if not WORKER_URL:
+        return None, False, "invalid", None
     import datetime as _dt
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    url = (f"{SUPABASE_URL}/rest/v1/access_codes"
-           f"?code=eq.{urllib.parse.quote(code.strip().upper())}&active=eq.true&select=id,name,usage_count,expires_at,daily_limit")
-    req = urllib.request.Request(url, headers={
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-    })
+    rows = _neon_get("access_codes",
+                     f"?code=eq.{urllib.parse.quote(code.strip().upper())}&active=eq.true")
     try:
-        with urllib.request.urlopen(req, context=ctx, timeout=10) as r:
-            rows = json.loads(r.read().decode())
         if rows:
             row = rows[0]
-            # Check expiry if set
             expires_at = row.get("expires_at")
             if expires_at:
                 try:
                     exp = _dt.datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
                     if _dt.datetime.now(_dt.timezone.utc) > exp:
-                        return None, False, "expired"
+                        return None, False, "expired", None
                 except Exception:
                     pass
             return row["name"], row["id"], None, row.get("daily_limit")
         return None, False, "invalid", None
     except Exception:
-        return None, False, "invalid"
+        return None, False, "invalid", None
 
 def record_code_use(code_id: int):
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    import datetime
-    data = json.dumps({
-        "usage_count": f"usage_count + 1",
-        "last_used": datetime.datetime.utcnow().isoformat() + "Z",
-    }).encode()
-    # Use RPC-style raw SQL via PostgREST
-    rpc_data = json.dumps({"p_id": code_id}).encode()
-    # Simpler: just PATCH with a fresh read-modify-write
-    url = f"{SUPABASE_URL}/rest/v1/access_codes?id=eq.{code_id}"
-    # Fetch current count first
-    req = urllib.request.Request(url + "&select=usage_count", headers={
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
+    import datetime as dt
+    rows = _neon_get("access_codes", f"?id=eq.{code_id}")
+    if not rows:
+        return
+    current = rows[0].get("usage_count", 0) or 0
+    _neon_patch("access_codes", code_id, {
+        "usage_count": current + 1,
+        "last_used": dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
     })
-    try:
-        with urllib.request.urlopen(req, context=ctx, timeout=10) as r:
-            current = json.loads(r.read().decode())[0]["usage_count"]
-        import datetime as dt
-        patch = json.dumps({
-            "usage_count": current + 1,
-            "last_used": dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-        }).encode()
-        req2 = urllib.request.Request(url, data=patch, headers={
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
-            "Content-Type": "application/json",
-            "Prefer": "return=minimal",
-        }, method="PATCH")
-        with urllib.request.urlopen(req2, context=ctx, timeout=10):
-            pass
-    except Exception:
-        pass
 
 if not st.session_state.get("access_granted"):
     st.markdown(
@@ -951,151 +830,125 @@ def sb_headers():
         "Prefer": "return=representation",
     }
 
-def sb_get():
-    if not SUPABASE_URL:
-        return []
-    req = urllib.request.Request(
-        f"{SUPABASE_URL}/rest/v1/grading_tracker?order=id.asc",
-        headers=sb_headers(),
-    )
+# ─── Neon / Cloudflare Worker helpers ─────────────────────────────────────────
+# All card-business tables now live in Neon Postgres via the Worker at WORKER_URL.
+# The Worker uses no auth (SHARED_SECRET not set → dev mode bypass).
+
+def _neon_headers():
+    return {"Content-Type": "application/json"}
+
+def _neon_get(table, params=""):
+    """GET list from Neon. Returns [] on error."""
+    url = f"{WORKER_URL}/api/db/{table}{params}"
+    req = urllib.request.Request(url, headers=_neon_headers())
     try:
-        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
-            return json.loads(r.read().decode())
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=15) as r:
+            body = json.loads(r.read().decode())
+            # Worker returns {data: [...], count: N}; fall back if old shape
+            return body.get("data", body) if isinstance(body, dict) else body
     except Exception:
         return []
+
+def _neon_post(table, payload, on_conflict=None):
+    """POST insert to Neon. Returns list of inserted rows, or None on error."""
+    url = f"{WORKER_URL}/api/db/{table}"
+    if on_conflict:
+        url += f"?on_conflict={on_conflict}"
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data, headers=_neon_headers(), method="POST")
+    try:
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=15) as r:
+            body = json.loads(r.read().decode())
+            return body.get("data", body) if isinstance(body, dict) else body
+    except Exception:
+        return None
+
+def _neon_patch(table, row_id, payload):
+    """PATCH update by id. Returns True on success."""
+    url = f"{WORKER_URL}/api/db/{table}/{row_id}"
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data, headers=_neon_headers(), method="PATCH")
+    try:
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=15):
+            return True
+    except Exception:
+        return False
+
+def _neon_delete(table, row_id):
+    """DELETE by id. Returns True on success."""
+    url = f"{WORKER_URL}/api/db/{table}/{row_id}"
+    req = urllib.request.Request(url, headers=_neon_headers(), method="DELETE")
+    try:
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=15):
+            return True
+    except Exception:
+        return False
+
+def _neon_id_from_filt(filt):
+    """Extract numeric id from Supabase-style filter string 'id=eq.123'."""
+    import re as _re_neon
+    m = _re_neon.search(r'id=eq\.(\d+)', filt)
+    return m.group(1) if m else None
+
+# ─── Grading Tracker — Neon via Worker ───────────────────────────────────────
+def sb_get():
+    return _neon_get("grading_tracker", "?order=id.asc")
 
 def sb_insert(row: dict):
-    if not SUPABASE_URL:
-        return
-    data = json.dumps(row).encode()
-    req = urllib.request.Request(
-        f"{SUPABASE_URL}/rest/v1/grading_tracker",
-        data=data,
-        headers=sb_headers(),
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
-            return json.loads(r.read().decode())
-    except Exception:
-        pass
+    result = _neon_post("grading_tracker", row)
+    if result and isinstance(result, list) and len(result) > 0:
+        return result
+    return result
 
 def sb_update(row_id: int, updates: dict):
-    if not SUPABASE_URL:
-        return
-    data = json.dumps(updates).encode()
-    req = urllib.request.Request(
-        f"{SUPABASE_URL}/rest/v1/grading_tracker?id=eq.{row_id}",
-        data=data,
-        headers={**sb_headers(), "Prefer": "return=minimal"},
-        method="PATCH",
-    )
-    try:
-        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
-            pass
-    except Exception:
-        pass
+    _neon_patch("grading_tracker", row_id, updates)
 
 def sb_delete(row_id: int):
-    if not SUPABASE_URL:
-        return
-    req = urllib.request.Request(
-        f"{SUPABASE_URL}/rest/v1/grading_tracker?id=eq.{row_id}",
-        headers=sb_headers(),
-        method="DELETE",
-    )
-    try:
-        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
-            pass
-    except Exception:
-        pass
+    _neon_delete("grading_tracker", row_id)
 
-# ─── Scan Stacks Supabase helpers ────────────────────────────────────────────
-def _sb_req(method, path, data=None, extra_headers=None):
-    """Generic Supabase REST helper."""
-    if not SUPABASE_URL:
-        return None
-    h = {**sb_headers(), **(extra_headers or {})}
-    req = urllib.request.Request(
-        f"{SUPABASE_URL}/rest/v1/{path}",
-        data=json.dumps(data).encode() if data else None,
-        headers=h, method=method,
-    )
-    try:
-        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
-            body = r.read().decode()
-            return json.loads(body) if body.strip() else []
-    except Exception:
-        return None
-
+# ─── Scan Stacks — Neon via Worker ───────────────────────────────────────────
 def stacks_list():
-    return _sb_req("GET", "scan_stacks?order=id.desc&select=*") or []
+    return _neon_get("scan_stacks", "?order=id.desc")
 
 def stack_create(name, notes=""):
-    rows = _sb_req("POST", "scan_stacks", {"name": name, "notes": notes, "status": "open"})
-    return rows[0] if rows else None
+    rows = _neon_post("scan_stacks", {"name": name, "notes": notes, "status": "open"})
+    if rows and isinstance(rows, list):
+        return rows[0]
+    return rows if isinstance(rows, dict) else None
 
 def stack_update(stack_id, updates):
-    _sb_req("PATCH", f"scan_stacks?id=eq.{stack_id}", updates,
-            extra_headers={"Prefer": "return=minimal"})
+    _neon_patch("scan_stacks", stack_id, updates)
 
 def stack_delete(stack_id):
-    _sb_req("DELETE", f"scan_stacks?id=eq.{stack_id}", extra_headers={"Prefer": "return=minimal"})
+    _neon_delete("scan_stacks", stack_id)
 
 def stack_cards_get(stack_id):
-    return _sb_req("GET", f"scan_cards?stack_id=eq.{stack_id}&order=idx.asc&select=*") or []
+    return _neon_get("scan_cards", f"?stack_id=eq.{stack_id}&order=idx.asc")
 
 def stack_card_upsert(card: dict):
-    """Insert or replace a card row (matched on stack_id + idx)."""
-    _sb_req("POST", "scan_cards", card,
-            extra_headers={"Prefer": "resolution=merge-duplicates,return=minimal",
-                           "on_conflict": "stack_id,idx"})
+    _neon_post("scan_cards", card, on_conflict="stack_id,idx")
 
 def stack_cards_delete(stack_id):
-    _sb_req("DELETE", f"scan_cards?stack_id=eq.{stack_id}",
-            extra_headers={"Prefer": "return=minimal"})
+    # Worker delete requires an id — delete cards one by one
+    cards = stack_cards_get(stack_id)
+    for c in (cards or []):
+        if c.get("id"):
+            _neon_delete("scan_cards", c["id"])
 
 def stack_card_update(card_id, updates):
     _sb_req("PATCH", f"scan_cards?id=eq.{card_id}", updates,
             extra_headers={"Prefer": "return=minimal"})
 
-# ─── Shipment Intake Supabase helpers ─────────────────────────────────────────
+# ─── Shipment Intake — Neon via Worker ───────────────────────────────────────
 def sb_intake_get():
-    """Fetch all shipment intake records, newest first. Returns (rows, error_str)."""
-    if not SUPABASE_URL:
-        return [], "Supabase not configured"
-    req = urllib.request.Request(
-        f"{SUPABASE_URL}/rest/v1/shipment_intake?order=id.desc",
-        headers=sb_headers(),
-    )
-    try:
-        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
-            return json.loads(r.read().decode()), None
-    except urllib.error.HTTPError as e:
-        body = e.read().decode(errors="replace")
-        return [], f"HTTP {e.code}: {body}"
-    except Exception as e:
-        return [], str(e)
+    rows = _neon_get("shipment_intake", "?order=id.desc")
+    return rows, None
 
 def sb_intake_insert(row: dict):
-    """Insert a new shipment intake record. Returns (result, error_str)."""
-    if not SUPABASE_URL:
-        return None, "Supabase not configured"
-    data = json.dumps(row).encode()
-    req = urllib.request.Request(
-        f"{SUPABASE_URL}/rest/v1/shipment_intake",
-        data=data,
-        headers=sb_headers(),
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
-            return json.loads(r.read().decode()), None
-    except urllib.error.HTTPError as e:
-        body = e.read().decode(errors="replace")
-        return None, f"HTTP {e.code}: {body}"
-    except Exception as e:
-        return None, str(e)
+    result = _neon_post("shipment_intake", row)
+    if result is None:
+        return None, "Worker POST failed"
+    return result, None
 
 def _json_safe(obj):
     """Recursively convert non-JSON-serializable types (date, numpy, NaT) to safe values."""
@@ -1123,36 +976,10 @@ def _json_safe(obj):
     return obj
 
 def sb_intake_update(row_id: int, updates: dict):
-    """Update a shipment intake record by ID."""
-    if not SUPABASE_URL:
-        return
-    data = json.dumps(_json_safe(updates)).encode()
-    req = urllib.request.Request(
-        f"{SUPABASE_URL}/rest/v1/shipment_intake?id=eq.{row_id}",
-        data=data,
-        headers={**sb_headers(), "Prefer": "return=minimal"},
-        method="PATCH",
-    )
-    try:
-        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
-            pass
-    except Exception:
-        pass
+    _neon_patch("shipment_intake", row_id, _json_safe(updates))
 
 def sb_intake_delete(row_id: int):
-    """Delete a shipment intake record by ID."""
-    if not SUPABASE_URL:
-        return
-    req = urllib.request.Request(
-        f"{SUPABASE_URL}/rest/v1/shipment_intake?id=eq.{row_id}",
-        headers=sb_headers(),
-        method="DELETE",
-    )
-    try:
-        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
-            pass
-    except Exception:
-        pass
+    _neon_delete("shipment_intake", row_id)
 
 # ─── Live-pricing daily usage cap (protects the CardHedger API budget) ────────
 # Supabase table `pricing_usage` (code text, day date, used int) persists the
@@ -1168,18 +995,12 @@ def pricing_unlimited():
     return st.session_state.get("access_name", "") in ("Duane", "Robert Bass")
 
 def pricing_used_today():
-    """Live look-ups already used today (max of Supabase + this session)."""
+    """Live look-ups already used today (max of Neon + this session)."""
     day = _today_iso()
     sess_n = st.session_state.get("_pricing_used", {}).get(day, 0)
-    if not SUPABASE_URL:
-        return sess_n
     try:
         code = urllib.parse.quote(_pricing_key())
-        req = urllib.request.Request(
-            f"{SUPABASE_URL}/rest/v1/pricing_usage?code=eq.{code}&day=eq.{day}&select=used",
-            headers=sb_headers())
-        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=8) as r:
-            rows = json.loads(r.read().decode())
+        rows = _neon_get("pricing_usage", f"?code=eq.{code}&day=eq.{day}")
         return max(sess_n, rows[0]["used"] if rows else 0)
     except Exception:
         return sess_n
@@ -1191,33 +1012,19 @@ def pricing_remaining():
     return max(0, cap - pricing_used_today())
 
 def pricing_bump(n):
-    """Record n live look-ups against today's budget (session + Supabase)."""
+    """Record n live look-ups against today's budget (session + Neon)."""
     if n <= 0 or pricing_unlimited():
         return
     day = _today_iso()
     sess = st.session_state.setdefault("_pricing_used", {})
     sess[day] = sess.get(day, 0) + n
-    if not SUPABASE_URL:
-        return
     try:
         code = _pricing_key()
-        q = urllib.parse.quote(code)
-        req = urllib.request.Request(
-            f"{SUPABASE_URL}/rest/v1/pricing_usage?code=eq.{q}&day=eq.{day}&select=id,used",
-            headers=sb_headers())
-        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=8) as r:
-            rows = json.loads(r.read().decode())
+        rows = _neon_get("pricing_usage", f"?code=eq.{urllib.parse.quote(code)}&day=eq.{day}")
         if rows:
-            req2 = urllib.request.Request(
-                f"{SUPABASE_URL}/rest/v1/pricing_usage?id=eq.{rows[0]['id']}",
-                data=json.dumps({"used": rows[0]["used"] + n}).encode(),
-                headers={**sb_headers(), "Prefer": "return=minimal"}, method="PATCH")
+            _neon_patch("pricing_usage", rows[0]["id"], {"used": rows[0]["used"] + n})
         else:
-            req2 = urllib.request.Request(
-                f"{SUPABASE_URL}/rest/v1/pricing_usage",
-                data=json.dumps({"code": code, "day": day, "used": n}).encode(),
-                headers={**sb_headers(), "Prefer": "return=minimal"}, method="POST")
-        urllib.request.urlopen(req2, context=ssl_ctx(), timeout=8)
+            _neon_post("pricing_usage", {"code": code, "day": day, "used": n})
     except Exception:
         pass
 
@@ -4194,55 +4001,29 @@ def _sb_base_headers():
             "Content-Type": "application/json"}
 
 def upsert_listings(rows):
-    if not SUPABASE_URL or not rows:
+    if not WORKER_URL or not rows:
         return 0
-    ctx = _sb_ctx()
     total = 0
     for i in range(0, len(rows), 500):
         chunk = rows[i:i+500]
-        body = json.dumps(chunk).encode()
-        req = urllib.request.Request(
-            f"{SUPABASE_URL}/rest/v1/listings",
-            data=body, method="POST",
-            headers={**_sb_base_headers(),
-                     "Prefer": "resolution=merge-duplicates,return=minimal"},
-        )
-        try:
-            with urllib.request.urlopen(req, context=ctx, timeout=30):
-                total += len(chunk)
-        except Exception:
-            pass
+        result = _neon_post("listings", chunk, on_conflict="item_number")
+        if result is not None:
+            total += len(chunk)
     return total
 
 def load_listings(min_price=20, limit=1000):
-    if not SUPABASE_URL:
+    if not WORKER_URL:
         return []
-    ctx = _sb_ctx()
-    url = (f"{SUPABASE_URL}/rest/v1/listings"
-           f"?current_price=gte.{min_price}&order=current_price.desc&limit={limit}")
-    req = urllib.request.Request(url, headers=_sb_base_headers())
-    try:
-        with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
-            data = json.loads(r.read().decode())
-            return data if isinstance(data, list) else []
-    except Exception:
-        return []
+    return _neon_get("listings",
+                     f"?current_price=gte.{min_price}&order=current_price.desc&limit={limit}")
 
 def update_listing(item_number, updates):
-    if not SUPABASE_URL:
+    if not WORKER_URL:
         return False
-    ctx = _sb_ctx()
-    body = json.dumps(updates).encode()
-    req = urllib.request.Request(
-        f"{SUPABASE_URL}/rest/v1/listings?item_number=eq.{urllib.parse.quote(item_number)}",
-        data=body, method="PATCH",
-        headers={**_sb_base_headers(), "Prefer": "return=minimal"},
-    )
-    try:
-        with urllib.request.urlopen(req, context=ctx, timeout=10):
-            return True
-    except Exception:
+    rows = _neon_get("listings", f"?item_number=eq.{urllib.parse.quote(str(item_number))}")
+    if not rows:
         return False
+    return _neon_patch("listings", rows[0]["id"], updates)
 
 def save_listing_pricing(item_number, comp_avg, trend_dir, trend_pct, suggested):
     return update_listing(item_number, {
@@ -9506,56 +9287,27 @@ if _active_tab == 8:
     if not SUPABASE_URL:
         st.warning("Supabase not connected. Configure in sidebar to enable Consignments.")
     else:
-        # ── Helpers ───────────────────────────────────────────────────────────
+        # ── Helpers (Neon via Cloudflare Worker) ──────────────────────────────
         def _csn_get(table, params=""):
-            url = f"{SUPABASE_URL}/rest/v1/{table}{params}"
-            req = urllib.request.Request(url, headers=sb_headers())
-            try:
-                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
-                    return json.loads(r.read().decode())
-            except Exception:
-                return []
+            return _neon_get(table, params)
 
         def _csn_post(table, payload, prefer="return=representation"):
-            data = json.dumps(payload).encode()
-            req = urllib.request.Request(
-                f"{SUPABASE_URL}/rest/v1/{table}",
-                data=data,
-                headers={**sb_headers(), "Prefer": prefer},
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
-                    body = r.read()
-                    return json.loads(body.decode()) if body else []
-            except Exception:
+            result = _neon_post(table, payload)
+            if result is None:
                 return None
+            return result if isinstance(result, list) else [result]
 
         def _csn_patch(table, filt, updates):
-            data = json.dumps(updates).encode()
-            req = urllib.request.Request(
-                f"{SUPABASE_URL}/rest/v1/{table}?{filt}",
-                data=data,
-                headers={**sb_headers(), "Prefer": "return=minimal"},
-                method="PATCH",
-            )
-            try:
-                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
-                    return True
-            except Exception:
+            row_id = _neon_id_from_filt(filt)
+            if not row_id:
                 return False
+            return _neon_patch(table, row_id, updates)
 
         def _csn_delete_row(table, filt):
-            req = urllib.request.Request(
-                f"{SUPABASE_URL}/rest/v1/{table}?{filt}",
-                headers=sb_headers(),
-                method="DELETE",
-            )
-            try:
-                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
-                    return True
-            except Exception:
+            row_id = _neon_id_from_filt(filt)
+            if not row_id:
                 return False
+            return _neon_delete(table, row_id)
 
         def _parse_dc_amount(val):
             if val is None or str(val).strip() in ("", "nan"):
@@ -10042,93 +9794,49 @@ if _active_tab == 9:
     st.markdown("## 📦 Purchases")
     st.caption("Track card lots you buy. SKU prefix (first 2 segments, e.g. MATTSFB-072026) ties every card back to its lot.")
 
-    if not SUPABASE_URL:
-        st.warning("Supabase not connected. Configure in sidebar.")
+    if not WORKER_URL:
+        st.warning("Worker not configured.")
     else:
+        # ── Neon helpers (Cloudflare Worker) ─────────────────────────────────
         def _pur_get(table, params=""):
-            url = f"{SUPABASE_URL}/rest/v1/{table}{params}"
-            req = urllib.request.Request(url, headers=sb_headers())
-            try:
-                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
-                    return json.loads(r.read().decode())
-            except Exception:
-                return []
+            return _neon_get(table, params)
 
         _pur_last_error = {"msg": None}
 
         def _pur_post(table, payload):
-            data = json.dumps(payload).encode()
-            req = urllib.request.Request(
-                f"{SUPABASE_URL}/rest/v1/{table}",
-                data=data,
-                headers={**sb_headers(), "Prefer": "return=representation"},
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
-                    body = r.read()
-                    return json.loads(body.decode()) if body else []
-            except urllib.error.HTTPError as e:
-                body = e.read().decode("utf-8", errors="replace")
-                _pur_last_error["msg"] = f"HTTP {e.code}: {body[:400]}"
-                return None
-            except Exception as ex:
-                _pur_last_error["msg"] = str(ex)
-                return None
+            result = _neon_post(table, payload)
+            if result is None:
+                _pur_last_error["msg"] = "Worker POST failed"
+            return result
 
         def _pur_delete(table, filt):
-            req = urllib.request.Request(
-                f"{SUPABASE_URL}/rest/v1/{table}?{filt}",
-                headers=sb_headers(),
-                method="DELETE",
-            )
-            try:
-                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
-                    return True
-            except Exception:
+            row_id = _neon_id_from_filt(filt)
+            if not row_id:
                 return False
+            return _neon_delete(table, row_id)
 
         def _pur_patch(table, filt, payload):
-            data = json.dumps(payload).encode()
-            hdrs = {**sb_headers(), "Content-Type": "application/json", "Prefer": "return=representation"}
-            req  = urllib.request.Request(
-                f"{SUPABASE_URL}/rest/v1/{table}?{filt}",
-                data=data, headers=hdrs, method="PATCH",
-            )
-            try:
-                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
-                    return json.loads(r.read())
-            except urllib.error.HTTPError as e:
-                _pur_last_error["msg"] = e.read().decode(errors="replace")
+            row_id = _neon_id_from_filt(filt)
+            if not row_id:
+                _pur_last_error["msg"] = f"Could not extract id from filter: {filt}"
                 return None
-            except Exception as ex:
-                _pur_last_error["msg"] = str(ex)
+            ok = _neon_patch(table, row_id, payload)
+            if not ok:
+                _pur_last_error["msg"] = "Worker PATCH failed"
                 return None
+            return payload  # return payload as stand-in for old Supabase representation
 
         def _pur_upsert_lot_cards(rows):
-            """Bulk upsert rows into lot_cards (on_conflict: lot_prefix,sku → update title)."""
+            """Bulk upsert rows into lot_cards (on_conflict: lot_prefix,sku → update)."""
             if not rows:
                 return 0, None
-            data = json.dumps(rows).encode()
-            hdrs = {
-                **sb_headers(),
-                "Content-Type": "application/json",
-                "Prefer": "resolution=merge-duplicates,return=representation",
-            }
-            req = urllib.request.Request(
-                f"{SUPABASE_URL}/rest/v1/lot_cards?on_conflict=lot_prefix,sku",
-                data=data, headers=hdrs, method="POST",
-            )
-            try:
-                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=30) as r:
-                    body = r.read()
-                    result = json.loads(body.decode()) if body else []
-                    return len(result), None
-            except urllib.error.HTTPError as e:
-                err = e.read().decode("utf-8", errors="replace")
-                return 0, f"HTTP {e.code}: {err[:400]}"
-            except Exception as ex:
-                return 0, str(ex)
+            # Send in one POST with on_conflict param — Worker now supports this
+            result = _neon_post("lot_cards", rows, on_conflict="lot_prefix,sku")
+            if result is None:
+                return 0, "Worker upsert failed"
+            return len(result) if isinstance(result, list) else 0, None
+
+        # ── dead code stub kept for compat (was Supabase-specific) ────────────
 
         def _pur_prefix_seg2(sku):
             """Fallback: first 2 dash-separated segments."""
@@ -11053,71 +10761,36 @@ if _active_tab == 10:
     st.markdown("## 💰 Sales & P&L")
     st.caption("Import eBay and CollX sales exports — track gross revenue, platform fees, and net proceeds across all channels.")
 
-    if not SUPABASE_URL:
-        st.warning("Supabase not connected. Configure in sidebar to enable Sales & P&L.")
+    if not WORKER_URL:
+        st.warning("Worker not configured.")
     else:
-        # ── Helpers ───────────────────────────────────────────────────────────
+        # ── Helpers (Neon via Cloudflare Worker) ──────────────────────────────
         def _sal_get(params=""):
-            url = f"{SUPABASE_URL}/rest/v1/sales_records{params}"
-            req = urllib.request.Request(url, headers=sb_headers())
-            try:
-                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
-                    return json.loads(r.read().decode())
-            except Exception:
-                return []
+            return _neon_get("sales_records", params)
 
         _sal_last_error = {"msg": None}
 
         def _sal_post(payload, prefer="return=minimal"):
-            data = json.dumps(payload).encode()
-            req = urllib.request.Request(
-                f"{SUPABASE_URL}/rest/v1/sales_records",
-                data=data,
-                headers={**sb_headers(), "Prefer": prefer},
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10) as r:
-                    body = r.read()
-                    return json.loads(body.decode()) if body else []
-            except urllib.error.HTTPError as e:
-                body = e.read().decode("utf-8", errors="replace")
-                _sal_last_error["msg"] = f"HTTP {e.code}: {body[:300]}"
-                return None
-            except Exception as ex:
-                _sal_last_error["msg"] = str(ex)
-                return None
+            result = _neon_post("sales_records", payload)
+            if result is None:
+                _sal_last_error["msg"] = "Worker POST failed"
+            return result
 
         def _sal_patch(filt, payload):
-            data = json.dumps(payload).encode()
-            req = urllib.request.Request(
-                f"{SUPABASE_URL}/rest/v1/sales_records?{filt}",
-                data=data,
-                headers={**sb_headers(), "Prefer": "return=minimal"},
-                method="PATCH",
-            )
-            try:
-                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
-                    return True
-            except urllib.error.HTTPError as e:
-                body = e.read().decode("utf-8", errors="replace")
-                _sal_last_error["msg"] = f"HTTP {e.code}: {body[:300]}"
+            row_id = _neon_id_from_filt(filt)
+            if not row_id:
+                _sal_last_error["msg"] = f"Could not extract id from: {filt}"
                 return False
-            except Exception as ex:
-                _sal_last_error["msg"] = str(ex)
-                return False
+            ok = _neon_patch("sales_records", row_id, payload)
+            if not ok:
+                _sal_last_error["msg"] = "Worker PATCH failed"
+            return ok
 
         def _sal_delete(filt):
-            req = urllib.request.Request(
-                f"{SUPABASE_URL}/rest/v1/sales_records?{filt}",
-                headers=sb_headers(),
-                method="DELETE",
-            )
-            try:
-                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
-                    return True
-            except Exception:
+            row_id = _neon_id_from_filt(filt)
+            if not row_id:
                 return False
+            return _neon_delete("sales_records", row_id)
 
         def _parse_money(val):
             if val is None or str(val).strip() in ("", "nan"):
