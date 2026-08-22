@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.43"
+APP_VERSION = "1.6.46"
 APP_TAGLINE = "Real-time market intelligence for card sellers."
 
 # Daily cap on live CardHedger look-ups per member (protects the API budget).
@@ -833,7 +833,10 @@ def sb_headers():
 # The Worker uses no auth (SHARED_SECRET not set → dev mode bypass).
 
 def _neon_headers():
-    return {"Content-Type": "application/json"}
+    return {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    }
 
 def _neon_get(table, params=""):
     """GET list from Neon. Returns [] on error."""
