@@ -847,6 +847,8 @@ def _neon_get(table, params=""):
     except Exception:
         return []
 
+_neon_last_error = {"msg": None}
+
 def _neon_post(table, payload, on_conflict=None):
     """POST insert to Neon. Returns list of inserted rows, or None on error."""
     url = f"{WORKER_URL}/api/db/{table}"
@@ -858,7 +860,15 @@ def _neon_post(table, payload, on_conflict=None):
         with urllib.request.urlopen(req, context=ssl_ctx(), timeout=15) as r:
             body = json.loads(r.read().decode())
             return body.get("data", body) if isinstance(body, dict) else body
-    except Exception:
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read().decode()).get("error", str(e))
+        except Exception:
+            detail = str(e)
+        _neon_last_error["msg"] = f"HTTP {e.code}: {detail}"
+        return None
+    except Exception as e:
+        _neon_last_error["msg"] = str(e)
         return None
 
 def _neon_patch(table, row_id, payload):
@@ -9804,7 +9814,7 @@ if _active_tab == 9:
         def _pur_post(table, payload):
             result = _neon_post(table, payload)
             if result is None:
-                _pur_last_error["msg"] = "Worker POST failed"
+                _pur_last_error["msg"] = _neon_last_error.get("msg") or "Worker POST failed"
             return result
 
         def _pur_delete(table, filt):
