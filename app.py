@@ -413,7 +413,6 @@ APP_NAME = get_secret("app", "name", "CardPulse")
 SUPABASE_URL = get_secret("supabase", "url")
 SUPABASE_KEY = get_secret("supabase", "key")
 WORKER_URL = get_secret("worker", "url", "https://dfs-api.duane-588.workers.dev")
-WORKER_SECRET = get_secret("worker", "secret", "")
 DEFAULT_EBAY_KEY = get_secret("ebay", "app_id")
 CARDHEDGER_KEY = get_secret("cardhedger", "api_key")
 CARDHEDGER_BASE = "https://api.cardhedger.com"
@@ -834,10 +833,7 @@ def sb_headers():
 # The Worker uses no auth (SHARED_SECRET not set → dev mode bypass).
 
 def _neon_headers():
-    h = {"Content-Type": "application/json"}
-    if WORKER_SECRET:
-        h["X-DFS-Auth"] = WORKER_SECRET
-    return h
+    return {"Content-Type": "application/json"}
 
 def _neon_get(table, params=""):
     """GET list from Neon. Returns [] on error."""
