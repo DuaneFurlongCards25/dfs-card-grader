@@ -9531,7 +9531,7 @@ if _active_tab == 8:
                     st.caption(f"Found **{len(import_df):,}** rows. Preview:")
                     st.dataframe(import_df.head(10), use_container_width=True, hide_index=True)
 
-                    if st.button("⬆️ Import to Supabase", type="primary", key="csn_import_btn"):
+                    if st.button("⬆️ Import to Neon", type="primary", key="csn_import_btn"):
                         # Load all existing items for matching
                         all_existing = _csn_get("consignment_items", "?select=id,title,dedup_key")
                         existing_keys2 = {r["dedup_key"] for r in all_existing if r.get("dedup_key")}
