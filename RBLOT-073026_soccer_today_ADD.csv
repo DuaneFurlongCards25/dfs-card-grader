@@ -1,0 +1,582 @@
+Info,Version=1.0.0,Template=fx_category_template_EBAY_US
+*Action(SiteID=US|Country=US|Currency=USD|Version=1193),Custom label (SKU),Category ID,Category name,Title,ScheduleTime,Start price,BestOfferEnabled,Quantity,Item photo URL,Condition ID,CD:Card Condition - (ID: 40001),CD:Professional Grader - (ID: 27501),CD:Grade - (ID: 27502),Description,Format,Duration,Location,PostalCode,ShippingProfileName,Max dispatch time,Returns accepted option,Refund option,C:Type,C:Sport,C:Player/Athlete,C:Signed By,C:Season,C:Manufacturer,C:Parallel/Variety,C:Set,C:Team,C:League,C:Autographed,C:Card Name,C:Card Number,*C:Game,*C:Franchise,Subtitle
+Add,RBLOT-073026-00098-97951,261328,Soccer,2026 Panini Prizm World Cup HUGO EKITIKE Wave France,,2.49,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_29f615ef-20c6-4b0d-be2a-f883ad9f2ffb.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_29f615ef-20c6-4b0d-be2a-f883ad9f2ffb.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_29f615ef-20c6-4b0d-be2a-f883ad9f2ffb.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_29f615ef-20c6-4b0d-be2a-f883ad9f2ffb.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_29f615ef-20c6-4b0d-be2a-f883ad9f2ffb.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_29f615ef-20c6-4b0d-be2a-f883ad9f2ffb.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_29f615ef-20c6-4b0d-be2a-f883ad9f2ffb.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_29f615ef-20c6-4b0d-be2a-f883ad9f2ffb.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_29f615ef-20c6-4b0d-be2a-f883ad9f2ffb.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_29f615ef-20c6-4b0d-be2a-f883ad9f2ffb.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_29f615ef-20c6-4b0d-be2a-f883ad9f2ffb.jpg"" alt=""2026 Panini Prizm World Cup HUGO EKITIKE Wave France"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup HUGO EKITIKE Wave France</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Hugo Ekitike,N/A,2026,Panini,BaseWavePrizm,Prizm World Cup,France,,No,Hugo Ekitike,35,,,
+Add,RBLOT-073026-00099-88684,261328,Soccer,2026 Panini Prizm World Cup ISMAEL KONE Wave Canada,,2.49,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_ada7a5e6-1457-45c7-b12a-d543a2ef7d54.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_ada7a5e6-1457-45c7-b12a-d543a2ef7d54.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_ada7a5e6-1457-45c7-b12a-d543a2ef7d54.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_ada7a5e6-1457-45c7-b12a-d543a2ef7d54.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_ada7a5e6-1457-45c7-b12a-d543a2ef7d54.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_ada7a5e6-1457-45c7-b12a-d543a2ef7d54.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_ada7a5e6-1457-45c7-b12a-d543a2ef7d54.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_ada7a5e6-1457-45c7-b12a-d543a2ef7d54.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_ada7a5e6-1457-45c7-b12a-d543a2ef7d54.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_ada7a5e6-1457-45c7-b12a-d543a2ef7d54.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_ada7a5e6-1457-45c7-b12a-d543a2ef7d54.jpg"" alt=""2026 Panini Prizm World Cup ISMAEL KONE Wave Canada"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup ISMAEL KONE Wave Canada</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Ismael Kone,N/A,2026,Panini,BaseWavePrizm,Prizm World Cup,Canada,,No,Ismael Kone,169,,,
+Add,RBLOT-073026-00100-69839,261328,Soccer,2025-26 Topps UEFA Club Competition Finest ESTEVAO WILLIAN Showmen RC Chelsea,,7.29,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_94191c5a-241b-4fa2-ae83-236fd019bc3b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_94191c5a-241b-4fa2-ae83-236fd019bc3b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_94191c5a-241b-4fa2-ae83-236fd019bc3b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_94191c5a-241b-4fa2-ae83-236fd019bc3b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_94191c5a-241b-4fa2-ae83-236fd019bc3b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_94191c5a-241b-4fa2-ae83-236fd019bc3b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_94191c5a-241b-4fa2-ae83-236fd019bc3b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_94191c5a-241b-4fa2-ae83-236fd019bc3b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_94191c5a-241b-4fa2-ae83-236fd019bc3b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_94191c5a-241b-4fa2-ae83-236fd019bc3b.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_94191c5a-241b-4fa2-ae83-236fd019bc3b.jpg"" alt=""2025-26 Topps UEFA Club Competition Finest ESTEVAO WILLIAN Showmen RC Chelsea"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2025-26 Topps UEFA Club Competition Finest ESTEVAO WILLIAN Showmen RC Chelsea</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Estevao Willian,N/A,2025-26,Topps,FinestShowmen,UEFA Club Competition Finest,Chelsea FC,,No,Estevao Willian,FS-23,,,
+Add,RBLOT-073026-00101-60800,261328,Soccer,2025 TOPPS UEFA CLUB COMPETITION FINEST ESTEVAO WILLIAN #FM-5 RC,,2.99,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_e46d30e9-0d43-452a-aa96-28d3d8311d3a.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_e46d30e9-0d43-452a-aa96-28d3d8311d3a.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_e46d30e9-0d43-452a-aa96-28d3d8311d3a.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_e46d30e9-0d43-452a-aa96-28d3d8311d3a.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_e46d30e9-0d43-452a-aa96-28d3d8311d3a.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_e46d30e9-0d43-452a-aa96-28d3d8311d3a.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_e46d30e9-0d43-452a-aa96-28d3d8311d3a.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_e46d30e9-0d43-452a-aa96-28d3d8311d3a.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_e46d30e9-0d43-452a-aa96-28d3d8311d3a.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_e46d30e9-0d43-452a-aa96-28d3d8311d3a.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_e46d30e9-0d43-452a-aa96-28d3d8311d3a.jpg"" alt=""2025 TOPPS UEFA CLUB COMPETITION FINEST ESTEVAO WILLIAN #FM-5 RC"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2025 TOPPS UEFA CLUB COMPETITION FINEST ESTEVAO WILLIAN #FM-5 RC</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Estevao Willian,N/A,2025-26,Topps,FinestoftheMillennium,UEFA Club Competition Finest,Chelsea FC,,No,Estevao Willian,FM-5,,,
+Add,RBLOT-073026-00102-24997,261328,Soccer,2026 Panini Prizm World Cup ANTONIO RUDIGER Aces Wave Germany,,2.99,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_e8c710f0-5f37-41d2-a956-7d5d66e26939.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_e8c710f0-5f37-41d2-a956-7d5d66e26939.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_e8c710f0-5f37-41d2-a956-7d5d66e26939.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_e8c710f0-5f37-41d2-a956-7d5d66e26939.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_e8c710f0-5f37-41d2-a956-7d5d66e26939.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_e8c710f0-5f37-41d2-a956-7d5d66e26939.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_e8c710f0-5f37-41d2-a956-7d5d66e26939.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_e8c710f0-5f37-41d2-a956-7d5d66e26939.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_e8c710f0-5f37-41d2-a956-7d5d66e26939.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_e8c710f0-5f37-41d2-a956-7d5d66e26939.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_e8c710f0-5f37-41d2-a956-7d5d66e26939.jpg"" alt=""2026 Panini Prizm World Cup ANTONIO RUDIGER Aces Wave Germany"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup ANTONIO RUDIGER Aces Wave Germany</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Antonio Rudiger,N/A,2026,Panini,AcesWavePrizm,Prizm World Cup,Germany,,No,Antonio Rudiger,2,,,
+Add,RBLOT-073026-00103-02546,261328,Soccer,2026 Panini Prizm World Cup JOHN STONES Silver England,,2.49,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_9415ea59-2c60-4bc1-8d72-ebf278f4e166.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_9415ea59-2c60-4bc1-8d72-ebf278f4e166.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_9415ea59-2c60-4bc1-8d72-ebf278f4e166.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_9415ea59-2c60-4bc1-8d72-ebf278f4e166.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_9415ea59-2c60-4bc1-8d72-ebf278f4e166.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_9415ea59-2c60-4bc1-8d72-ebf278f4e166.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_9415ea59-2c60-4bc1-8d72-ebf278f4e166.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_9415ea59-2c60-4bc1-8d72-ebf278f4e166.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_9415ea59-2c60-4bc1-8d72-ebf278f4e166.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_9415ea59-2c60-4bc1-8d72-ebf278f4e166.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_9415ea59-2c60-4bc1-8d72-ebf278f4e166.jpg"" alt=""2026 Panini Prizm World Cup JOHN STONES Silver England"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup JOHN STONES Silver England</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,John Stones,N/A,2026,Panini,BaseSilverPrizm,Prizm World Cup,England,,No,John Stones,106,,,
+Add,RBLOT-073026-00104-28452,261328,Soccer,2026 Panini Prizm World Cup THEO BONGONDA Wave COD,,2.75,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_48e8e7dd-19a1-4b19-9ffd-153bb2f215ca.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_48e8e7dd-19a1-4b19-9ffd-153bb2f215ca.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_48e8e7dd-19a1-4b19-9ffd-153bb2f215ca.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_48e8e7dd-19a1-4b19-9ffd-153bb2f215ca.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_48e8e7dd-19a1-4b19-9ffd-153bb2f215ca.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_48e8e7dd-19a1-4b19-9ffd-153bb2f215ca.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_48e8e7dd-19a1-4b19-9ffd-153bb2f215ca.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_48e8e7dd-19a1-4b19-9ffd-153bb2f215ca.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_48e8e7dd-19a1-4b19-9ffd-153bb2f215ca.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_48e8e7dd-19a1-4b19-9ffd-153bb2f215ca.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_48e8e7dd-19a1-4b19-9ffd-153bb2f215ca.jpg"" alt=""2026 Panini Prizm World Cup THEO BONGONDA Wave COD"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup THEO BONGONDA Wave COD</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Theo Bongonda,N/A,2026,Panini,BaseWavePrizm,Prizm World Cup,DR Congo,,No,Theo Bongonda,468,,,
+Add,RBLOT-073026-00105-36037,261328,Soccer,2026 Panini Prizm World Cup DECLAN RICE Silver England,,3.25,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_6dfd6cf6-9686-4f5a-9c40-a9a295140972.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_6dfd6cf6-9686-4f5a-9c40-a9a295140972.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_6dfd6cf6-9686-4f5a-9c40-a9a295140972.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_6dfd6cf6-9686-4f5a-9c40-a9a295140972.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_6dfd6cf6-9686-4f5a-9c40-a9a295140972.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_6dfd6cf6-9686-4f5a-9c40-a9a295140972.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_6dfd6cf6-9686-4f5a-9c40-a9a295140972.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_6dfd6cf6-9686-4f5a-9c40-a9a295140972.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_6dfd6cf6-9686-4f5a-9c40-a9a295140972.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_6dfd6cf6-9686-4f5a-9c40-a9a295140972.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_6dfd6cf6-9686-4f5a-9c40-a9a295140972.jpg"" alt=""2026 Panini Prizm World Cup DECLAN RICE Silver England"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup DECLAN RICE Silver England</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Declan Rice,N/A,2026,Panini,BaseSilverPrizm,Prizm World Cup,England,,No,Declan Rice,98,,,
+Add,RBLOT-073026-00106-49607,261328,Soccer,2026 Panini Prizm World Cup GRANIT XHAKA Trophy Hunting Silver Switzerland,,2.99,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_d36903d2-82b4-4226-8bc9-d7f5e0a3dc17.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_d36903d2-82b4-4226-8bc9-d7f5e0a3dc17.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_d36903d2-82b4-4226-8bc9-d7f5e0a3dc17.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_d36903d2-82b4-4226-8bc9-d7f5e0a3dc17.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_d36903d2-82b4-4226-8bc9-d7f5e0a3dc17.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_d36903d2-82b4-4226-8bc9-d7f5e0a3dc17.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_d36903d2-82b4-4226-8bc9-d7f5e0a3dc17.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_d36903d2-82b4-4226-8bc9-d7f5e0a3dc17.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_d36903d2-82b4-4226-8bc9-d7f5e0a3dc17.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_d36903d2-82b4-4226-8bc9-d7f5e0a3dc17.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_d36903d2-82b4-4226-8bc9-d7f5e0a3dc17.jpg"" alt=""2026 Panini Prizm World Cup GRANIT XHAKA Trophy Hunting Silver Switzerland"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup GRANIT XHAKA Trophy Hunting Silver Switzerland</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Granit Xhaka,N/A,2026,Panini,TrophyHuntingSilverPrizm,Prizm World Cup,Switzerland,,No,Granit Xhaka,20,,,
+Add,RBLOT-073026-00107-78670,261328,Soccer,2026 Panini Prizm World Cup EBERECHI EZE Phenomenon Silver England,,2.49,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_8b4b9de7-f65e-4fa1-8e5a-cbd22f7d76cc.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_8b4b9de7-f65e-4fa1-8e5a-cbd22f7d76cc.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_8b4b9de7-f65e-4fa1-8e5a-cbd22f7d76cc.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_8b4b9de7-f65e-4fa1-8e5a-cbd22f7d76cc.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_8b4b9de7-f65e-4fa1-8e5a-cbd22f7d76cc.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_8b4b9de7-f65e-4fa1-8e5a-cbd22f7d76cc.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_8b4b9de7-f65e-4fa1-8e5a-cbd22f7d76cc.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_8b4b9de7-f65e-4fa1-8e5a-cbd22f7d76cc.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_8b4b9de7-f65e-4fa1-8e5a-cbd22f7d76cc.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_8b4b9de7-f65e-4fa1-8e5a-cbd22f7d76cc.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_8b4b9de7-f65e-4fa1-8e5a-cbd22f7d76cc.jpg"" alt=""2026 Panini Prizm World Cup EBERECHI EZE Phenomenon Silver England"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup EBERECHI EZE Phenomenon Silver England</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Eberechi Eze,N/A,2026,Panini,PhenomenonSilverPrizm,Prizm World Cup,England,,No,Eberechi Eze,22,,,
+Add,RBLOT-073026-00108-48486,261328,Soccer,2026 Panini Prizm World Cup WESTON MCKENNIE Wave USMNT,,2.49,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_85d6577a-1706-45c1-aced-57a2a92279ef.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_85d6577a-1706-45c1-aced-57a2a92279ef.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_85d6577a-1706-45c1-aced-57a2a92279ef.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_85d6577a-1706-45c1-aced-57a2a92279ef.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_85d6577a-1706-45c1-aced-57a2a92279ef.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_85d6577a-1706-45c1-aced-57a2a92279ef.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_85d6577a-1706-45c1-aced-57a2a92279ef.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_85d6577a-1706-45c1-aced-57a2a92279ef.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_85d6577a-1706-45c1-aced-57a2a92279ef.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_85d6577a-1706-45c1-aced-57a2a92279ef.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_85d6577a-1706-45c1-aced-57a2a92279ef.jpg"" alt=""2026 Panini Prizm World Cup WESTON MCKENNIE Wave USMNT"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup WESTON MCKENNIE Wave USMNT</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Weston McKennie,N/A,2026,Panini,BaseWavePrizm,Prizm World Cup,United States,,No,Weston McKennie,434,,,
+Add,RBLOT-073026-00109-97497,261328,Soccer,2026 Panini Prizm World Cup FABIAN RUIZ Wave Spain,,2.49,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_b296ca0d-9fce-43dc-9b37-e8ab5913478d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_b296ca0d-9fce-43dc-9b37-e8ab5913478d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_b296ca0d-9fce-43dc-9b37-e8ab5913478d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_b296ca0d-9fce-43dc-9b37-e8ab5913478d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_b296ca0d-9fce-43dc-9b37-e8ab5913478d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_b296ca0d-9fce-43dc-9b37-e8ab5913478d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_b296ca0d-9fce-43dc-9b37-e8ab5913478d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_b296ca0d-9fce-43dc-9b37-e8ab5913478d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_b296ca0d-9fce-43dc-9b37-e8ab5913478d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_b296ca0d-9fce-43dc-9b37-e8ab5913478d.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_b296ca0d-9fce-43dc-9b37-e8ab5913478d.jpg"" alt=""2026 Panini Prizm World Cup FABIAN RUIZ Wave Spain"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup FABIAN RUIZ Wave Spain</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Fabian Ruiz,N/A,2026,Panini,BaseWavePrizm,Prizm World Cup,Spain,,No,Fabian Ruiz,77,,,
+Add,RBLOT-073026-00110-01614,261328,Soccer,2026 Panini Prizm World Cup TSUYOSHI WATANABE Wave Japan,,2.49,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_62be0bd5-9fc8-4b2a-b630-35c064331186.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_62be0bd5-9fc8-4b2a-b630-35c064331186.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_62be0bd5-9fc8-4b2a-b630-35c064331186.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_62be0bd5-9fc8-4b2a-b630-35c064331186.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_62be0bd5-9fc8-4b2a-b630-35c064331186.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_62be0bd5-9fc8-4b2a-b630-35c064331186.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_62be0bd5-9fc8-4b2a-b630-35c064331186.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_62be0bd5-9fc8-4b2a-b630-35c064331186.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_62be0bd5-9fc8-4b2a-b630-35c064331186.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_62be0bd5-9fc8-4b2a-b630-35c064331186.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_62be0bd5-9fc8-4b2a-b630-35c064331186.jpg"" alt=""2026 Panini Prizm World Cup TSUYOSHI WATANABE Wave Japan"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup TSUYOSHI WATANABE Wave Japan</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Tsuyoshi Watanabe,N/A,2026,Panini,BaseWavePrizm,Prizm World Cup,Japan,,No,Tsuyoshi Watanabe,266,,,
+Add,RBLOT-073026-00111-65662,261328,Soccer,2026 Panini Prizm World Cup JUNINHO BACUNA Wave CUW,,2.49,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_151431f8-39e6-4f30-af80-43c5fd9c0591.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_151431f8-39e6-4f30-af80-43c5fd9c0591.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_151431f8-39e6-4f30-af80-43c5fd9c0591.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_151431f8-39e6-4f30-af80-43c5fd9c0591.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_151431f8-39e6-4f30-af80-43c5fd9c0591.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_151431f8-39e6-4f30-af80-43c5fd9c0591.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_151431f8-39e6-4f30-af80-43c5fd9c0591.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_151431f8-39e6-4f30-af80-43c5fd9c0591.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_151431f8-39e6-4f30-af80-43c5fd9c0591.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_151431f8-39e6-4f30-af80-43c5fd9c0591.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_151431f8-39e6-4f30-af80-43c5fd9c0591.jpg"" alt=""2026 Panini Prizm World Cup JUNINHO BACUNA Wave CUW"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup JUNINHO BACUNA Wave CUW</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Juninho Bacuna,N/A,2026,Panini,BaseWavePrizm,Prizm World Cup,Curacao,,No,Juninho Bacuna,206,,,
+Add,RBLOT-073026-00112-23675,261328,Soccer,2026 Panini Prizm World Cup JORTHY MOKIO New Era Silver Belgium,,2.49,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_84724b45-1f56-45c0-adc5-a48805819228.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_84724b45-1f56-45c0-adc5-a48805819228.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_84724b45-1f56-45c0-adc5-a48805819228.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_84724b45-1f56-45c0-adc5-a48805819228.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_84724b45-1f56-45c0-adc5-a48805819228.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_84724b45-1f56-45c0-adc5-a48805819228.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_84724b45-1f56-45c0-adc5-a48805819228.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_84724b45-1f56-45c0-adc5-a48805819228.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_84724b45-1f56-45c0-adc5-a48805819228.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_84724b45-1f56-45c0-adc5-a48805819228.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_84724b45-1f56-45c0-adc5-a48805819228.jpg"" alt=""2026 Panini Prizm World Cup JORTHY MOKIO New Era Silver Belgium"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup JORTHY MOKIO New Era Silver Belgium</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Jorthy Mokio,N/A,2026,Panini,NewEraSilverPrizm,Prizm World Cup,Belgium,,No,Jorthy Mokio,11,,,
+Add,RBLOT-073026-00113-02064,261328,Soccer,2026 Panini Prizm World Cup SVERRE NYPAN Wave Norway,,2.49,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_fff0bffb-cbe5-45ed-88e0-f3f432318bec.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_fff0bffb-cbe5-45ed-88e0-f3f432318bec.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_fff0bffb-cbe5-45ed-88e0-f3f432318bec.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_fff0bffb-cbe5-45ed-88e0-f3f432318bec.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_fff0bffb-cbe5-45ed-88e0-f3f432318bec.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_fff0bffb-cbe5-45ed-88e0-f3f432318bec.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_fff0bffb-cbe5-45ed-88e0-f3f432318bec.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_fff0bffb-cbe5-45ed-88e0-f3f432318bec.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_fff0bffb-cbe5-45ed-88e0-f3f432318bec.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_fff0bffb-cbe5-45ed-88e0-f3f432318bec.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_fff0bffb-cbe5-45ed-88e0-f3f432318bec.jpg"" alt=""2026 Panini Prizm World Cup SVERRE NYPAN Wave Norway"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup SVERRE NYPAN Wave Norway</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Sverre Nypan,N/A,2026,Panini,BaseWavePrizm,Prizm World Cup,Norway,,No,Sverre Nypan,327,,,
+Add,RBLOT-073026-00114-36136,261328,Soccer,2026 Panini Prizm World Cup WILFRIED SINGO Wave CIV,,3.29,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_384fd952-45ba-4154-8a2d-e7dc4942041d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_384fd952-45ba-4154-8a2d-e7dc4942041d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_384fd952-45ba-4154-8a2d-e7dc4942041d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_384fd952-45ba-4154-8a2d-e7dc4942041d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_384fd952-45ba-4154-8a2d-e7dc4942041d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_384fd952-45ba-4154-8a2d-e7dc4942041d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_384fd952-45ba-4154-8a2d-e7dc4942041d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_384fd952-45ba-4154-8a2d-e7dc4942041d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_384fd952-45ba-4154-8a2d-e7dc4942041d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_384fd952-45ba-4154-8a2d-e7dc4942041d.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_384fd952-45ba-4154-8a2d-e7dc4942041d.jpg"" alt=""2026 Panini Prizm World Cup WILFRIED SINGO Wave CIV"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup WILFRIED SINGO Wave CIV</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Wilfried Singo,N/A,2026,Panini,BaseWavePrizm,Prizm World Cup,Ivory Coast,,No,Wilfried Singo,256,,,
+Add,RBLOT-073026-00115-80090,261328,Soccer,2026 Panini Prizm World Cup ABDULLAH AL-KHAIBARI Wave Saudi Arabia NT,,2.49,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_c56454bb-6842-4a91-abef-09670b3efb0b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_c56454bb-6842-4a91-abef-09670b3efb0b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_c56454bb-6842-4a91-abef-09670b3efb0b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_c56454bb-6842-4a91-abef-09670b3efb0b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_c56454bb-6842-4a91-abef-09670b3efb0b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_c56454bb-6842-4a91-abef-09670b3efb0b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_c56454bb-6842-4a91-abef-09670b3efb0b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_c56454bb-6842-4a91-abef-09670b3efb0b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_c56454bb-6842-4a91-abef-09670b3efb0b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_c56454bb-6842-4a91-abef-09670b3efb0b.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_c56454bb-6842-4a91-abef-09670b3efb0b.jpg"" alt=""2026 Panini Prizm World Cup ABDULLAH AL-KHAIBARI Wave Saudi Arabia NT"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup ABDULLAH AL-KHAIBARI Wave Saudi Arabia NT</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Abdullah Al-Khaibari,N/A,2026,Panini,BaseWavePrizm,Prizm World Cup,Saudi Arabia,,No,Abdullah Al-Khaibari,386,,,
+Add,RBLOT-073026-00116-44291,261328,Soccer,2025 TOPPS UEFA CLUB COMPETITION FINEST ESTEVAO WILLIAN #PF-13 RC,,3.75,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_3eb0f9d5-5613-4236-ad1c-e2e613317730.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_3eb0f9d5-5613-4236-ad1c-e2e613317730.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_3eb0f9d5-5613-4236-ad1c-e2e613317730.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_3eb0f9d5-5613-4236-ad1c-e2e613317730.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_3eb0f9d5-5613-4236-ad1c-e2e613317730.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_3eb0f9d5-5613-4236-ad1c-e2e613317730.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_3eb0f9d5-5613-4236-ad1c-e2e613317730.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_3eb0f9d5-5613-4236-ad1c-e2e613317730.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_3eb0f9d5-5613-4236-ad1c-e2e613317730.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_3eb0f9d5-5613-4236-ad1c-e2e613317730.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_3eb0f9d5-5613-4236-ad1c-e2e613317730.jpg"" alt=""2025 TOPPS UEFA CLUB COMPETITION FINEST ESTEVAO WILLIAN #PF-13 RC"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2025 TOPPS UEFA CLUB COMPETITION FINEST ESTEVAO WILLIAN #PF-13 RC</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Estevao Willian,N/A,2025-26,Topps,PrizedFootballers,UEFA Club Competition Finest,Chelsea FC,,No,Estevao Willian,PF-13,,,
+Add,RBLOT-073026-00117-54637,261328,Soccer,2026 Panini Prizm World Cup ZIZO Wave RC Egypt,,2.49,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_82c2e4d8-e416-4980-942f-1fb8b7092b24.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_82c2e4d8-e416-4980-942f-1fb8b7092b24.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_82c2e4d8-e416-4980-942f-1fb8b7092b24.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_82c2e4d8-e416-4980-942f-1fb8b7092b24.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_82c2e4d8-e416-4980-942f-1fb8b7092b24.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_82c2e4d8-e416-4980-942f-1fb8b7092b24.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_82c2e4d8-e416-4980-942f-1fb8b7092b24.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_82c2e4d8-e416-4980-942f-1fb8b7092b24.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_82c2e4d8-e416-4980-942f-1fb8b7092b24.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_82c2e4d8-e416-4980-942f-1fb8b7092b24.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_82c2e4d8-e416-4980-942f-1fb8b7092b24.jpg"" alt=""2026 Panini Prizm World Cup ZIZO Wave RC Egypt"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup ZIZO Wave RC Egypt</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Zizo,N/A,2026,Panini,BaseWavePrizm,Prizm World Cup,Egypt,,No,Zizo,225,,,
+Add,RBLOT-073026-00118-75196,261328,Soccer,2026 Panini Prizm World Cup ELLIOT ANDERSON Trophy Hunting Silver England,,2.59,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_784e0d95-6658-4c41-abf1-e8c3390c170f.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_784e0d95-6658-4c41-abf1-e8c3390c170f.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_784e0d95-6658-4c41-abf1-e8c3390c170f.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_784e0d95-6658-4c41-abf1-e8c3390c170f.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_784e0d95-6658-4c41-abf1-e8c3390c170f.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_784e0d95-6658-4c41-abf1-e8c3390c170f.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_784e0d95-6658-4c41-abf1-e8c3390c170f.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_784e0d95-6658-4c41-abf1-e8c3390c170f.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_784e0d95-6658-4c41-abf1-e8c3390c170f.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_784e0d95-6658-4c41-abf1-e8c3390c170f.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_784e0d95-6658-4c41-abf1-e8c3390c170f.jpg"" alt=""2026 Panini Prizm World Cup ELLIOT ANDERSON Trophy Hunting Silver England"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup ELLIOT ANDERSON Trophy Hunting Silver England</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Elliot Anderson,N/A,2026,Panini,TrophyHuntingSilverPrizm,Prizm World Cup,England,,No,Elliot Anderson,24,,,
+Add,RBLOT-073026-00119-96634,261328,Soccer,2026 Panini Prizm World Cup EDER MILITAO Aces Silver Brazil,,2.49,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_fc5d49da-f05e-4fb7-ab8c-8a91d147295b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_fc5d49da-f05e-4fb7-ab8c-8a91d147295b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_fc5d49da-f05e-4fb7-ab8c-8a91d147295b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_fc5d49da-f05e-4fb7-ab8c-8a91d147295b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_fc5d49da-f05e-4fb7-ab8c-8a91d147295b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_fc5d49da-f05e-4fb7-ab8c-8a91d147295b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_fc5d49da-f05e-4fb7-ab8c-8a91d147295b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_fc5d49da-f05e-4fb7-ab8c-8a91d147295b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_fc5d49da-f05e-4fb7-ab8c-8a91d147295b.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_fc5d49da-f05e-4fb7-ab8c-8a91d147295b.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_fc5d49da-f05e-4fb7-ab8c-8a91d147295b.jpg"" alt=""2026 Panini Prizm World Cup EDER MILITAO Aces Silver Brazil"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup EDER MILITAO Aces Silver Brazil</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Eder Militao,N/A,2026,Panini,AcesSilverPrizm,Prizm World Cup,Brazil,,No,Eder Militao,3,,,
+Add,RBLOT-073026-00120-82480,261328,Soccer,2026 Panini Prizm World Cup XAVI SIMONS Wave Netherlands,,2.49,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_b4fd4c85-23e9-4a1c-8f46-1be2d964e796.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_b4fd4c85-23e9-4a1c-8f46-1be2d964e796.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_b4fd4c85-23e9-4a1c-8f46-1be2d964e796.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_b4fd4c85-23e9-4a1c-8f46-1be2d964e796.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_b4fd4c85-23e9-4a1c-8f46-1be2d964e796.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_b4fd4c85-23e9-4a1c-8f46-1be2d964e796.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_b4fd4c85-23e9-4a1c-8f46-1be2d964e796.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_b4fd4c85-23e9-4a1c-8f46-1be2d964e796.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_b4fd4c85-23e9-4a1c-8f46-1be2d964e796.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_b4fd4c85-23e9-4a1c-8f46-1be2d964e796.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_b4fd4c85-23e9-4a1c-8f46-1be2d964e796.jpg"" alt=""2026 Panini Prizm World Cup XAVI SIMONS Wave Netherlands"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup XAVI SIMONS Wave Netherlands</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Xavi Simons,N/A,2026,Panini,BaseWavePrizm,Prizm World Cup,Netherlands,,No,Xavi Simons,313,,,
+Add,RBLOT-073026-00121-66057,261328,Soccer,2026 Panini Prizm World Cup REECE JAMES Phenomenon Silver England,,2.49,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_334a71f6-73b7-496e-b66c-0bb16f90afa1.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_334a71f6-73b7-496e-b66c-0bb16f90afa1.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_334a71f6-73b7-496e-b66c-0bb16f90afa1.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_334a71f6-73b7-496e-b66c-0bb16f90afa1.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_334a71f6-73b7-496e-b66c-0bb16f90afa1.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_334a71f6-73b7-496e-b66c-0bb16f90afa1.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_334a71f6-73b7-496e-b66c-0bb16f90afa1.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_334a71f6-73b7-496e-b66c-0bb16f90afa1.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_334a71f6-73b7-496e-b66c-0bb16f90afa1.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_334a71f6-73b7-496e-b66c-0bb16f90afa1.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_334a71f6-73b7-496e-b66c-0bb16f90afa1.jpg"" alt=""2026 Panini Prizm World Cup REECE JAMES Phenomenon Silver England"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup REECE JAMES Phenomenon Silver England</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Reece James,N/A,2026,Panini,PhenomenonSilverPrizm,Prizm World Cup,England,,No,Reece James,15,,,
+Add,RBLOT-073026-00123-33373,261328,Soccer,2026 Panini Prizm World Cup CALEB YIRENKYI Wave Ghana,,2.49,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_37c7409f-7dd2-4770-aee7-13a08714344a.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_37c7409f-7dd2-4770-aee7-13a08714344a.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_37c7409f-7dd2-4770-aee7-13a08714344a.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_37c7409f-7dd2-4770-aee7-13a08714344a.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_37c7409f-7dd2-4770-aee7-13a08714344a.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_37c7409f-7dd2-4770-aee7-13a08714344a.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_37c7409f-7dd2-4770-aee7-13a08714344a.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_37c7409f-7dd2-4770-aee7-13a08714344a.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_37c7409f-7dd2-4770-aee7-13a08714344a.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_37c7409f-7dd2-4770-aee7-13a08714344a.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_37c7409f-7dd2-4770-aee7-13a08714344a.jpg"" alt=""2026 Panini Prizm World Cup CALEB YIRENKYI Wave Ghana"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup CALEB YIRENKYI Wave Ghana</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Caleb Yirenkyi,N/A,2026,Panini,BaseWavePrizm,Prizm World Cup,Ghana,,No,Caleb Yirenkyi,227,,,
+Add,RBLOT-073026-00124-75432,261328,Soccer,2026 Panini Prizm World Cup CHEMSDINE TALBI Wave Morocco,,2.49,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_565d473f-5ec5-47de-8790-930ab87763a1.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_565d473f-5ec5-47de-8790-930ab87763a1.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_565d473f-5ec5-47de-8790-930ab87763a1.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_565d473f-5ec5-47de-8790-930ab87763a1.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_565d473f-5ec5-47de-8790-930ab87763a1.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_565d473f-5ec5-47de-8790-930ab87763a1.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_565d473f-5ec5-47de-8790-930ab87763a1.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_565d473f-5ec5-47de-8790-930ab87763a1.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_565d473f-5ec5-47de-8790-930ab87763a1.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_565d473f-5ec5-47de-8790-930ab87763a1.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_565d473f-5ec5-47de-8790-930ab87763a1.jpg"" alt=""2026 Panini Prizm World Cup CHEMSDINE TALBI Wave Morocco"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup CHEMSDINE TALBI Wave Morocco</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Chemsdine Talbi,N/A,2026,Panini,BaseWavePrizm,Prizm World Cup,Morocco,,No,Chemsdine Talbi,298,,,
+Add,RBLOT-073026-00125-02041,261328,Soccer,2026 Panini Prizm World Cup MIN-JAE KIM Wave Korea,,2.49,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_f8c52124-b75a-44a9-9715-594e79c6ff34.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_f8c52124-b75a-44a9-9715-594e79c6ff34.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_f8c52124-b75a-44a9-9715-594e79c6ff34.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_f8c52124-b75a-44a9-9715-594e79c6ff34.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_f8c52124-b75a-44a9-9715-594e79c6ff34.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_f8c52124-b75a-44a9-9715-594e79c6ff34.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_f8c52124-b75a-44a9-9715-594e79c6ff34.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_f8c52124-b75a-44a9-9715-594e79c6ff34.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_f8c52124-b75a-44a9-9715-594e79c6ff34.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_f8c52124-b75a-44a9-9715-594e79c6ff34.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_f8c52124-b75a-44a9-9715-594e79c6ff34.jpg"" alt=""2026 Panini Prizm World Cup MIN-JAE KIM Wave Korea"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup MIN-JAE KIM Wave Korea</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Min-jae Kim,N/A,2026,Panini,BaseWavePrizm,Prizm World Cup,Korea Republic,,No,Min-jae Kim,278,,,
+Add,RBLOT-073026-00130-55257,261328,Soccer,2026 Panini Prizm World Cup MAHMOUD AL-MARDI Silver Jordan NT,,2.49,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_645a451f-5229-46a0-b8c8-ee3d3c9f0f8d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_645a451f-5229-46a0-b8c8-ee3d3c9f0f8d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_645a451f-5229-46a0-b8c8-ee3d3c9f0f8d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_645a451f-5229-46a0-b8c8-ee3d3c9f0f8d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_645a451f-5229-46a0-b8c8-ee3d3c9f0f8d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_645a451f-5229-46a0-b8c8-ee3d3c9f0f8d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_645a451f-5229-46a0-b8c8-ee3d3c9f0f8d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_645a451f-5229-46a0-b8c8-ee3d3c9f0f8d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_645a451f-5229-46a0-b8c8-ee3d3c9f0f8d.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_645a451f-5229-46a0-b8c8-ee3d3c9f0f8d.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_645a451f-5229-46a0-b8c8-ee3d3c9f0f8d.jpg"" alt=""2026 Panini Prizm World Cup MAHMOUD AL-MARDI Silver Jordan NT"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup MAHMOUD AL-MARDI Silver Jordan NT</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Mahmoud Al-Mardi,N/A,2026,Panini,BaseSilverPrizm,Prizm World Cup,Jordan,,No,Mahmoud Al-Mardi,273,,,
+Add,RBLOT-073026-00131-69231,261328,Soccer,2026 Panini Prizm World Cup JORTHY MOKIO Wave RC Belgium,,2.49,true,1,https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_74e9cc13-27f7-461d-968c-43b9fe6bdfb4.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/74c5acad-4194-445f-a712-fca63d039b16_74e9cc13-27f7-461d-968c-43b9fe6bdfb4.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/4fdaf44f-d3b2-46e0-b8e8-f677de577430_74e9cc13-27f7-461d-968c-43b9fe6bdfb4.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/1ee30cc3-25e5-4b98-9620-fcaabfc0329d_74e9cc13-27f7-461d-968c-43b9fe6bdfb4.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d8ce52e3-3950-44ee-80d7-3833153d9a15_74e9cc13-27f7-461d-968c-43b9fe6bdfb4.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/d400877f-3f36-4b2e-aaf3-c0fb7b156b73_74e9cc13-27f7-461d-968c-43b9fe6bdfb4.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/f4f1d977-f1b2-4a4d-80c1-b65111a37070_74e9cc13-27f7-461d-968c-43b9fe6bdfb4.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/fba79431-0873-41f8-8096-cb0c7b5da340_74e9cc13-27f7-461d-968c-43b9fe6bdfb4.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/eeb5df3d-a90a-49be-bc2b-d7323caf6ea4_74e9cc13-27f7-461d-968c-43b9fe6bdfb4.jpg|https://tccentral-cropped-images.s3.amazonaws.com/v1/68e8dec4-5399-46a2-9f39-36e5f91d3250_74e9cc13-27f7-461d-968c-43b9fe6bdfb4.jpg,4000,400011,,,"<div style=""font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;"">
+  <table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""border-collapse:collapse;"">
+    <tr>
+      <td valign=""top"" style=""width:180px;padding-right:20px;"">
+        <img src=""https://tccentral-cropped-images.s3.amazonaws.com/v1/a16f6c5b-5181-46cf-a0d9-a2805baed683_74e9cc13-27f7-461d-968c-43b9fe6bdfb4.jpg"" alt=""2026 Panini Prizm World Cup JORTHY MOKIO Wave RC Belgium"" style=""width:100%;max-width:180px;border-radius:12px;border:1px solid #e5e7eb;"" />
+      </td>
+      <td valign=""top"">
+        <h2 style=""margin:0 0 12px;font-size:24px;text-transform:uppercase;"">2026 Panini Prizm World Cup JORTHY MOKIO Wave RC Belgium</h2>
+        <ol style=""margin:0 0 20px;padding-left:20px;"">
+          <li style=""margin-bottom:10px;"">All cards are scanned. If you see any lines, if you want more pictures, just ask!&nbsp;</li>
+          <li style=""margin-bottom:10px;"">I send all cards over $20 with tracking, and all mem patches are sent ground advantage to prevent damage.&nbsp;</li>
+          <li style=""margin-bottom:10px;"">All cards valued over $100 will have insurance added, which protects you as the buyer.&nbsp;</li>
+        </ol>
+        <p style=""margin:0;"">
+          My goal is to have you receive the card in tip-top shape. No Returns Accepted. Questions, please ask!!!
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>",FixedPrice,GTC,,85250-6312,"Flat: US_eBayStandardEnvelope $.99, 2 busines (315934471021)",2,ReturnsNotAccepted,,Sports Trading Card,Soccer,Jorthy Mokio,N/A,2026,Panini,BaseWavePrizm,Prizm World Cup,Belgium,,No,Jorthy Mokio,160,,,

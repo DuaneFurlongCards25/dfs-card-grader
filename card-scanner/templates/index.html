@@ -1,0 +1,721 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>DFS Card Scanner</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;background:#f0f2f5;color:#1a1a2e;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
+
+/* ── Top bar ── */
+.topbar{background:#fff;border-bottom:1px solid #e2e8f0;padding:0 16px;height:52px;display:flex;align-items:center;gap:10px;flex-shrink:0;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.topbar h1{font-size:15px;font-weight:700;color:#1a1a2e;white-space:nowrap}
+.tb-div{width:1px;height:20px;background:#e2e8f0;flex-shrink:0}
+.stat{font-size:11px;color:#64748b;white-space:nowrap}
+.stat strong{color:#1d4ed8}
+.search-wrap{flex:1;position:relative;min-width:0}
+.search-wrap input{width:100%;border:1px solid #d1d5db;border-radius:7px;padding:7px 10px 7px 30px;font-size:16px;color:#1a1a2e;outline:none;background:#fff}
+.search-wrap input:focus{border-color:#3b82f6}
+.search-ico{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:#9ca3af;font-size:12px;pointer-events:none}
+.tbr{display:flex;gap:6px;flex-shrink:0}
+.pbtn{padding:5px 10px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #d1d5db;background:#fff;color:#475569;white-space:nowrap}
+.pbtn.active{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
+
+/* ── Upload bar ── */
+#uploadZone{flex-shrink:0;background:#fff;border-bottom:1px solid #e2e8f0;padding:8px 14px;display:flex;align-items:center;gap:10px}
+.ubtn{padding:10px 18px;background:#1d4ed8;color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;white-space:nowrap;min-height:44px}
+.utext{font-size:13px;color:#64748b;flex:1}
+.utext strong{color:#1d4ed8}
+.umsg{font-size:12px;color:#16a34a}
+#fileInput{display:none}
+
+/* ── Desktop: 3-col layout ── */
+.main{display:flex;flex:1;overflow:hidden}
+.queue-col{width:220px;background:#fff;border-right:1px solid #e2e8f0;display:flex;flex-direction:column;flex-shrink:0;overflow:hidden}
+.col-hdr{padding:8px 12px;font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;flex-shrink:0}
+.qlist{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.qi{padding:9px 10px;border-bottom:1px solid #f8fafc;cursor:pointer;display:flex;align-items:center;gap:8px}
+.qi.active{background:#eff6ff;border-left:3px solid #3b82f6}
+.qi-thumb{width:32px;height:32px;object-fit:cover;border-radius:4px;border:1px solid #e2e8f0;flex-shrink:0}
+.qi-ph{width:32px;height:32px;background:#f1f5f9;border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px;color:#cbd5e1}
+.qi-fn{font-size:11px;color:#334155;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qi-st{font-size:10px;margin-top:1px}
+.s-q{color:#94a3b8}.s-u{color:#f59e0b}.s-i{color:#8b5cf6}.s-r{color:#16a34a}.s-e{color:#ef4444}
+.spin{display:inline-block;width:8px;height:8px;border:1.5px solid #e2e8f0;border-top-color:#6366f1;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:2px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Center */
+.center-col{flex:1;display:flex;overflow:hidden;flex-direction:column}
+.match-layout{flex:1;display:flex;overflow:hidden}
+.img-pane{width:260px;flex-shrink:0;background:#fff;border-right:1px solid #e2e8f0;display:flex;flex-direction:column;align-items:center;padding:14px 12px;gap:8px;overflow-y:auto}
+.imgbox{width:100%;min-height:220px;background:#f8fafc;border-radius:8px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.imgbox img{max-width:100%;max-height:320px;object-fit:contain;display:block}
+.img-no{color:#94a3b8;font-size:12px;text-align:center;padding:30px 10px}
+.img-ctrls{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
+.cbtn{padding:6px 10px;border:1px solid #d1d5db;border-radius:5px;font-size:11px;background:#fff;color:#374151;cursor:pointer;min-height:36px}
+.sport-sel{width:100%;border:1px solid #d1d5db;border-radius:6px;padding:7px 8px;font-size:14px;color:#374151;background:#fff;outline:none;min-height:36px}
+
+/* Candidates */
+.match-pane{flex:1;display:flex;flex-direction:column;overflow:hidden;background:#f8fafc}
+.mph{padding:6px 14px;background:#fff;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;flex-shrink:0}
+.mph-label{font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px}
+.mph-count{font-size:11px;color:#94a3b8;margin-left:auto}
+.cands{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.cg{border-bottom:1px solid #e9edf2;cursor:pointer;transition:background .1s}
+.cg:active{background:#e8f0fe}
+.cg.sel{background:#eff6ff}
+.cg.sel .cn{background:#1d4ed8;color:#fff}
+/* Single compact row per candidate */
+.ct-row{padding:10px 12px;display:flex;align-items:center;gap:8px}
+.cn{width:24px;height:24px;border-radius:5px;background:#e2e8f0;color:#475569;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.ct{font-size:13px;font-weight:600;color:#1e293b;flex:1;line-height:1.3;min-width:0}
+.ct-sub{font-size:10px;color:#64748b;font-weight:400;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cbadge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;flex-shrink:0}
+.bhi{background:#dcfce7;color:#166534}.bmed{background:#fef9c3;color:#854d0e}.blo{background:#fee2e2;color:#991b1b}
+.skip-lnk{font-size:11px;color:#94a3b8;cursor:pointer;text-decoration:underline;padding:8px 14px 10px;display:block}
+/* Rotation button */
+.rot-btn{width:100%;padding:10px;border:1px solid #d1d5db;border-radius:7px;font-size:15px;background:#fff;color:#374151;cursor:pointer;min-height:44px;display:flex;align-items:center;justify-content:center;gap:6px;font-weight:600}
+.rot-btn:active{background:#f1f5f9}
+
+/* Lightbox */
+.lb{display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:500;align-items:center;justify-content:center;flex-direction:column;gap:14px}
+.lb.open{display:flex}
+.lb img{max-width:92vw;max-height:80dvh;object-fit:contain;border-radius:6px;transition:transform .2s}
+.lb-close{position:absolute;top:14px;right:16px;color:#fff;font-size:32px;cursor:pointer;line-height:1;padding:6px}
+.lb-rot{padding:12px 28px;background:#fff;color:#1a1a2e;border:none;border-radius:8px;font-size:16px;font-weight:700;cursor:pointer}
+
+/* No-match search panel */
+.nm-panel{padding:16px;background:#fff;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.1);width:100%;max-width:360px;display:flex;flex-direction:column;gap:10px}
+.nm-panel p{font-size:13px;color:#475569;text-align:center}
+.nm-inp{border:1px solid #d1d5db;border-radius:7px;padding:11px 12px;font-size:16px;color:#1a1a2e;outline:none;width:100%}
+.nm-inp:focus{border-color:#3b82f6}
+.nm-row{display:flex;gap:8px}
+.nm-sbtn{flex:1;padding:11px;background:#1d4ed8;color:#fff;border:none;border-radius:7px;font-size:14px;font-weight:700;cursor:pointer;min-height:44px}
+.nm-skip{flex:0 0 auto;padding:11px 14px;background:#f1f5f9;color:#64748b;border:none;border-radius:7px;font-size:14px;font-weight:600;cursor:pointer;min-height:44px}
+
+/* Empty */
+.es{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;color:#94a3b8;text-align:center;padding:20px}
+.es-ico{font-size:44px}
+.es p{font-size:13px;line-height:1.6}
+
+/* Stack sidebar */
+.stack-col{width:270px;flex-shrink:0;border-left:1px solid #e2e8f0;background:#fff;display:flex;flex-direction:column;overflow:hidden}
+.stabs{display:flex;border-bottom:1px solid #e2e8f0;flex-shrink:0}
+.stab{flex:1;padding:10px;font-size:11px;font-weight:700;color:#64748b;cursor:pointer;text-align:center;border-bottom:2px solid transparent}
+.stab.on{color:#1d4ed8;border-bottom-color:#1d4ed8}
+.sbody{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.si{padding:9px 12px;border-bottom:1px solid #f1f5f9}
+.si-title{font-size:11px;color:#334155;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px}
+.si-row{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.si-price{font-size:13px;font-weight:700;color:#16a34a}
+.si-inp{width:62px;border:1px solid #d1d5db;border-radius:4px;padding:4px 6px;font-size:13px;font-weight:700;color:#16a34a;text-align:right;outline:none;min-height:32px}
+.tbadge{font-size:9px;font-weight:700;padding:2px 5px;border-radius:3px}
+.tu{background:#dcfce7;color:#166534}.td{background:#fee2e2;color:#991b1b}.tf{background:#f1f5f9;color:#64748b}
+.si-sales{font-size:9px;color:#94a3b8}
+.si-sp{font-size:9px;color:#f59e0b}
+.si-x{margin-left:auto;color:#cbd5e1;cursor:pointer;font-size:18px;line-height:1;padding:4px}
+.sfooter{padding:10px 12px;border-top:1px solid #e2e8f0;flex-shrink:0}
+.sfsum{font-size:11px;color:#64748b;margin-bottom:7px}
+.sfsum strong{color:#1a1a2e}
+.fbtn{width:100%;padding:10px;border:none;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:6px;min-height:44px}
+.fbtn:disabled{background:#e2e8f0;color:#94a3b8;cursor:not-allowed}
+.f-move{background:#0d9488;color:#fff}
+.f-exp{background:#1d4ed8;color:#fff}
+
+/* ── Mobile bottom nav ── */
+.mob-nav{display:none;background:#fff;border-top:1px solid #e2e8f0;flex-shrink:0;padding:0}
+.mob-nav-inner{display:flex}
+.mn-btn{flex:1;padding:10px 4px 8px;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;border:none;background:none;color:#64748b;font-size:10px;font-weight:600;min-height:54px;position:relative}
+.mn-btn.active{color:#1d4ed8}
+.mn-ico{font-size:20px;line-height:1}
+.mn-badge{position:absolute;top:6px;right:calc(50% - 18px);background:#ef4444;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:1px 5px;min-width:16px;text-align:center}
+
+/* Toast */
+.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:8px 18px;border-radius:7px;font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:999;white-space:nowrap}
+.toast.show{opacity:1}
+
+/* Settings drawer */
+.settings-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200}
+.settings-overlay.open{display:block}
+.settings-drawer{position:fixed;top:0;right:-105%;width:min(500px,100%);height:100dvh;background:#fff;box-shadow:-4px 0 24px rgba(0,0,0,.15);z-index:201;transition:right .25s ease;overflow-y:auto;display:flex;flex-direction:column}
+.settings-drawer.open{right:0}
+.sdw-hdr{padding:16px 18px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.sdw-hdr h2{font-size:16px;font-weight:700}
+.sdw-close{font-size:22px;color:#94a3b8;cursor:pointer;line-height:1;padding:4px}
+.sdw-body{flex:1;overflow-y:auto;padding:18px;-webkit-overflow-scrolling:touch}
+.sdw-section{margin-bottom:22px}
+.sdw-section h3{font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #f1f5f9}
+.sdw-row{display:flex;gap:10px;margin-bottom:10px}
+.sdw-field{flex:1;display:flex;flex-direction:column;gap:4px}
+.sdw-label{font-size:11px;color:#64748b;font-weight:600}
+.sdw-input{border:1px solid #d1d5db;border-radius:6px;padding:10px;font-size:16px;color:#1a1a2e;outline:none;width:100%;background:#fff;min-height:44px}
+.sdw-input:focus{border-color:#3b82f6}
+.sdw-textarea{border:1px solid #d1d5db;border-radius:6px;padding:10px;font-size:13px;font-family:monospace;color:#1a1a2e;outline:none;width:100%;resize:vertical;min-height:100px;line-height:1.5;background:#fff}
+.sdw-hint{font-size:10px;color:#94a3b8;margin-top:2px}
+.sdw-preview{background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;font-size:12px;margin-top:8px}
+.sdw-preview-label{font-size:10px;color:#94a3b8;margin-bottom:6px;font-weight:600;text-transform:uppercase}
+.cat-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.cat-sport{font-size:12px;font-weight:600;color:#374151;width:88px;flex-shrink:0}
+.cat-input{flex:1;border:1px solid #d1d5db;border-radius:5px;padding:8px;font-size:16px;color:#1a1a2e;outline:none;background:#fff;min-height:40px}
+.sdw-footer{padding:14px 18px;border-top:1px solid #e2e8f0;flex-shrink:0}
+.save-btn{width:100%;padding:12px;background:#1d4ed8;color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;min-height:48px}
+
+/* ── Mobile overrides (≤768px) ── */
+@media(max-width:768px){
+  body{overflow:hidden}
+  .topbar{padding:0 12px;gap:8px;height:48px}
+  .topbar h1{font-size:14px}
+  .tb-div,.stat{display:none}
+  .search-wrap{max-width:none}
+  .tbr .pbtn:not(.settings-pbtn){display:none}
+  #uploadZone{padding:8px 12px}
+  .ubtn{font-size:14px;padding:10px 14px}
+  .utext{display:none}
+  .main{display:block;position:relative;overflow:hidden}
+  .queue-col{display:none;width:100%;height:100%;border-right:none;position:absolute;top:0;left:0;z-index:10}
+  .queue-col.mob-visible{display:flex}
+  .center-col{width:100%;height:100%;position:absolute;top:0;left:0}
+  .stack-col{display:none;width:100%;height:100%;border-left:none;position:absolute;top:0;left:0}
+  .stack-col.mob-visible{display:flex}
+  .mob-nav{display:block}
+  .toast{bottom:70px}
+
+  /* Mobile match layout: image on top, candidates below */
+  .match-layout{flex-direction:column}
+  .img-pane{width:100%;flex-direction:row;align-items:center;padding:10px 12px;gap:10px;min-height:unset;overflow:visible;border-right:none;border-bottom:1px solid #e2e8f0;flex-shrink:0}
+  .imgbox{width:90px;min-height:120px;flex-shrink:0;border-radius:6px}
+  .imgbox img{max-height:120px}
+  .img-pane-side{display:flex;flex-direction:column;gap:8px;flex:1;min-width:0}
+  .img-ctrls{justify-content:flex-start}
+  .cbtn{font-size:12px;padding:6px 10px}
+  .sport-sel{font-size:14px}
+  .mob-key-hint{display:none}
+
+  /* Larger tap targets on candidates */
+  .ct-row{padding:13px 12px}
+  .ct{font-size:14px}
+  .cn{width:28px;height:28px;font-size:13px}
+
+  .settings-drawer{width:100%}
+  .sdw-row{flex-direction:column}
+}
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="topbar">
+  <h1>DFS Scanner</h1>
+  <div class="tb-div"></div>
+  <div class="stat">Queue <strong id="hQ">0</strong></div>
+  <div class="stat">Matched <strong id="hM">0</strong></div>
+  <div class="stat">Stack <strong id="hB">0</strong></div>
+  <div class="search-wrap">
+    <span class="search-ico">🔍</span>
+    <input type="text" id="catSearch" placeholder="Search catalog…" onkeydown="if(event.key==='Enter')doSearch()">
+  </div>
+  <div class="tbr">
+    <button class="pbtn active" id="bp1" onclick="setPhase(1)">① Match</button>
+    <button class="pbtn" id="bp2" onclick="setPhase(2)">② Stack</button>
+    <button class="pbtn settings-pbtn" onclick="openSettings()" title="Settings">⚙</button>
+  </div>
+</div>
+
+<!-- Settings drawer -->
+<div class="settings-overlay" id="settingsOverlay" onclick="closeSettings()"></div>
+<div class="settings-drawer" id="settingsDrawer">
+  <div class="sdw-hdr">
+    <h2>⚙ Listing Defaults</h2>
+    <span class="sdw-close" onclick="closeSettings()">✕</span>
+  </div>
+  <div class="sdw-body">
+    <div class="sdw-section">
+      <h3>SKU &amp; Condition</h3>
+      <div class="sdw-row">
+        <div class="sdw-field">
+          <label class="sdw-label">SKU Prefix</label>
+          <input class="sdw-input" id="s_sku_prefix" placeholder="DFS">
+          <span class="sdw-hint">Exports: DFS-080626-0001…</span>
+        </div>
+        <div class="sdw-field">
+          <label class="sdw-label">Default Price ($)</label>
+          <input class="sdw-input" id="s_default_price" type="number" step="0.01" min="0.01">
+        </div>
+      </div>
+      <div class="sdw-row">
+        <div class="sdw-field">
+          <label class="sdw-label">Condition</label>
+          <select class="sdw-input" id="s_condition_id">
+            <option value="1000">New</option>
+            <option value="2750">Like New</option>
+            <option value="3000">Very Good</option>
+            <option value="4000">Excellent</option>
+            <option value="5000">Very Good (Used)</option>
+            <option value="6000">Good</option>
+          </select>
+        </div>
+        <div class="sdw-field">
+          <label class="sdw-label">Condition Desc</label>
+          <select class="sdw-input" id="s_condition_desc">
+            <option value="Excellent">Excellent</option>
+            <option value="Near Mint">Near Mint</option>
+            <option value="Very Good">Very Good</option>
+            <option value="Good">Good</option>
+          </select>
+        </div>
+      </div>
+      <div class="sdw-row">
+        <div class="sdw-field">
+          <label class="sdw-label">ZIP / Postal Code</label>
+          <input class="sdw-input" id="s_postal" placeholder="85250-6312">
+        </div>
+      </div>
+    </div>
+    <div class="sdw-section">
+      <h3>eBay Store Categories</h3>
+      <p class="sdw-hint" style="margin-bottom:10px">Paste your eBay store category ID per sport.</p>
+      <div class="cat-row"><span class="cat-sport">BASEBALL</span><input class="cat-input" id="sc_BASEBALL" placeholder="e.g. 44411116016"></div>
+      <div class="cat-row"><span class="cat-sport">FOOTBALL</span><input class="cat-input" id="sc_FOOTBALL" placeholder="e.g. 44411117016"></div>
+      <div class="cat-row"><span class="cat-sport">BASKETBALL</span><input class="cat-input" id="sc_BASKETBALL" placeholder="e.g. 44411138016"></div>
+      <div class="cat-row"><span class="cat-sport">SOCCER</span><input class="cat-input" id="sc_SOCCER" placeholder="e.g. 44411118016"></div>
+      <div class="cat-row"><span class="cat-sport">HOCKEY</span><input class="cat-input" id="sc_HOCKEY" placeholder="e.g. 44411119016"></div>
+    </div>
+    <div class="sdw-section">
+      <h3>Description Template</h3>
+      <p class="sdw-hint" style="margin-bottom:8px">Tokens: <strong>[LISTING_TITLE]</strong> · <strong>[FRONT_IMAGE]</strong></p>
+      <textarea class="sdw-textarea" id="s_desc_tmpl" rows="6" oninput="previewDesc()"></textarea>
+      <div class="sdw-preview"><div class="sdw-preview-label">Preview</div><div id="descPreview"></div></div>
+    </div>
+  </div>
+  <div class="sdw-footer"><button class="save-btn" onclick="saveSettings()">Save Defaults</button></div>
+</div>
+
+<!-- Upload bar -->
+<div id="uploadZone" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="onDrop(event)">
+  <button class="ubtn" onclick="document.getElementById('fileInput').click()">📷 Add Images</button>
+  <span class="utext">or <strong>drag images here</strong></span>
+  <span class="umsg" id="umsg"></span>
+</div>
+<input type="file" id="fileInput" multiple accept="image/*" capture="environment" onchange="handleFiles(this.files)">
+
+<div class="main">
+
+  <!-- Queue -->
+  <div class="queue-col" id="queueCol">
+    <div class="col-hdr"><span>Queue</span><span id="qc">0</span></div>
+    <div class="qlist" id="qlist"></div>
+  </div>
+
+  <!-- Center: match -->
+  <div class="center-col" id="centerCol">
+    <div class="es" id="esEmpty">
+      <div class="es-ico">📷</div>
+      <p>Tap <strong>Add Images</strong> to start.<br>Cards appear here for matching.</p>
+    </div>
+    <div id="matchLayout" style="display:none;flex:1;flex-direction:column;overflow:hidden">
+      <div class="match-layout" style="flex:1;overflow:hidden">
+        <div class="img-pane" id="imgPane">
+          <div class="imgbox" id="imgBox"><div class="img-no">No image</div></div>
+          <!-- Mobile puts controls inline next to image -->
+          <div class="img-pane-side" id="imgSide">
+            <button class="rot-btn" onclick="rot(90)" title="Rotate image">↻ Rotate</button>
+            <select class="sport-sel" id="sportSel">
+              <option value="BASEBALL">BASEBALL</option>
+              <option value="FOOTBALL">FOOTBALL</option>
+              <option value="BASKETBALL">BASKETBALL</option>
+              <option value="SOCCER">SOCCER</option>
+              <option value="HOCKEY">HOCKEY</option>
+            </select>
+            <div class="mob-key-hint" style="font-size:10px;color:#94a3b8;line-height:1.6">
+              Keys <strong>1–8</strong> · <strong>Enter</strong> confirm · <strong>Esc</strong> skip
+            </div>
+          </div>
+        </div>
+        <div class="match-pane">
+          <div class="mph">
+            <span class="mph-label">Candidates</span>
+            <span class="mph-count" id="mphCount"></span>
+          </div>
+          <div class="cands" id="cands"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stack sidebar -->
+  <div class="stack-col" id="stackCol">
+    <div class="stabs">
+      <div class="stab on" id="stM" onclick="showStab('matched')">Matched (<span id="mc">0</span>)</div>
+      <div class="stab" id="stB" onclick="showStab('batch')">Stack (<span id="bc">0</span>)</div>
+    </div>
+    <div class="sbody" id="sbody"></div>
+    <div class="sfooter">
+      <div class="sfsum"><strong id="fCount">0</strong> in stack · $<strong id="fTotal">0.00</strong></div>
+      <button class="fbtn f-move" id="moveBtn" disabled onclick="moveToBatch()">Move ready to stack →</button>
+      <button class="fbtn f-exp" id="expBtn" disabled onclick="exportCSV()">⬇ Export eBay CSV</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- Mobile bottom nav -->
+<div class="mob-nav">
+  <div class="mob-nav-inner">
+    <button class="mn-btn active" id="mnMatch" onclick="mobView('match')">
+      <span class="mn-ico">🔍</span>Match
+    </button>
+    <button class="mn-btn" id="mnQueue" onclick="mobView('queue')">
+      <span class="mn-ico">📋</span>Queue
+      <span class="mn-badge" id="qBadge" style="display:none">0</span>
+    </button>
+    <button class="mn-btn" id="mnStack" onclick="mobView('stack')">
+      <span class="mn-ico">📦</span>Stack
+      <span class="mn-badge" id="sBadge" style="display:none">0</span>
+    </button>
+    <button class="mn-btn settings-pbtn" onclick="openSettings()">
+      <span class="mn-ico">⚙</span>Settings
+    </button>
+  </div>
+</div>
+
+<!-- Lightbox -->
+<div class="lb" id="lb" onclick="closeLb()">
+  <span class="lb-close">✕</span>
+  <img id="lbImg" src="" onclick="event.stopPropagation()">
+  <button class="lb-rot" onclick="event.stopPropagation();lbRot()">↻ Rotate</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let state={queue:[],matched:[],batch:[]};
+let activeId=null, selCand=0, imgRot=0, phase=1, stab='matched';
+let mobScreen='match'; // 'match' | 'queue' | 'stack'
+
+const isMobile=()=>window.innerWidth<=768;
+
+// ── Mobile view switching ──────────────────────────────────────────────────────
+function mobView(v){
+  mobScreen=v;
+  ['mnMatch','mnQueue','mnStack'].forEach(id=>document.getElementById(id).classList.remove('active'));
+  document.getElementById('queueCol').classList.remove('mob-visible');
+  document.getElementById('stackCol').classList.remove('mob-visible');
+  document.getElementById('centerCol').style.display='';
+  if(v==='match'){
+    document.getElementById('mnMatch').classList.add('active');
+  } else if(v==='queue'){
+    document.getElementById('mnQueue').classList.add('active');
+    document.getElementById('queueCol').classList.add('mob-visible');
+    document.getElementById('centerCol').style.display='none';
+  } else if(v==='stack'){
+    document.getElementById('mnStack').classList.add('active');
+    document.getElementById('stackCol').classList.add('mob-visible');
+    document.getElementById('centerCol').style.display='none';
+  }
+}
+
+// ── Phase ─────────────────────────────────────────────────────────────────────
+function setPhase(p){
+  phase=p;
+  document.getElementById('bp1').classList.toggle('active',p===1);
+  document.getElementById('bp2').classList.toggle('active',p===2);
+  document.getElementById('uploadZone').style.display=p===1?'':'none';
+  if(p===2){showStab('batch');if(isMobile())mobView('stack');}
+  renderAll();
+}
+
+// ── Upload ────────────────────────────────────────────────────────────────────
+function onDrop(ev){ev.preventDefault();document.getElementById('uploadZone').classList.remove('drag');handleFiles(ev.dataTransfer.files);}
+async function handleFiles(files){
+  if(!files||!files.length)return;
+  const fd=new FormData();
+  for(const f of files)fd.append('files',f);
+  document.getElementById('umsg').textContent=`Uploading ${files.length}…`;
+  const r=await fetch('/api/upload',{method:'POST',body:fd});
+  const d=await r.json();
+  document.getElementById('umsg').textContent=d.ok?`✓ ${d.added} queued`:`⚠ ${d.error}`;
+  setTimeout(()=>{document.getElementById('umsg').textContent='';},3000);
+  await poll();
+}
+
+async function doSearch(){
+  const q=document.getElementById('catSearch').value.trim();
+  if(!q||!activeId)return;
+  await fetch('/api/catalog-search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:activeId,query:q})});
+  await poll();
+}
+
+function showStab(t){
+  stab=t;
+  document.getElementById('stM').classList.toggle('on',t==='matched');
+  document.getElementById('stB').classList.toggle('on',t==='batch');
+  renderStack();
+}
+
+async function poll(){
+  try{const r=await fetch('/api/state');state=await r.json();renderAll();}catch(e){}
+}
+
+function renderAll(){renderHdr();renderQueue();renderCenter();renderStack();}
+
+function renderHdr(){
+  document.getElementById('hQ').textContent=state.queue.length;
+  document.getElementById('hM').textContent=state.matched.length;
+  document.getElementById('hB').textContent=state.batch.length;
+  document.getElementById('mc').textContent=state.matched.length;
+  document.getElementById('bc').textContent=state.batch.length;
+  // Mobile badges
+  const qb=document.getElementById('qBadge');
+  const sb=document.getElementById('sBadge');
+  qb.textContent=state.queue.length; qb.style.display=state.queue.length?'':'none';
+  const tot=state.matched.length+state.batch.length;
+  sb.textContent=tot; sb.style.display=tot?'':'none';
+}
+
+function renderQueue(){
+  document.getElementById('qc').textContent=state.queue.length;
+  document.getElementById('qlist').innerHTML=state.queue.map(c=>`
+    <div class="qi ${c.id===activeId?'active':''}" onclick="selCard('${c.id}');if(isMobile())mobView('match')">
+      ${c.public_url?`<img class="qi-thumb" src="${c.public_url}" onerror="this.style.display='none'">`:`<div class="qi-ph">📷</div>`}
+      <div style="flex:1;min-width:0">
+        <div class="qi-fn">${c.filename}</div>
+        <div class="qi-st ${stCls(c)}">${stTxt(c)}</div>
+      </div>
+    </div>`).join('');
+  if(!activeId||!state.queue.find(c=>c.id===activeId&&c.status==='ready')){
+    const f=state.queue.find(c=>c.status==='ready');
+    if(f)selCard(f.id,false);
+  }
+}
+
+function stCls(c){return{queued:'s-q',uploading:'s-u',identifying:'s-i',ready:'s-r',error:'s-e'}[c.status]||'s-q';}
+function stTxt(c){
+  const sp=c.status!=='ready'&&c.status!=='error'?'<span class="spin"></span>':'';
+  if(c.status==='error')return`⚠ ${(c.error||'').slice(0,28)}`;
+  if(c.status==='ready')return`${(c.candidates||[]).length} matches found`;
+  return sp+({queued:'Queued',uploading:'Uploading…',identifying:'Identifying…'}[c.status]||c.status);
+}
+
+function selCard(id,resetCand=true){
+  activeId=id; if(resetCand){selCand=0;imgRot=0;}
+  renderQueue(); renderCenter();
+}
+
+function renderCenter(){
+  const es=document.getElementById('esEmpty');
+  const ml=document.getElementById('matchLayout');
+  const card=state.queue.find(c=>c.id===activeId);
+  if(!card){
+    ml.style.display='none'; es.style.display='flex';
+    es.innerHTML=state.queue.length===0
+      ?'<div class="es-ico">✅</div><p>All cards matched!<br>Go to <strong>Stack</strong> to export.</p>'
+      :'<div class="es-ico">⏳</div><p>Identifying…<br>Cards appear when ready.</p>';
+    return;
+  }
+  es.style.display='none'; ml.style.display='flex';
+  // Image — onclick opens lightbox; prevents iOS default image navigation
+  const box=document.getElementById('imgBox');
+  box.innerHTML=card.public_url
+    ?`<img id="cimg" src="${card.public_url}" style="transform:rotate(${imgRot}deg);transition:transform .2s;cursor:zoom-in" onclick="openLb(this.src,${imgRot})" onerror="this.parentElement.innerHTML='<div class=img-no>Preview unavailable</div>'">`
+    :'<div class="img-no">No preview</div>';
+  const ss=document.getElementById('sportSel');
+  if(card.sport&&ss.value!==card.sport)ss.value=card.sport;
+
+  const cands=card.candidates||[];
+  document.getElementById('mphCount').textContent=cands.length?`${cands.length} results`:'';
+
+  let html='';
+  if(card.status==='error'){
+    html=`<div class="es"><p style="color:#ef4444">⚠ ${card.error||'Error'}</p></div><span class="skip-lnk" onclick="skipCard('${card.id}')">Skip this card</span>`;
+  } else if(card.status!=='ready'){
+    html=`<div class="es"><span class="spin" style="width:28px;height:28px;border-width:2.5px"></span><p style="margin-top:10px">${stTxt(card)}</p></div>`;
+  } else if(!cands.length){
+    html=`<div class="es">
+      <div class="nm-panel">
+        <p>No matches found.<br>Search by player name or set:</p>
+        <input class="nm-inp" id="nmInp" type="search" placeholder="e.g. Guerrero 2024 Topps Chrome" value="${(card.filename||'').replace(/\.[^.]+$/,'').replace(/[_-]/g,' ')}">
+        <div class="nm-row">
+          <button class="nm-sbtn" onclick="doNmSearch()">🔍 Search</button>
+          <button class="nm-skip" onclick="skipCard('${card.id}')">Skip →</button>
+        </div>
+      </div>
+    </div>`;
+  } else {
+    html=cands.map((c,i)=>{
+      const sel=i===selCand;
+      const conf=Math.round(parseFloat(c.similarity||0));
+      const bcls=conf>=85?'bhi':conf>=65?'bmed':'blo';
+      const hasVar=c.variant&&c.variant.toLowerCase()!=='base';
+      const title=`${c.year||''} ${c.set||''} ${(c.player||'').toUpperCase()}${c.number?' #'+c.number:''}`.trim();
+      const sub=[hasVar?c.variant:null,c.number?`#${c.number}`:null].filter(Boolean).join(' · ')||c.set||'';
+      return`<div class="cg ${sel?'sel':''}" onclick="pickC(${i});doMatch()">
+        <div class="ct-row">
+          <div class="cn">${i+1}</div>
+          <div class="ct">${title}<div class="ct-sub">${sub}</div></div>
+          <div class="cbadge ${bcls}">${conf}%</div>
+        </div>
+      </div>`;
+    }).join('')+`<span class="skip-lnk" onclick="event.stopPropagation();skipCard('${card.id}')">Skip this card →</span>`;
+  }
+  document.getElementById('cands').innerHTML=html;
+}
+
+function rot(d){imgRot=(imgRot+d)%360;const i=document.getElementById('cimg');if(i)i.style.transform=`rotate(${imgRot}deg)`;}
+function pickC(i){selCand=i;renderCenter();}
+
+async function doMatch(){
+  const card=state.queue.find(c=>c.id===activeId&&c.status==='ready');
+  if(!card)return;
+  const sport=document.getElementById('sportSel')?.value||'BASEBALL';
+  await fetch('/api/confirm-match',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:activeId,candidate_index:selCand,sport})});
+  activeId=null;selCand=0;imgRot=0;
+  showStab('matched');showToast('Matched ✓ — fetching comps…');
+  await poll();
+}
+
+async function skipCard(id){
+  await fetch('/api/skip-queue',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+  if(activeId===id){activeId=null;selCand=0;imgRot=0;}
+  await poll();
+}
+
+function tbadge(c){
+  if(c.comp_status!=='done')return`<span class="si-sp">⏳</span>`;
+  const t=c.trend||'flat',p=c.trend_pct||0;
+  return`<span class="tbadge ${t==='up'?'tu':t==='down'?'td':'tf'}">${t==='up'?'↑':t==='down'?'↓':'→'}${p?` ${Math.abs(p)}%`:''}</span>`;
+}
+
+function renderStack(){
+  const items=stab==='matched'?state.matched:state.batch;
+  const bTotal=state.batch.reduce((s,c)=>s+parseFloat(c.price||0),0);
+  document.getElementById('fCount').textContent=state.batch.length;
+  document.getElementById('fTotal').textContent=bTotal.toFixed(2);
+  const rdy=state.matched.filter(c=>c.comp_status==='done').length;
+  const mb=document.getElementById('moveBtn');
+  mb.disabled=rdy===0;
+  mb.textContent=rdy>0?`Move ${rdy} ready to stack →`:'Move ready to stack →';
+  document.getElementById('expBtn').disabled=state.batch.length===0;
+  document.getElementById('sbody').innerHTML=items.map(c=>`
+    <div class="si">
+      <div class="si-title">${c.title||c.filename}</div>
+      <div class="si-row">
+        ${stab==='batch'
+          ?`<span style="font-size:11px;color:#64748b">$</span><input class="si-inp" type="number" step="0.01" min="0.01" value="${parseFloat(c.price||2.49).toFixed(2)}" onchange="updPrice('${c.id}',this.value)" onclick="this.select()">`
+          :`<span class="si-price">$${parseFloat(c.price||2.49).toFixed(2)}</span>`}
+        ${tbadge(c)}
+        ${c.recent_sales!=null?`<span class="si-sales">${c.recent_sales} sales</span>`:''}
+        ${c.comp_high?`<span class="si-sales">Hi $${parseFloat(c.comp_high).toFixed(0)}</span>`:''}
+        <span class="si-x" onclick="${stab==='batch'?`rmBatch('${c.id}')`:`rmMatched('${c.id}')`}">×</span>
+      </div>
+    </div>`).join('')||`<div style="padding:14px 12px;font-size:12px;color:#94a3b8">${stab==='matched'?'Confirmed matches appear here.':'Stack is empty.'}</div>`;
+}
+
+async function moveToBatch(){await fetch('/api/move-to-batch',{method:'POST'});showStab('batch');showToast('Added to stack ✓');if(isMobile())mobView('stack');await poll();}
+async function updPrice(id,v){await fetch('/api/update-price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,price:parseFloat(v)})});await poll();}
+async function rmBatch(id){await fetch('/api/remove-batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});await poll();}
+async function rmMatched(id){await fetch('/api/remove-matched',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});await poll();}
+function exportCSV(){window.location.href='/api/export';showToast('Downloading…');}
+
+// ── Keyboard (desktop) ────────────────────────────────────────────────────────
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT'||isMobile())return;
+  if(phase!==1)return;
+  const card=state.queue.find(c=>c.id===activeId&&c.status==='ready');
+  if(!card)return;
+  const n=parseInt(e.key),max=(card.candidates||[]).length;
+  if(n>=1&&n<=max){pickC(n-1);return;}
+  if(e.key==='Enter'||e.key===' '){e.preventDefault();doMatch();}
+  if(e.key==='Escape')skipCard(activeId);
+  if(e.key==='ArrowDown'){e.preventDefault();pickC(Math.min(selCand+1,max-1));}
+  if(e.key==='ArrowUp'){e.preventDefault();pickC(Math.max(selCand-1,0));}
+});
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+async function openSettings(){
+  const r=await fetch('/api/settings');const s=await r.json();
+  document.getElementById('s_sku_prefix').value=s.sku_prefix||'DFS';
+  document.getElementById('s_default_price').value=s.default_price||2.49;
+  document.getElementById('s_condition_id').value=s.condition_id||'4000';
+  document.getElementById('s_condition_desc').value=s.condition_desc||'Excellent';
+  document.getElementById('s_postal').value=s.ebay_postal_code||'';
+  document.getElementById('s_desc_tmpl').value=s.description_template||'';
+  const cats=s.store_categories||{};
+  ['BASEBALL','FOOTBALL','BASKETBALL','SOCCER','HOCKEY'].forEach(sp=>{const el=document.getElementById('sc_'+sp);if(el)el.value=cats[sp]||'';});
+  previewDesc();
+  document.getElementById('settingsDrawer').classList.add('open');
+  document.getElementById('settingsOverlay').classList.add('open');
+}
+function closeSettings(){
+  document.getElementById('settingsDrawer').classList.remove('open');
+  document.getElementById('settingsOverlay').classList.remove('open');
+}
+function previewDesc(){
+  const t=document.getElementById('s_desc_tmpl').value;
+  const p=t.replace(/\[LISTING_TITLE\]/g,'2026 Panini Prizm EBERECHI EZE #22').replace(/\[FRONT_IMAGE\]/g,'https://placehold.co/120x160/e2e8f0/64748b?text=Card');
+  document.getElementById('descPreview').innerHTML=p||'<span style="color:#94a3b8;font-size:12px">Enter template above to preview.</span>';
+}
+async function saveSettings(){
+  const cats={};
+  ['BASEBALL','FOOTBALL','BASKETBALL','SOCCER','HOCKEY'].forEach(sp=>{const el=document.getElementById('sc_'+sp);if(el)cats[sp]=el.value.trim();});
+  await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    sku_prefix:document.getElementById('s_sku_prefix').value.trim()||'DFS',
+    default_price:parseFloat(document.getElementById('s_default_price').value)||2.49,
+    condition_id:document.getElementById('s_condition_id').value,
+    condition_desc:document.getElementById('s_condition_desc').value,
+    ebay_postal_code:document.getElementById('s_postal').value.trim(),
+    description_template:document.getElementById('s_desc_tmpl').value,
+    store_categories:cats,
+  })});
+  showToast('Settings saved ✓'); closeSettings();
+}
+
+function showToast(msg){const e=document.getElementById('toast');e.textContent=msg;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2500);}
+
+// ── Lightbox ──────────────────────────────────────────────────────────────────
+let lbRotDeg=0;
+function openLb(src,rot){
+  lbRotDeg=rot||0;
+  const img=document.getElementById('lbImg');
+  img.src=src;
+  img.style.transform=`rotate(${lbRotDeg}deg)`;
+  document.getElementById('lb').classList.add('open');
+  // Push a history entry so the back button closes the lightbox instead of leaving the app
+  history.pushState({lb:true},'');
+}
+function closeLb(){
+  document.getElementById('lb').classList.remove('open');
+}
+function lbRot(){
+  lbRotDeg=(lbRotDeg+90)%360;
+  document.getElementById('lbImg').style.transform=`rotate(${lbRotDeg}deg)`;
+  imgRot=lbRotDeg;
+  const ci=document.getElementById('cimg');
+  if(ci)ci.style.transform=`rotate(${imgRot}deg)`;
+}
+// Back button closes lightbox instead of navigating away
+window.addEventListener('popstate',e=>{
+  if(document.getElementById('lb').classList.contains('open')){
+    closeLb();
+  }
+});
+// Escape key also closes
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.getElementById('lb').classList.contains('open')){history.back();}});
+
+// ── No-match inline search ────────────────────────────────────────────────────
+async function doNmSearch(){
+  const inp=document.getElementById('nmInp');
+  if(!inp||!activeId)return;
+  const q=inp.value.trim();
+  if(!q)return;
+  document.getElementById('catSearch').value=q;
+  await fetch('/api/catalog-search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:activeId,query:q})});
+  await poll();
+}
+
+setInterval(poll,2000);poll();
+</script>
+</body>
+</html>

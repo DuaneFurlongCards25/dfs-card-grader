@@ -16,7 +16,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.46"
+APP_VERSION = "1.6.47"
 APP_TAGLINE = "Real-time market intelligence for card sellers."
 
 # Daily cap on live CardHedger look-ups per member (protects the API budget).
@@ -2541,6 +2541,23 @@ with st.sidebar:
         """,
         unsafe_allow_html=True,
     )
+
+    # ── The scanning half of the operation ────────────────────────────────
+    # PriceDesk runs the scanner, identifies cards, confirms parallels and
+    # builds the eBay file. CardPulse holds the lots, the sales and the money.
+    # They already share a database through the same Worker — this is the
+    # missing door between them, so the two stop being two separate apps you
+    # have to remember to open.
+    _pd_port = 8501
+    st.link_button("🎯  Open PriceDesk — scan & price",
+                   f"http://localhost:{_pd_port}",
+                   use_container_width=True,
+                   help="Scan a stack, confirm parallels, price them and build "
+                        "the eBay upload. Runs on this Mac. If it does not "
+                        "open, start it with START.command in the PriceDesk "
+                        "folder.")
+    st.caption("Lots pushed from PriceDesk land in **Purchases** here.")
+    st.markdown("---")
 
     access_name = st.session_state.get("access_name", "")
     if access_name:
