@@ -18,7 +18,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.8.1"
+APP_VERSION = "1.8.2"
 APP_TAGLINE = "Real-time market intelligence for card sellers."
 
 # Daily cap on live CardHedger look-ups per member (protects the API budget).
@@ -11964,16 +11964,19 @@ if _active_tab == 12:
 # Doing that card by card is how lots get bought on a feel.
 # ══════════════════════════════════════════════════════════════════════════════
 if _active_tab == 13:
-    st.subheader("💵 Buy Desk — what is this stack worth to you?")
-    st.caption("Paste their list, one card per line. You get a number to "
-               "offer for the whole thing, and the cards to hand back.")
+    st.subheader("💵 Buy Desk — what should you pay?")
+    st.caption("One card or fifty. Type what the card says, one per line — "
+               "add the grade (`psa 9`, `bgs 9.5`) and it prices the slab "
+               "rather than the raw card.")
 
     lot_text = st.text_area(
-        "Their list", height=170, key="bd_text",
-        placeholder=("jasson dominguez 2020 bowman chrome\n"
+        "What are you looking at?", height=150, key="bd_text",
+        placeholder=("2024 topps chrome sapphire jayden daniels #201 psa 9\n"
                      "walker jenkins fp-3\n"
-                     "2024 prizm jayden daniels #2"),
-        label_visibility="collapsed")
+                     "2024 prizm jayden daniels #347 neon green pulsar"),
+        label_visibility="collapsed",
+        help="One card per line. A single line is fine — this is not only for "
+             "big lots.")
 
     b1, b2, b3 = st.columns([1.2, 1.6, 2])
     bd_target = b1.number_input("Return %", 10, 200, 35, step=5, key="bd_ret")
@@ -11999,12 +12002,22 @@ if _active_tab == 13:
                    "since pricing a raw card as a slab overpays.")
 
     lines_in = [l for l in lot_text.splitlines() if l.strip()]
-    if lines_in:
-        st.caption(f"**{len(lines_in)} cards** — one CardHedger lookup each, "
-                   f"and the limit is 10 a minute.")
+    n_in = len(lines_in)
+    if n_in:
+        # One lookup per card against a ten-a-minute limit. For one or two
+        # cards that is instant and not worth mentioning; for fifty it is five
+        # minutes and worth saying before the button is pressed.
+        if n_in > 10:
+            mins = n_in / 10.0
+            st.caption(f"**{n_in} cards** — about {mins:.0f} min at "
+                       f"CardHedger's 10-a-minute limit.")
+        else:
+            st.caption(f"**{n_in} card{'s' if n_in > 1 else ''}** — a few "
+                       f"seconds.")
 
-    if st.button("Price the stack", type="primary", disabled=not lines_in,
-                 key="bd_go"):
+    btn = ("Price this card" if n_in == 1 else
+           f"Price these {n_in} cards" if n_in else "Price")
+    if st.button(btn, type="primary", disabled=not lines_in, key="bd_go"):
         bar = st.progress(0.0, text="Starting…")
         out = []
         for i, q in enumerate(lines_in):
@@ -12086,16 +12099,32 @@ if _active_tab == 13:
         retail = sum((o[1].raw or 0) for o in out if o[1])
         dead = sum((o[1].raw or 0) for o in out if o[1] and o[1].sits)
         slabs = sum(1 for o in out if buying.is_graded(o[4]))
-        o1, o2, o3, o4 = st.columns(4)
-        o1.metric("Offer the stack", f"${total:,.2f}")
-        o2.metric("If it all sold", f"${retail:,.2f}")
-        o3.metric("Buy", sum(1 for o in out if o[3] == "buy"))
-        o4.metric("Hand back",
-                  sum(1 for o in out if o[3] in ("sits", "not found", "no price")))
+
+        # One card does not have a "stack". Show what matters about THAT card;
+        # show the roll-up only when there is something to roll up.
+        if len(out) == 1:
+            q, sig, offer, verdict, grade, reason, band = out[0]
+            o1, o2, o3, o4 = st.columns(4)
+            o1.metric("Pay no more than", f"${offer:,.2f}")
+            o2.metric(f"{grade} value" if buying.is_graded(grade) else "Raw value",
+                      f"${(sig.raw or 0):,.2f}" if sig else "—")
+            o3.metric("Sold, 30 days", sig.sales_30d if sig else 0,
+                      delta=(sig.velocity if sig else None), delta_color="off")
+            o4.metric("Verdict", {"buy": "Buy", "thin": "Thin",
+                                  "sits": "Walk", "not found": "No match",
+                                  "no price": "No price"}.get(verdict, verdict))
+        else:
+            o1, o2, o3, o4 = st.columns(4)
+            o1.metric("Offer for all of it", f"${total:,.2f}")
+            o2.metric("If every card sold", f"${retail:,.2f}")
+            o3.metric("Worth buying", sum(1 for o in out if o[3] == "buy"))
+            o4.metric("Hand back",
+                      sum(1 for o in out if o[3] in ("sits", "not found",
+                                                     "no price")))
         if slabs:
             st.caption(f"{slabs} of {len(out)} priced as graded slabs at their "
                        f"own grade; the rest raw.")
-        if dead:
+        if dead and len(out) > 1:
             st.warning(f"**${dead:,.2f} of that retail is in cards with no "
                        f"sales in 30 days.** That is the line item that turns "
                        f"a good-looking stack into months of shelf.")
