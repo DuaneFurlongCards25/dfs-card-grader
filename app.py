@@ -18,7 +18,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.8.0"
+APP_VERSION = "1.8.1"
 APP_TAGLINE = "Real-time market intelligence for card sellers."
 
 # Daily cap on live CardHedger look-ups per member (protects the API budget).
@@ -2544,21 +2544,11 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    # ── The scanning half of the operation ────────────────────────────────
-    # PriceDesk runs the scanner, identifies cards, confirms parallels and
-    # builds the eBay file. CardPulse holds the lots, the sales and the money.
-    # They already share a database through the same Worker — this is the
-    # missing door between them, so the two stop being two separate apps you
-    # have to remember to open.
-    _pd_port = 8501
-    st.link_button("🎯  Open PriceDesk — scan & price",
-                   f"http://localhost:{_pd_port}",
-                   use_container_width=True,
-                   help="Scan a stack, confirm parallels, price them and build "
-                        "the eBay upload. Runs on this Mac. If it does not "
-                        "open, start it with START.command in the PriceDesk "
-                        "folder.")
-    st.caption("Lots pushed from PriceDesk land in **Purchases** here.")
+    # The PriceDesk link lived here. It was removed on 6 Sep 2026 when that app
+    # was retired for listing: Heystack and CDP do the scanning and the eBay
+    # uploads, and the parts of PriceDesk still in use — buying, triage and SKU
+    # labels — are tabs in this app now. A door to an app nobody should open
+    # is worse than no door.
     st.markdown("---")
 
     access_name = st.session_state.get("access_name", "")
