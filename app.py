@@ -1,5 +1,6 @@
 import streamlit as st
 import dfs_buying as buying
+import dfs_labels as labels
 import pandas as pd
 import json
 import urllib.request
@@ -17,7 +18,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.7.1"
 APP_TAGLINE = "Real-time market intelligence for card sellers."
 
 # Daily cap on live CardHedger look-ups per member (protects the API budget).
@@ -2879,7 +2880,7 @@ _NAV_LABELS = [
     "🔍 Card Research", "🔥 Hot Movers", "📷 Scan", "📦 Inventory Check",
     "🧰 Operations", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake",
     "🏷️ Consignments", "📦 Purchases", "💰 Sales & P&L", "📸 Image Prep",
-    "🗂️ Triage", "💵 Buy Desk",
+    "🗂️ Triage", "💵 Buy Desk", "🏷️ Labels",
 ]
 
 # If a sidebar feature button was clicked, update both nav state AND the radio widget's own state key
@@ -12068,3 +12069,76 @@ if _active_tab == 13:
         st.caption("Offers already take out the platform's measured cut and "
                    "$0.75 handling, then the return you asked for. A card that "
                    "does not trade gets no bid — that is deliberate.")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 14 — SKU Labels
+#
+# Ported from PriceDesk when that app was retired for listing. A SKU on its own
+# tells you nothing while you are holding a card looking for its sleeve, so
+# every label carries the card name underneath as a spot check.
+# ══════════════════════════════════════════════════════════════════════════════
+if _active_tab == 14:
+    st.subheader("🏷️ SKU Labels — 2″ × 1″ thermal")
+    st.caption("Drop in an eBay active-listings report or any upload file, pick "
+               "the batches, print. The file is read here in this session and "
+               "sent nowhere.")
+
+    lab_file = st.file_uploader(
+        "Listings file (CSV)", type=["csv"], key="lbl_upload",
+        help="eBay Seller Hub → Reports → Download → Active listings. "
+             "A CDP export or a Heystack upload file works too.")
+
+    if lab_file is None:
+        st.info("**Where to get the file:** eBay Seller Hub → **Reports** → "
+                "**Download** → *Active listings*. It carries the SKU, title "
+                "and current price for everything you have live.")
+    else:
+        try:
+            parsed = labels.read_listings(
+                lab_file.getvalue().decode("utf-8-sig", errors="replace"))
+        except Exception as exc:                                   # noqa: BLE001
+            parsed = []
+            st.error(f"**Couldn't read that file.** {exc}")
+
+        if not parsed:
+            st.warning("No listings found. The file needs a SKU column "
+                       "(*Custom label (SKU)* or *CustomLabel*) and a title.")
+        else:
+            groups = {}
+            for it in parsed:
+                groups.setdefault(it["batch"], []).append(it)
+            # SKUs carry their date and the file runs oldest-first, so the most
+            # recent batch is the last one discovered.
+            order = list(dict.fromkeys(it["batch"] for it in parsed))[::-1]
+            st.success(f"Read **{len(parsed):,}** listings across "
+                       f"**{len(groups)}** batches.")
+
+            search = st.text_input("Filter batches", key="lbl_search",
+                                   placeholder="GRIMWHAT, JIMMYWHT, 08-27…")
+            shown = ([b for b in order if search.lower() in b.lower()]
+                     if search else order)
+
+            picked = st.multiselect(
+                "Batches to print", shown, key="lbl_batches",
+                format_func=lambda b: f"{b}  ({len(groups[b])} cards)")
+
+            chosen = [it for b in picked for it in groups[b]]
+            if chosen:
+                show_price = st.checkbox("Put the price on the label",
+                                         value=True, key="lbl_price")
+                st.download_button(
+                    f"🏷️ Print labels ({len(chosen)} · 2″ × 1″)",
+                    labels.labels_from_listings(chosen, show_price=show_price),
+                    "cardpulse-sku-labels.html", "text/html", type="primary",
+                    key="lbl_dl")
+                st.caption("Open it, **Cmd-P**, margins **None**, scaling "
+                           "**100%** — not 'fit to page', or the labels drift "
+                           "off the roll.")
+                st.dataframe(pd.DataFrame([{
+                    "SKU": it["sku"],
+                    "Label reads": labels.name_from_title(it["title"]),
+                    "Price": it["price"],
+                } for it in chosen]), hide_index=True, width='stretch')
+            elif picked:
+                st.caption("Those batches have no cards in the file.")
