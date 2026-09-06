@@ -292,3 +292,61 @@ def read_ebay_report(text_or_rows, today=None) -> list:
             fmt=(d.get("Format") or "").strip(),
         ))
     return out
+
+# ─── Slabs ────────────────────────────────────────────────────────────────────
+# A graded card is a different card. The 2024 Prizm Jayden Daniels Neon Green
+# Pulsar is $20 raw and $34.90 in a PSA 9; the Topps Chrome Sapphire is $18.51
+# raw and $80.00 in a PSA 9 — more than four times the raw price. Pricing a
+# slab off the raw comp is not a small error, and it is the error that made two
+# real cards look six times overpriced when they were not.
+#
+# So the grade is read off the line the seller typed, and the FMV endpoint is
+# asked for that grade specifically.
+
+GRADERS = {
+    "psa": "PSA", "bgs": "BGS", "beckett": "BGS", "sgc": "SGC",
+    "cgc": "CGC", "csg": "CSG", "hga": "HGA", "ace": "ACE",
+}
+
+# "PSA 9", "psa9", "BGS 9.5", "SGC 10", "PSA GEM MT 10", "CGC 9.5"
+_GRADE_RE = re.compile(
+    r"\b(psa|bgs|beckett|sgc|cgc|csg|hga|ace)[\s\-:]*"      # no \b: "sgc10" has none
+    r"(?:gem\s*mt|gem|mint|mt|nm)?[\s\-:]*"
+    r"(10(?:\.0)?|9(?:\.5)?|8(?:\.5)?|7(?:\.5)?|6(?:\.5)?|[1-5](?:\.5)?)\b",
+    re.I)
+
+# A bare "PSA 10" with no number is still a slab; and "raw"/"ungraded" is
+# explicit about not being one.
+_RAW_RE = re.compile(r"\b(raw|ungraded|no\s*grade)\b", re.I)
+
+
+def parse_grade(line: str) -> str:
+    """The grade label CardHedger wants ('PSA 9'), or 'Raw'.
+
+    Returns 'Raw' both when the line says so and when it says nothing — an
+    ungraded card is the common case and the safe default, because pricing a
+    raw card as a slab overpays and that is the expensive direction.
+    """
+    if _RAW_RE.search(line or ""):
+        return "Raw"
+    m = _GRADE_RE.search(line or "")
+    if not m:
+        return "Raw"
+    grader = GRADERS.get(m.group(1).lower(), m.group(1).upper())
+    num = m.group(2)
+    if num.endswith(".0"):
+        num = num[:-2]
+    return f"{grader} {num}"
+
+
+def strip_grade(line: str) -> str:
+    """The line without its grade, for searching the catalogue.
+
+    "psa 9" in a search query matches nothing useful — the catalogue indexes
+    the card, not the slab.
+    """
+    return re.sub(r"\s{2,}", " ", _GRADE_RE.sub(" ", _RAW_RE.sub(" ", line or ""))).strip()
+
+
+def is_graded(grade: str) -> bool:
+    return bool(grade) and grade.strip().lower() != "raw"

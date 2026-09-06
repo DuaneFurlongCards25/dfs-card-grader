@@ -18,7 +18,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.7.1"
+APP_VERSION = "1.8.0"
 APP_TAGLINE = "Real-time market intelligence for card sellers."
 
 # Daily cap on live CardHedger look-ups per member (protects the API budget).
@@ -11992,20 +11992,43 @@ if _active_tab == 13:
         format_func=lambda p: {"ebay": "eBay 14.4%",
                                "dc_sports": "DC Sports 17.7%",
                                "collx": "CollX 21.3%"}[p])
+    g1, g2 = st.columns([1.4, 2.6])
+    bd_auto_grade = g1.checkbox(
+        "Read the grade from each line", value=True, key="bd_autograde",
+        help="Writes 'PSA 9', 'BGS 9.5', 'SGC 10' straight into the line and "
+             "each card is priced at its own grade. Untick to price the whole "
+             "stack at one grade.")
+    bd_grade = "Raw"
+    if not bd_auto_grade:
+        bd_grade = g2.selectbox(
+            "Price everything as", ["Raw", "PSA 10", "PSA 9", "PSA 8",
+                                    "BGS 9.5", "BGS 9", "SGC 10", "SGC 9",
+                                    "CGC 9.5", "CGC 9"], key="bd_grade")
+    else:
+        g2.caption("\n\nA line with no grade is priced raw — the safe default, "
+                   "since pricing a raw card as a slab overpays.")
+
     lines_in = [l for l in lot_text.splitlines() if l.strip()]
     if lines_in:
-        b3.caption(f"\n\n**{len(lines_in)} cards** — one CardHedger lookup "
-                   f"each, and the limit is 10 a minute.")
+        st.caption(f"**{len(lines_in)} cards** — one CardHedger lookup each, "
+                   f"and the limit is 10 a minute.")
 
     if st.button("Price the stack", type="primary", disabled=not lines_in,
                  key="bd_go"):
         bar = st.progress(0.0, text="Starting…")
         out = []
         for i, q in enumerate(lines_in):
-            bar.progress(i / max(len(lines_in), 1), text=f"{i+1}/{len(lines_in)}  {q[:50]}")
-            hits = ch_search(q) or []
+            bar.progress(i / max(len(lines_in), 1),
+                         text=f"{i+1}/{len(lines_in)}  {q[:50]}")
+            # A slab is a different card from the raw one — the Sapphire
+            # Jayden Daniels is $18.51 raw and $80.00 in a PSA 9. Read the
+            # grade off the line, and search the catalogue WITHOUT it, because
+            # "psa 9" matches nothing in a card index.
+            grade = buying.parse_grade(q) if bd_auto_grade else bd_grade
+            query = buying.strip_grade(q)
+            hits = ch_search(query) or []
             best = None
-            want = {w for w in re.findall(r"[a-z0-9']+", q.lower()) if len(w) > 2}
+            want = {w for w in re.findall(r"[a-z0-9']+", query.lower()) if len(w) > 2}
             for c in hits[:10]:
                 names = {w for w in re.findall(r"[a-z0-9']+",
                          (c.get("player") or "").lower()) if len(w) > 2}
@@ -12014,23 +12037,46 @@ if _active_tab == 13:
                 best = c
                 break
             if not best:
-                out.append((q, None, 0.0, "not found",
-                            "Nothing in the catalogue matches that line."))
+                out.append((q, None, 0.0, "not found", grade,
+                            "Nothing in the catalogue matches that line.", None))
                 continue
-            raw = None
-            for p in (best.get("prices") or []):
-                if str(p.get("grade")) == "Raw":
-                    try: raw = float(p.get("price"))
-                    except (TypeError, ValueError): pass
+
+            # Graded: ask the FMV endpoint for that grade, which carries a
+            # confidence band. Raw: the search response already has the price.
+            band = None
+            price = None
+            if buying.is_graded(grade):
+                fm = ch_fmv(best.get("card_id"), grade) or {}
+                price = fmv_price(fm)
+                if price:
+                    band = (fm.get("price_low"), fm.get("price_high"),
+                            fm.get("confidence_grade"))
+            if price is None:
+                for p_ in (best.get("prices") or []):
+                    if str(p_.get("grade")) == grade:
+                        try: price = float(p_.get("price"))
+                        except (TypeError, ValueError): pass
+            if price is None and buying.is_graded(grade):
+                out.append((q, None, 0.0, "no price", grade,
+                            f"No {grade} sales on record for this card. "
+                            f"Price it raw, or grade-check it yourself.", None))
+                continue
+            if price is None:
+                for p_ in (best.get("prices") or []):
+                    if str(p_.get("grade")) == "Raw":
+                        try: price = float(p_.get("price"))
+                        except (TypeError, ValueError): pass
+
             sig = buying.BuySignal(
                 description=best.get("description") or "",
                 player=best.get("player") or "",
                 number=str(best.get("number") or ""),
                 variant=best.get("variant") or "",
-                raw=raw, sales_30d=int(best.get("30 Day Sales") or 0))
+                raw=price, sales_30d=int(best.get("30 Day Sales") or 0))
             mb = sig.max_buy(bd_target / 100.0, bd_plat)
             if mb is None:
-                out.append((q, sig, 0.0, "thin", "No raw price to work back from."))
+                out.append((q, sig, 0.0, "thin", grade,
+                            "No price to work back from.", band))
             else:
                 mult = buying.haircut(sig.sales_30d)
                 offer = round(mb * mult, 2)
@@ -12040,7 +12086,7 @@ if _active_tab == 13:
                           f"but nothing says it will." if mult == 0 else
                           f"{sig.velocity} — {sig.sales_30d} sold in 30 days."
                           + ("" if mult == 1 else f" ${mb:.2f} → ${offer:.2f}."))
-                out.append((q, sig, offer, verdict, reason))
+                out.append((q, sig, offer, verdict, grade, reason, band))
         bar.empty()
         st.session_state["bd_out"] = out
 
@@ -12049,96 +12095,33 @@ if _active_tab == 13:
         total = sum(o[2] for o in out)
         retail = sum((o[1].raw or 0) for o in out if o[1])
         dead = sum((o[1].raw or 0) for o in out if o[1] and o[1].sits)
+        slabs = sum(1 for o in out if buying.is_graded(o[4]))
         o1, o2, o3, o4 = st.columns(4)
         o1.metric("Offer the stack", f"${total:,.2f}")
         o2.metric("If it all sold", f"${retail:,.2f}")
         o3.metric("Buy", sum(1 for o in out if o[3] == "buy"))
-        o4.metric("Hand back", sum(1 for o in out if o[3] in ("sits", "not found")))
+        o4.metric("Hand back",
+                  sum(1 for o in out if o[3] in ("sits", "not found", "no price")))
+        if slabs:
+            st.caption(f"{slabs} of {len(out)} priced as graded slabs at their "
+                       f"own grade; the rest raw.")
         if dead:
             st.warning(f"**${dead:,.2f} of that retail is in cards with no "
                        f"sales in 30 days.** That is the line item that turns "
                        f"a good-looking stack into months of shelf.")
-        for q, sig, offer, verdict, reason in out:
+        for q, sig, offer, verdict, grade, reason, band in out:
             icon = {"buy": "✅", "thin": "⚠️", "sits": "🛑",
-                    "not found": "❓"}.get(verdict, "•")
+                    "not found": "❓", "no price": "❓"}.get(verdict, "•")
             with st.container(border=True):
                 c1, c2 = st.columns([5, 1.3])
-                c1.markdown(f"{icon} **{sig.description if sig else q}**")
+                title = sig.description if sig else q
+                pill = f"  `{grade}`" if buying.is_graded(grade) else ""
+                c1.markdown(f"{icon} **{title}**{pill}")
                 c1.caption(reason)
+                if band and band[0] and band[1]:
+                    c1.caption(f"{grade} FMV band ${band[0]:,.2f}–${band[1]:,.2f}"
+                               + (f" · confidence {band[2]}" if band[2] else ""))
                 c2.metric("Offer", f"${offer:,.2f}")
         st.caption("Offers already take out the platform's measured cut and "
                    "$0.75 handling, then the return you asked for. A card that "
                    "does not trade gets no bid — that is deliberate.")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 14 — SKU Labels
-#
-# Ported from PriceDesk when that app was retired for listing. A SKU on its own
-# tells you nothing while you are holding a card looking for its sleeve, so
-# every label carries the card name underneath as a spot check.
-# ══════════════════════════════════════════════════════════════════════════════
-if _active_tab == 14:
-    st.subheader("🏷️ SKU Labels — 2″ × 1″ thermal")
-    st.caption("Drop in an eBay active-listings report or any upload file, pick "
-               "the batches, print. The file is read here in this session and "
-               "sent nowhere.")
-
-    lab_file = st.file_uploader(
-        "Listings file (CSV)", type=["csv"], key="lbl_upload",
-        help="eBay Seller Hub → Reports → Download → Active listings. "
-             "A CDP export or a Heystack upload file works too.")
-
-    if lab_file is None:
-        st.info("**Where to get the file:** eBay Seller Hub → **Reports** → "
-                "**Download** → *Active listings*. It carries the SKU, title "
-                "and current price for everything you have live.")
-    else:
-        try:
-            parsed = labels.read_listings(
-                lab_file.getvalue().decode("utf-8-sig", errors="replace"))
-        except Exception as exc:                                   # noqa: BLE001
-            parsed = []
-            st.error(f"**Couldn't read that file.** {exc}")
-
-        if not parsed:
-            st.warning("No listings found. The file needs a SKU column "
-                       "(*Custom label (SKU)* or *CustomLabel*) and a title.")
-        else:
-            groups = {}
-            for it in parsed:
-                groups.setdefault(it["batch"], []).append(it)
-            # SKUs carry their date and the file runs oldest-first, so the most
-            # recent batch is the last one discovered.
-            order = list(dict.fromkeys(it["batch"] for it in parsed))[::-1]
-            st.success(f"Read **{len(parsed):,}** listings across "
-                       f"**{len(groups)}** batches.")
-
-            search = st.text_input("Filter batches", key="lbl_search",
-                                   placeholder="GRIMWHAT, JIMMYWHT, 08-27…")
-            shown = ([b for b in order if search.lower() in b.lower()]
-                     if search else order)
-
-            picked = st.multiselect(
-                "Batches to print", shown, key="lbl_batches",
-                format_func=lambda b: f"{b}  ({len(groups[b])} cards)")
-
-            chosen = [it for b in picked for it in groups[b]]
-            if chosen:
-                show_price = st.checkbox("Put the price on the label",
-                                         value=True, key="lbl_price")
-                st.download_button(
-                    f"🏷️ Print labels ({len(chosen)} · 2″ × 1″)",
-                    labels.labels_from_listings(chosen, show_price=show_price),
-                    "cardpulse-sku-labels.html", "text/html", type="primary",
-                    key="lbl_dl")
-                st.caption("Open it, **Cmd-P**, margins **None**, scaling "
-                           "**100%** — not 'fit to page', or the labels drift "
-                           "off the roll.")
-                st.dataframe(pd.DataFrame([{
-                    "SKU": it["sku"],
-                    "Label reads": labels.name_from_title(it["title"]),
-                    "Price": it["price"],
-                } for it in chosen]), hide_index=True, width='stretch')
-            elif picked:
-                st.caption("Those batches have no cards in the file.")
