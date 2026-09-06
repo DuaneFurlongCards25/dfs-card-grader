@@ -1,4 +1,5 @@
 import streamlit as st
+import dfs_buying as buying
 import pandas as pd
 import json
 import urllib.request
@@ -16,7 +17,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-APP_VERSION = "1.6.47"
+APP_VERSION = "1.7.0"
 APP_TAGLINE = "Real-time market intelligence for card sellers."
 
 # Daily cap on live CardHedger look-ups per member (protects the API budget).
@@ -2878,6 +2879,7 @@ _NAV_LABELS = [
     "🔍 Card Research", "🔥 Hot Movers", "📷 Scan", "📦 Inventory Check",
     "🧰 Operations", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake",
     "🏷️ Consignments", "📦 Purchases", "💰 Sales & P&L", "📸 Image Prep",
+    "🗂️ Triage", "💵 Buy Desk",
 ]
 
 # If a sidebar feature button was clicked, update both nav state AND the radio widget's own state key
@@ -11867,3 +11869,202 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 12 — Triage
+#
+# The store is 3,720 listings and 3,555 of them are under $10. That band is
+# 2.6% of the watchers, 16% of the revenue and 64% of the work. This tab is
+# how it stops being listed one card at a time.
+# ══════════════════════════════════════════════════════════════════════════════
+if _active_tab == 12:
+    st.subheader("🗂️ Triage — what to do with what you already own")
+    st.caption("Drop in an eBay active-listings report. Every listing gets an "
+               "action and a reason, and the piles come out as files you can "
+               "work from.")
+
+    up = st.file_uploader("eBay active-listings report (CSV)",
+                          type=["csv"], key="tri_up")
+
+    tc1, tc2, tc3 = st.columns(3)
+    bulk_ceiling = tc1.number_input(
+        "Bulk below ($)", 1.0, 50.0, float(buying.BULK_CEILING), step=1.0,
+        help="Under this, a card is not worth listing on its own. Default is "
+             "$10 — measured: that band is 64% of the work and 16% of the money.")
+    auction_floor = tc2.number_input(
+        "Auction above ($)", 5.0, 200.0, float(buying.AUCTION_FLOOR), step=5.0,
+        help="Above this, enough people watch for an auction to find a bidder. "
+             "Watcher rate goes 21.9% → 30.8% at $25.")
+    stale_days = tc3.number_input(
+        "Stale after (days)", 14, 365, int(buying.STALE_DAYS), step=7,
+        help="Unsold this long at this price means the price or the audience "
+             "is wrong.")
+
+    if up is not None:
+        raw = up.getvalue().decode("utf-8-sig", errors="replace")
+        listings = buying.read_ebay_report(raw)
+        if not listings:
+            st.error("No listings found. eBay puts a preamble above the real "
+                     "header — this looks for the row containing 'Item "
+                     "number'. If they changed it, say so and I will fix it.")
+        else:
+            res = buying.triage_all(
+                listings, bulk_ceiling=bulk_ceiling,
+                auction_floor=auction_floor, stale_days=int(stale_days))
+            summary = buying.summarise(res)
+
+            ages = [l.age_days for l in listings if l.age_days is not None]
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Listings", f"{len(listings):,}")
+            m2.metric("Asking", f"${sum(l.price for l in listings):,.0f}")
+            m3.metric("Net if it all sold",
+                      f"${sum(l.net for l in listings):,.0f}",
+                      help="After the platform's measured 14.4% and $0.75 "
+                           "handling. It will not all sell.")
+            if ages:
+                ages.sort()
+                m4.metric("Median age", f"{ages[len(ages)//2]}d",
+                          delta=f"{sum(1 for a in ages if a > 180)} over 180d",
+                          delta_color="off")
+
+            st.markdown("---")
+            for action in buying.ACTIONS:
+                if action not in summary:
+                    continue
+                v = summary[action]
+                rows = [t for t in res if t.action == action]
+                with st.expander(
+                        f"{buying.ACTION_LABEL[action]} — {v['count']:,} cards"
+                        f"  ·  ${v['ask']:,.2f} asking  ·  ${v['net']:,.2f} net",
+                        expanded=action in ("auction", "consign", "reprice")):
+                    st.caption(rows[0].reason)
+                    import pandas as _pd
+                    df = _pd.DataFrame([{
+                        "Watch": t.listing.watchers,
+                        "Ask": t.listing.price,
+                        "Start": t.suggested_start or None,
+                        "Age": t.listing.age_days,
+                        "SKU": t.listing.sku,
+                        "ItemID": t.listing.item_id,
+                        "Title": t.listing.title,
+                    } for t in rows]).sort_values(
+                        ["Watch", "Ask"], ascending=[False, False])
+                    st.dataframe(df, width='stretch', hide_index=True,
+                                 height=min(420, 40 + 35 * min(len(df), 10)))
+                    st.download_button(
+                        f"⬇️ {buying.ACTION_LABEL[action]} list",
+                        df.to_csv(index=False).encode(),
+                        file_name=f"triage-{action}.csv", mime="text/csv",
+                        key=f"dl_{action}")
+
+            st.info(
+                "**The pile that matters is the bulk one.** Every card in it "
+                "costs roughly the same minutes to list and ship as a $200 "
+                "card, and returns a few dollars. Moving it to lots, Whatnot "
+                "or consignment is what buys back the time to chase the cards "
+                "that actually pay.")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 13 — Buy Desk
+#
+# Somebody messages a list of what they want to sell and waits for a number.
+# Doing that card by card is how lots get bought on a feel.
+# ══════════════════════════════════════════════════════════════════════════════
+if _active_tab == 13:
+    st.subheader("💵 Buy Desk — what is this stack worth to you?")
+    st.caption("Paste their list, one card per line. You get a number to "
+               "offer for the whole thing, and the cards to hand back.")
+
+    lot_text = st.text_area(
+        "Their list", height=170, key="bd_text",
+        placeholder=("jasson dominguez 2020 bowman chrome\n"
+                     "walker jenkins fp-3\n"
+                     "2024 prizm jayden daniels #2"),
+        label_visibility="collapsed")
+
+    b1, b2, b3 = st.columns([1.2, 1.6, 2])
+    bd_target = b1.number_input("Return %", 10, 200, 35, step=5, key="bd_ret")
+    bd_plat = b2.selectbox(
+        "Selling on", ["ebay", "dc_sports", "collx"], key="bd_plat",
+        format_func=lambda p: {"ebay": "eBay 14.4%",
+                               "dc_sports": "DC Sports 17.7%",
+                               "collx": "CollX 21.3%"}[p])
+    lines_in = [l for l in lot_text.splitlines() if l.strip()]
+    if lines_in:
+        b3.caption(f"\n\n**{len(lines_in)} cards** — one CardHedger lookup "
+                   f"each, and the limit is 10 a minute.")
+
+    if st.button("Price the stack", type="primary", disabled=not lines_in,
+                 key="bd_go"):
+        bar = st.progress(0.0, text="Starting…")
+        out = []
+        for i, q in enumerate(lines_in):
+            bar.progress(i / max(len(lines_in), 1), text=f"{i+1}/{len(lines_in)}  {q[:50]}")
+            hits = ch_search(q) or []
+            best = None
+            want = {w for w in re.findall(r"[a-z0-9']+", q.lower()) if len(w) > 2}
+            for c in hits[:10]:
+                names = {w for w in re.findall(r"[a-z0-9']+",
+                         (c.get("player") or "").lower()) if len(w) > 2}
+                if not names or not (names & want):
+                    continue
+                best = c
+                break
+            if not best:
+                out.append((q, None, 0.0, "not found",
+                            "Nothing in the catalogue matches that line."))
+                continue
+            raw = None
+            for p in (best.get("prices") or []):
+                if str(p.get("grade")) == "Raw":
+                    try: raw = float(p.get("price"))
+                    except (TypeError, ValueError): pass
+            sig = buying.BuySignal(
+                description=best.get("description") or "",
+                player=best.get("player") or "",
+                number=str(best.get("number") or ""),
+                variant=best.get("variant") or "",
+                raw=raw, sales_30d=int(best.get("30 Day Sales") or 0))
+            mb = sig.max_buy(bd_target / 100.0, bd_plat)
+            if mb is None:
+                out.append((q, sig, 0.0, "thin", "No raw price to work back from."))
+            else:
+                mult = buying.haircut(sig.sales_30d)
+                offer = round(mb * mult, 2)
+                verdict = ("sits" if mult == 0 else
+                           "thin" if mult < 0.85 else "buy")
+                reason = (f"No sales in 30 days — worth ${mb:.2f} if it sold, "
+                          f"but nothing says it will." if mult == 0 else
+                          f"{sig.velocity} — {sig.sales_30d} sold in 30 days."
+                          + ("" if mult == 1 else f" ${mb:.2f} → ${offer:.2f}."))
+                out.append((q, sig, offer, verdict, reason))
+        bar.empty()
+        st.session_state["bd_out"] = out
+
+    out = st.session_state.get("bd_out")
+    if out:
+        total = sum(o[2] for o in out)
+        retail = sum((o[1].raw or 0) for o in out if o[1])
+        dead = sum((o[1].raw or 0) for o in out if o[1] and o[1].sits)
+        o1, o2, o3, o4 = st.columns(4)
+        o1.metric("Offer the stack", f"${total:,.2f}")
+        o2.metric("If it all sold", f"${retail:,.2f}")
+        o3.metric("Buy", sum(1 for o in out if o[3] == "buy"))
+        o4.metric("Hand back", sum(1 for o in out if o[3] in ("sits", "not found")))
+        if dead:
+            st.warning(f"**${dead:,.2f} of that retail is in cards with no "
+                       f"sales in 30 days.** That is the line item that turns "
+                       f"a good-looking stack into months of shelf.")
+        for q, sig, offer, verdict, reason in out:
+            icon = {"buy": "✅", "thin": "⚠️", "sits": "🛑",
+                    "not found": "❓"}.get(verdict, "•")
+            with st.container(border=True):
+                c1, c2 = st.columns([5, 1.3])
+                c1.markdown(f"{icon} **{sig.description if sig else q}**")
+                c1.caption(reason)
+                c2.metric("Offer", f"${offer:,.2f}")
+        st.caption("Offers already take out the platform's measured cut and "
+                   "$0.75 handling, then the return you asked for. A card that "
+                   "does not trade gets no bid — that is deliberate.")
