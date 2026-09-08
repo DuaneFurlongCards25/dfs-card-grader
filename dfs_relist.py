@@ -33,7 +33,11 @@ import datetime as dt
 import io
 import re
 
-STALE_DAYS = 30          # a listing younger than this has not had its chance
+STALE_DAYS = 45          # a listing younger than this has not had its chance
+                         # Duane's number. It barely changes the shortlist —
+                         # the top 50 have a median age of 125-150 days whether
+                         # the cutoff is 30 or 90 — but it keeps recently
+                         # relisted cards out of a list about relisting.
 MAX_PER_PLAYER = 3       # first pass returned 18 Nick Kurtz cards out of 50
 PRICE_CEILING = 200.0    # the big autos are held back by hand, not by a rule
 

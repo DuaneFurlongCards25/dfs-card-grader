@@ -411,7 +411,13 @@ def get_secret(section, key, default=""):
     except Exception:
         return default
 
-APP_NAME = get_secret("app", "name", "CardPulse")
+APP_NAME = get_secret("app", "name", "The CardPulse")
+# The company behind the app. Kept separate from APP_NAME so the product name
+# can stand alone in tight places (browser tab, sidebar) while the full brand
+# appears where it earns its space — the login screen, the About box, the
+# footer. Override either in secrets without touching code.
+APP_OWNER = get_secret("app", "owner", "DFS Cards")
+APP_BRAND = f"{APP_NAME} by {APP_OWNER}" if APP_OWNER else APP_NAME
 SUPABASE_URL = get_secret("supabase", "url")
 SUPABASE_KEY = get_secret("supabase", "key")
 WORKER_URL = get_secret("worker", "url", "https://dfs-api.duane-588.workers.dev")
@@ -428,7 +434,7 @@ st.set_page_config(
     page_icon="💎",
     layout="wide",
     initial_sidebar_state="expanded",
-    menu_items={"About": f"{APP_NAME} — research & decision-support tool"},
+    menu_items={"About": f"{APP_BRAND} — research & decision-support tool"},
 )
 
 # ─── Mobile CSS ───────────────────────────────────────────────────────────────
@@ -693,7 +699,11 @@ if not st.session_state.get("access_granted"):
                     background:#1e2130; border-radius:12px;
                     border:1px solid #2e3250; text-align:center;">
             <div style="font-size:2.2rem; margin-bottom:8px;">💎</div>
-            <h2 style="margin-bottom:4px;">{APP_NAME}</h2>
+            <h2 style="margin-bottom:2px;">{APP_NAME}</h2>
+            <div style="color:#8b93a7; font-size:0.72rem; letter-spacing:.12em;
+                        text-transform:uppercase; margin-bottom:18px;">
+                by {APP_OWNER}
+            </div>
             <p style="color:#aaa; font-size:0.85rem; margin-bottom:24px;">
                 Enter your access code to continue.
             </p>
@@ -775,7 +785,11 @@ if not st.session_state.get("agreed"):
                     background:#1e2130; border-radius:12px;
                     border:1px solid #2e3250; text-align:center;">
             <div style="font-size:2.5rem; margin-bottom:8px;">💎</div>
-            <h2 style="margin-bottom:4px;">{APP_NAME}</h2>
+            <h2 style="margin-bottom:2px;">{APP_NAME}</h2>
+            <div style="color:#8b93a7; font-size:0.72rem; letter-spacing:.12em;
+                        text-transform:uppercase; margin-bottom:18px;">
+                by {APP_OWNER}
+            </div>
             <p style="color:#aaa; font-size:0.85rem; margin-bottom:24px;">
                 Please read and accept the disclaimer before continuing.
             </p>
@@ -792,7 +806,7 @@ if not st.session_state.get("agreed"):
                 solely your responsibility</strong>. {APP_NAME} assumes no liability
                 for financial outcomes resulting from use of this tool.<br><br>
                 <span style="font-size:0.8rem; color:#888;">
-                ©️ 2026 {APP_NAME}. All rights reserved.
+                ©️ 2026 {APP_OWNER}. All rights reserved.
                 </span>
             </div>
         </div>
@@ -2534,6 +2548,10 @@ with st.sidebar:
         <div style="padding:14px 4px 10px 4px;">
           <div style="font-size:1.25rem;font-weight:800;letter-spacing:-0.5px;color:#e2e8f0;">
             {APP_NAME}
+          </div>
+          <div style="font-size:0.63rem;color:#64748b;letter-spacing:.14em;
+                      text-transform:uppercase;margin-top:1px;">
+            by {APP_OWNER}
           </div>
           <div style="font-size:0.72rem;color:#94a3b8;margin-top:3px;font-style:italic;">
             {APP_TAGLINE}
@@ -11871,7 +11889,7 @@ st.markdown(
         Gem rates and market values fluctuate — always verify data independently before submitting cards for grading.
         All grading decisions and associated costs are solely your responsibility.
         {APP_NAME} assumes no liability for financial outcomes resulting from use of this tool.<br><br>
-        ©️ 2026 {APP_NAME}. All rights reserved.
+        ©️ 2026 {APP_OWNER}. All rights reserved.
     </div>
     """,
     unsafe_allow_html=True,
