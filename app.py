@@ -2870,7 +2870,7 @@ _NAV_LABELS = [
     "🔍 Card Research", "🔥 Hot Movers", "📷 Scan", "📦 Inventory Check",
     "🧰 Operations", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake",
     "🏷️ Consignments", "📦 Purchases", "💰 Sales & P&L", "📸 Image Prep",
-    "🗂️ Triage", "💵 Buy Desk", "🏷️ Labels",
+    "🗂️ Triage", "💵 Buy Desk", "🏷️ Labels", "♻️ Relist",
 ]
 
 # If a sidebar feature button was clicked, update both nav state AND the radio widget's own state key
@@ -9877,10 +9877,26 @@ if _active_tab == 9:
         )
 
         def _pur_prefix(sku):
-            """Match SKU to registered lot prefix (longest match wins), fall back to first-2-segments."""
+            """Match SKU to registered lot prefix (longest match wins), fall back to first-2-segments.
+
+            A prefix ending in "*" is a wildcard: it matches on raw startswith with
+            no dash boundary required. That is the only way to group a batch whose
+            SKUs run the counter straight into the prefix — `FEAR00001-1746v4`,
+            `FEAR00002-1746v5` — where every card would otherwise land in its own
+            one-card "lot" via the seg2 fallback. Some listings are created
+            inventory-managed on eBay and their SKU can never be edited afterwards
+            (error 21920278), so matching the SKU that exists is the only option.
+
+            Wildcards are opt-in per alias on purpose. Making every prefix a bare
+            startswith would quietly swallow neighbours — "FB" would eat every
+            "FBRELIST-..." card in the store.
+            """
             s = str(sku or "").strip().upper()
             for pfx in _known_prefixes:
-                if s.startswith(pfx + "-") or s == pfx:
+                if pfx.endswith("*"):
+                    if s.startswith(pfx[:-1]):
+                        return pfx
+                elif s.startswith(pfx + "-") or s == pfx:
                     return pfx
             return _pur_prefix_seg2(sku)
 
@@ -9896,7 +9912,7 @@ if _active_tab == 9:
                 p1, p2, p3 = st.columns(3)
                 pl_prefix  = p1.text_input("Lot Prefix *", placeholder="MATTSFB-072026")
                 pl_source  = p1.text_input("Source", placeholder="Matt's FB Marketplace")
-                pl_aliases = p1.text_input("Alias Prefixes", placeholder="RBLOT_-_07, OTHER-ALT", help="Comma-separated alternate SKU prefixes that also belong to this lot")
+                pl_aliases = p1.text_input("Alias Prefixes", placeholder="RBLOT_-_07, FEAR*", help="Comma-separated alternate SKU prefixes that also belong to this lot. End one with * to match without a dash — FEAR* catches FEAR00001-1746v4, FEAR00002-… as one lot.")
                 pl_date    = p2.date_input("Purchase Date", value=date.today())
                 pl_cost    = p2.number_input("Total Cost Paid ($)", min_value=0.0, step=0.01, format="%.2f")
                 pl_count   = p2.number_input("Card Count in Lot", min_value=0, step=1, value=0, help="Total cards you received in this lot — used as a check against imported cards")
@@ -10228,7 +10244,7 @@ if _active_tab == 9:
                         e1, e2, e3 = st.columns(3)
                         e_source   = e1.text_input("Source", value=el.get("source") or "")
                         e_aliases  = e1.text_input("Alias Prefixes", value=el.get("alias_prefixes") or "",
-                                        help="Comma-separated alternate SKU prefixes that roll up to this lot (e.g. RBLOT_-_07)")
+                                        help="Comma-separated alternate SKU prefixes that roll up to this lot (e.g. RBLOT_-_07). End one with * to match without a dash — FEAR* catches FEAR00001-1746v4, FEAR00002-… as one lot.")
                         e_date     = e2.date_input("Purchase Date",
                                         value=date.fromisoformat(el["purchase_date"]) if el.get("purchase_date") else date.today())
                         e_cost     = e2.number_input("Total Cost Paid ($)", min_value=0.0, step=0.01,
@@ -12144,3 +12160,114 @@ if _active_tab == 13:
         st.caption("Offers already take out the platform's measured cut and "
                    "$0.75 handling, then the return you asked for. A card that "
                    "does not trade gets no bid — that is deliberate.")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 15 — Labels
+# The nav entry and the `dfs_labels` import were both in place, but this block
+# was never written, so the tab rendered an empty page.
+# ══════════════════════════════════════════════════════════════════════════════
+if _active_tab == 14:
+    st.subheader("🏷️ Labels — 2×1 thermal, one per card")
+    st.caption("Drop an eBay active-listings report, a File Exchange upload file, "
+               "or any CSV with a SKU and a title. Print at 100% scaling with "
+               "margins off — scaling is what walks labels off the stock.")
+    lb_up = st.file_uploader("Listings CSV", type=["csv"], key="lb_csv")
+    if lb_up:
+        lb_txt = lb_up.getvalue().decode("utf-8-sig", errors="replace")
+        lb_rows = labels.read_listings(lb_txt)
+        if not lb_rows:
+            st.error("No rows with a SKU or title found — is this the right file?")
+        else:
+            batches = sorted({r["batch"] for r in lb_rows if r["batch"]})
+            c1, c2 = st.columns([3, 1])
+            pick = c1.multiselect("Batches", batches, default=batches, key="lb_batch")
+            show_price = c2.checkbox("Show price", value=True, key="lb_price")
+            sel = [r for r in lb_rows if r["batch"] in pick]
+            st.write(f"**{len(sel)}** labels from {len(pick)} batch(es).")
+            if sel:
+                st.dataframe(
+                    [{"SKU": r["sku"], "Name": labels.name_from_title(r["title"]),
+                      "Price": r["price"]} for r in sel[:25]],
+                    use_container_width=True, hide_index=True)
+                if len(sel) > 25:
+                    st.caption(f"…and {len(sel) - 25} more.")
+                html = labels.labels_from_listings(sel, show_price=show_price)
+                st.download_button("⬇️ Download labels (HTML → print)", html,
+                                   file_name="sku-labels.html", mime="text/html",
+                                   key="lb_dl")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 16 — Relist
+# ══════════════════════════════════════════════════════════════════════════════
+if _active_tab == 15:
+    import dfs_relist as relist
+
+    st.subheader("♻️ Relist — stale listings that actually sell")
+    st.caption("Not what is old, and not what is expensive: cards whose **player "
+               "sold in your last 90 days** sitting on a listing that has gone "
+               "cold. Everything else is an inventory problem, not a listing one.")
+
+    rc1, rc2 = st.columns(2)
+    rl_active = rc1.file_uploader("Active listings report", type=["csv"], key="rl_act")
+    rl_orders = rc2.file_uploader("Orders report (90 days)", type=["csv"], key="rl_ord")
+
+    o1, o2, o3, o4 = st.columns(4)
+    rl_sport = o1.selectbox("Sport", ["Baseball", "Football", "Basketball",
+                                      "Soccer", "Hockey", "(all)"], key="rl_sport")
+    rl_stale = o2.number_input("Stale after (days)", 7, 365,
+                               relist.STALE_DAYS, key="rl_stale")
+    rl_limit = o3.number_input("How many", 10, 500, 50, step=10, key="rl_limit")
+    rl_pp    = o4.number_input("Max per player", 1, 20,
+                               relist.MAX_PER_PLAYER, key="rl_pp")
+
+    rl_excl_raw = st.text_area(
+        "Never touch these ItemIDs (one per line)", "", height=68, key="rl_excl",
+        help="Cards you are not pushing to move. Anything over $200 is already "
+             "excluded automatically.")
+
+    if rl_active and rl_orders:
+        act = rl_active.getvalue().decode("utf-8-sig", errors="replace")
+        ords = rl_orders.getvalue().decode("utf-8-sig", errors="replace")
+        sport = "" if rl_sport == "(all)" else rl_sport
+        dem = relist.demand_from_orders(ords, sport=sport)
+        excl = {l.strip() for l in rl_excl_raw.splitlines() if l.strip()}
+        rows = relist.candidates(act, dem, sport=sport, stale_days=int(rl_stale),
+                                 limit=int(rl_limit), per_player=int(rl_pp),
+                                 exclude=excl)
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Sales analysed", dem["total"])
+        m2.metric("Relist candidates", len(rows))
+        m3.metric("Asking value", f"${sum(r['price'] for r in rows):,.2f}")
+
+        if not rows:
+            st.info("Nothing qualifies — either no listing is stale enough, or "
+                    "no player on the shelf has sold in this orders report.")
+        else:
+            with st.expander("Who is selling (the demand evidence)"):
+                st.dataframe(
+                    [{"Player": p, "Sales 90d": n,
+                      "Revenue": f"${dem['revenue'][p]:,.2f}"}
+                     for p, n in dem["players"].most_common(20)],
+                    use_container_width=True, hide_index=True)
+            st.dataframe(
+                [{"Ask": f"${r['price']:.2f}", "Age": f"{r['age']}d",
+                  "Watch": r["watchers"], "Player sales": r["player_sales"],
+                  "Set sales": r["set_sales"], "Title": r["title"]} for r in rows],
+                use_container_width=True, hide_index=True)
+            d1, d2 = st.columns(2)
+            d1.download_button("⬇️ End file (File Exchange)", relist.end_csv(rows),
+                               file_name="ebay-END-relist.csv", mime="text/csv",
+                               key="rl_end")
+            d2.download_button("⬇️ Worksheet (with the evidence)",
+                               relist.worksheet_csv(rows),
+                               file_name="relist-worksheet.csv", mime="text/csv",
+                               key="rl_ws")
+            st.warning("**Relist through Seller Hub → Sell Similar, not Haystack.** "
+                       "A Haystack scan is $0.18 and these cards are already "
+                       "catalogued — the photos, description and specifics are on "
+                       "the live listing and Sell Similar carries them across for "
+                       "nothing. End here, relist there.")
+    else:
+        st.info("Upload both reports to build the list.")
