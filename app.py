@@ -418,6 +418,36 @@ APP_NAME = get_secret("app", "name", "The CardPulse")
 # footer. Override either in secrets without touching code.
 APP_OWNER = get_secret("app", "owner", "DFS Cards")
 APP_BRAND = f"{APP_NAME} by {APP_OWNER}" if APP_OWNER else APP_NAME
+
+# DFS Cards marks. Read once and inlined as data URIs — the login and
+# disclaimer screens are raw HTML blocks, and st.image() cannot be placed
+# inside one. Missing files degrade to no logo rather than a broken page.
+def _logo_uri(fname: str) -> str:
+    import base64
+    from pathlib import Path
+    f = Path(__file__).parent / "assets" / fname
+    try:
+        return ("data:image/png;base64,"
+                + base64.b64encode(f.read_bytes()).decode())
+    except OSError:
+        return ""
+
+LOGO_SEAL  = _logo_uri("dfs-logo-seal.png")    # crest + DFS CARDS wordmark
+LOGO_CREST = _logo_uri("dfs-logo-crest.png")   # crest alone, for small sizes
+
+# Prebuilt <img> tags rather than f-strings nested inside the HTML blocks
+# below. Nesting same-quote f-strings only parses on Python 3.12+ (PEP 701),
+# and this app also runs on Streamlit Cloud where the runtime is not ours to
+# choose. Building the tag once here keeps it working everywhere.
+def _img(uri: str, px: int, radius: int = 10, extra: str = "") -> str:
+    if not uri:
+        return ""
+    return (f'<img src="{uri}" alt="{APP_OWNER}" style="width:{px}px;'
+            f'height:{px}px;border-radius:{radius}px;{extra}">')
+
+SEAL_LG  = _img(LOGO_SEAL, 104, 10, "margin-bottom:14px;") or '<div style="font-size:2.2rem;margin-bottom:8px;">💎</div>'
+SEAL_MD  = _img(LOGO_SEAL, 96, 10, "margin-bottom:12px;") or '<div style="font-size:2.5rem;margin-bottom:8px;">💎</div>'
+CREST_SM = _img(LOGO_CREST, 38, 7, "flex:0 0 auto;")
 SUPABASE_URL = get_secret("supabase", "url")
 SUPABASE_KEY = get_secret("supabase", "key")
 WORKER_URL = get_secret("worker", "url", "https://dfs-api.duane-588.workers.dev")
@@ -431,7 +461,10 @@ WP_PROXY_URL   = "https://duanefurlongstudios.com/wp-admin/admin-ajax.php?action
 # ─── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title=APP_NAME,
-    page_icon="💎",
+    page_icon=(str(__import__("pathlib").Path(__file__).parent
+                   / "assets" / "dfs-logo-crest.png")
+               if (__import__("pathlib").Path(__file__).parent
+                   / "assets" / "dfs-logo-crest.png").exists() else "💎"),
     layout="wide",
     initial_sidebar_state="expanded",
     menu_items={"About": f"{APP_BRAND} — research & decision-support tool"},
@@ -698,7 +731,7 @@ if not st.session_state.get("access_granted"):
         <div style="max-width:420px; margin:60px auto; padding:36px 28px;
                     background:#1e2130; border-radius:12px;
                     border:1px solid #2e3250; text-align:center;">
-            <div style="font-size:2.2rem; margin-bottom:8px;">💎</div>
+            {SEAL_LG}
             <h2 style="margin-bottom:2px;">{APP_NAME}</h2>
             <div style="color:#8b93a7; font-size:0.72rem; letter-spacing:.12em;
                         text-transform:uppercase; margin-bottom:18px;">
@@ -784,7 +817,7 @@ if not st.session_state.get("agreed"):
         <div style="max-width:680px; margin:40px auto; padding:32px 24px;
                     background:#1e2130; border-radius:12px;
                     border:1px solid #2e3250; text-align:center;">
-            <div style="font-size:2.5rem; margin-bottom:8px;">💎</div>
+            {SEAL_MD}
             <h2 style="margin-bottom:2px;">{APP_NAME}</h2>
             <div style="color:#8b93a7; font-size:0.72rem; letter-spacing:.12em;
                         text-transform:uppercase; margin-bottom:18px;">
@@ -2545,7 +2578,9 @@ with st.sidebar:
     # ── Branding ──────────────────────────────────────────────────────────────
     st.markdown(
         f"""
-        <div style="padding:14px 4px 10px 4px;">
+        <div style="padding:14px 4px 10px 4px;display:flex;align-items:center;gap:10px;">
+          {CREST_SM}
+          <div>
           <div style="font-size:1.25rem;font-weight:800;letter-spacing:-0.5px;color:#e2e8f0;">
             {APP_NAME}
           </div>
@@ -2557,6 +2592,7 @@ with st.sidebar:
             {APP_TAGLINE}
           </div>
           <div style="font-size:0.65rem;color:#475569;margin-top:5px;">v{APP_VERSION}</div>
+          </div>
         </div>
         """,
         unsafe_allow_html=True,
