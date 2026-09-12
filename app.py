@@ -12849,8 +12849,49 @@ if _active_tab == 16:
                        "a whole did. Cards are matched to a spot by what the title says, so "
                        "nothing has to be re-SKU'd.")
 
+            def _bk_spots_reachable():
+                """True only if break_spots can actually be read.
+
+                _neon_get() returns [] on any failure, so a 403 from the
+                Worker whitelist or a table that does not exist yet both look
+                exactly like "no spots recorded". Someone would add a spot,
+                watch it not appear, and have nothing to go on.
+                """
+                try:
+                    req = urllib.request.Request(
+                        f"{WORKER_URL}/api/db/break_spots?limit=1",
+                        headers=_neon_headers())
+                    with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
+                        return True, ""
+                except urllib.error.HTTPError as e:
+                    try:
+                        d = json.loads(e.read().decode()).get("error", "")
+                    except Exception:
+                        d = ""
+                    return False, f"HTTP {e.code}: {d}"
+                except Exception as e:
+                    return False, str(e)
+
+            _sp_ok, _sp_why = _bk_spots_reachable()
+            if not _sp_ok:
+                if "not allowed" in _sp_why:
+                    st.error(
+                        "**Two setup steps needed before spots will save.**\n\n"
+                        "1. Run the SQL below once in Neon to create `break_spots`.\n"
+                        "2. `break_spots` also has to be added to `ALLOWED_TABLES` in "
+                        "`cloudflare-worker/src/index.ts` and the Worker redeployed "
+                        "(`npx wrangler deploy`) — the line is already edited locally, "
+                        "it just has not been deployed. Until then the API refuses the "
+                        "table and nothing here can save.")
+                else:
+                    st.error(f"**`break_spots` is not reachable** — {_sp_why}. "
+                             "Run the setup SQL below once in Neon.")
+                st.caption(f"Worker said: {_sp_why}")
+
             if not _bk_rows:
                 st.info("Log a break first, then add its spots here.")
+            elif not _sp_ok:
+                pass
             else:
                 _sp_pick = st.selectbox(
                     "Break", ["— select —"] + [r["lot_prefix"] for r in _bk_rows],
