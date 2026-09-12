@@ -10098,6 +10098,26 @@ if _active_tab == 9:
                         _a = _a.strip().upper()
                         if _a:
                             _lot_alias_map[_a] = _l["lot_prefix"].upper()
+                # Comps for the cards a lot still holds, so a lot can be valued
+                # at full comp before a single card has sold. Sold SKUs are
+                # removed first — counting them here would double-count against
+                # the net revenue already banked below.
+                _lot_listings = _pur_get(
+                    "listings",
+                    "?select=sku,title,comp_avg,current_price&sku=not.is.null&limit=10000") or []
+                _sold_skus = {str(_s.get("sku") or "").strip().upper()
+                              for _s in (_lot_sales_raw or []) if _s.get("sku")}
+                _lot_comps_by_pfx = {}
+                for _li in _lot_listings:
+                    _lsku = str(_li.get("sku") or "").strip()
+                    if not _lsku or _lsku.upper() in _sold_skus:
+                        continue
+                    _lp_pfx = _pur_prefix(_lsku)
+                    if not _lp_pfx:
+                        continue
+                    _lcanon = _lot_alias_map.get(_lp_pfx.upper(), _lp_pfx.upper())
+                    _lot_comps_by_pfx.setdefault(_lcanon, []).append(_li)
+
                 _lot_rev = {}
                 _lot_sales_by_pfx = {}
                 for _s in _lot_sales_raw:
@@ -10209,6 +10229,47 @@ if _active_tab == 9:
                                    help="Cards sold per week since purchase date")
                         ep6.metric("Avg Days to Sell", f"{int(_avg_days)}d" if _avg_days else "—",
                                    help="Average days from lot purchase date to each card's sale date")
+
+                        # ── Projected revenue at full comp ───────────────────
+                        # Values the cards still on hand. Priced off comp_avg,
+                        # falling back to the current asking price when a card
+                        # has never been comped — otherwise a lot that has only
+                        # been listed, never priced, reports nothing at all.
+                        _lc_avail = _lot_comps_by_pfx.get(pfx.upper(), [])
+                        if _lc_avail:
+                            _lc_prices = [
+                                (_l.get("comp_avg") if _l.get("comp_avg") not in (None, "", 0)
+                                 else _l.get("current_price"))
+                                for _l in _lc_avail
+                            ]
+                            _lp = buying.lot_projection(_lc_prices)
+                            if _lp["cards"]:
+                                st.divider()
+                                st.markdown(
+                                    f"**📈 If the {_lp['cards']} unsold cards sell at full comp**")
+                                pc1, pc2, pc3, pc4 = st.columns(4)
+                                pc1.metric("Gross at comp", f"${_lp['gross']:,.2f}")
+                                pc2.metric("eBay fees", f"−${_lp['fees']:,.2f}",
+                                           delta=f"{_lp['fee_pct']:.1f}% of gross",
+                                           delta_color="off")
+                                pc3.metric("Projected net", f"${_lp['net']:,.2f}",
+                                           help="Gross at comp less eBay's published fees")
+                                _lot_all_in = round(net_rev + _lp["net"], 2)
+                                pc4.metric("Lot net if all sell", f"${_lot_all_in:,.2f}",
+                                           delta=f"${_lot_all_in - cost:+,.2f} vs cost",
+                                           delta_color="off",
+                                           help="Net already banked plus this projection, against cost paid")
+                                _pc = [f"{buying.EBAY_FVF_PCT*100:.2f}% final value fee plus "
+                                       f"${buying.EBAY_PER_ORDER[0]:.2f} per order at "
+                                       f"${buying.EBAY_PER_ORDER_BREAK:.0f} and under, "
+                                       f"${buying.EBAY_PER_ORDER[1]:.2f} above."]
+                                if _lp["no_comp"]:
+                                    _pc.append(f"**{_lp['no_comp']} unsold card(s) have no comp "
+                                               f"or price and are excluded.**")
+                                _pc.append("Best case — assumes every remaining card sells, at "
+                                           "comp. Your measured all-in take is 14.4%.")
+                                st.caption(" ".join(_pc))
+                                st.divider()
 
                         if _days_left is not None:
                             st.caption(f"📅 At current pace ({_turn_rate}/wk), ~{_days_left} days to clear remaining {remaining} cards.")
