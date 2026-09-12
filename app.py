@@ -11627,18 +11627,61 @@ if _active_tab == 10:
                         help="Upload your DCS87_Full_Reconcile_*.xlsx to auto-match titles to Haystack SKUs"
                     )
 
-                # Build reconcile lookup from xlsx
+                # Build reconcile lookup from xlsx.
+                #
+                # Two shapes are accepted. The hand-built DCS87_Full_Reconcile
+                # uses "DC Sports Title"/"Haystack SKU"/"Lot". The consignment
+                # picks workbook produced by dfs_consign uses "Card"/"SKU" and
+                # has no Lot column at all — lot is derived from the SKU prefix
+                # anyway, which is exactly how the lot panel resolves it. Taking
+                # both means the manifest you already built to ship the cards
+                # doubles as the SKU bridge, with no second file to maintain.
                 _dcs_recon_lookup = {}  # dc_title_lower → {sku, lot}
+
+                # Local prefix helper. _pur_prefix lives inside the Purchases
+                # tab, and Streamlit only runs the active tab's block — calling
+                # it from here raised NameError the moment a picks workbook was
+                # uploaded. Registered lot prefixes are not in scope here
+                # either, so this falls back to the same first-two-segments
+                # rule _pur_prefix uses when nothing matches.
+                def _dcs_lot_from_sku(sku: str) -> str:
+                    parts = str(sku or "").strip().split("-")
+                    return "-".join(parts[:2]) if len(parts) >= 2 else ""
+
                 if dc_recon_file:
                     try:
-                        _recon_df = pd.read_excel(dc_recon_file, sheet_name=0)
+                        # The picks workbook opens on a Summary tab, so sheet 0
+                        # is a legend, not data — reading it found 0 titles and
+                        # the import silently did nothing. Take "Cards" by name
+                        # when present, else fall back to the first sheet.
+                        _rc_sheets = pd.ExcelFile(dc_recon_file).sheet_names
+                        _rc_sheet = "Cards" if "Cards" in _rc_sheets else 0
+                        _recon_df = pd.read_excel(dc_recon_file, sheet_name=_rc_sheet)
+                        _rc_cols = {str(c).strip() for c in _recon_df.columns}
+                        _is_picks = "Card" in _rc_cols and "SKU" in _rc_cols
+                        _t_col = "Card" if _is_picks else "DC Sports Title"
+                        _s_col = "SKU" if _is_picks else "Haystack SKU"
                         for _, _rr in _recon_df.iterrows():
-                            _rt = str(_rr.get("DC Sports Title", "") or "").strip()
-                            _rs = str(_rr.get("Haystack SKU", "") or "").strip()
+                            _rt = str(_rr.get(_t_col, "") or "").strip()
+                            _rs = str(_rr.get(_s_col, "") or "").strip()
                             _rl = str(_rr.get("Lot", "") or "").strip()
+                            if _rs in ("", "nan"):
+                                _rs = ""
+                            if _rl in ("", "nan"):
+                                # No Lot column (picks workbook): the prefix IS the lot
+                                _rl = _dcs_lot_from_sku(_rs) if _rs else ""
                             if _rt:
-                                _dcs_recon_lookup[_rt.lower()] = {"sku": _rs if _rs and _rs != "nan" else "", "lot": _rl if _rl != "nan" else ""}
-                        st.success(f"✅ Reconcile file loaded — {len(_dcs_recon_lookup):,} title mappings ({sum(1 for v in _dcs_recon_lookup.values() if v['sku'])} with SKU)")
+                                _dcs_recon_lookup[_rt.lower()] = {"sku": _rs, "lot": _rl}
+                        _n_sku = sum(1 for v in _dcs_recon_lookup.values() if v["sku"])
+                        st.success(
+                            f"✅ {'Consignment picks' if _is_picks else 'Reconcile'} file loaded — "
+                            f"{len(_dcs_recon_lookup):,} title mappings ({_n_sku} with SKU)"
+                        )
+                        if _is_picks:
+                            st.caption(
+                                "Read as a consignment picks workbook (Card / SKU). "
+                                "Lot is taken from each SKU's prefix."
+                            )
                     except Exception as _re6:
                         st.warning(f"Could not read reconcile file: {_re6}")
 
