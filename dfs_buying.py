@@ -113,6 +113,81 @@ def net_after_fees(price: float, platform: str = "ebay") -> float:
     return round(price * (1 - take) - HANDLING, 2)
 
 
+# ─── eBay's published fee schedule ────────────────────────────────────────────
+# Separate from TAKE_RATE above, and deliberately so. TAKE_RATE is 14.4%
+# measured across real payouts, which already swallows promoted-listing spend
+# and everything else that came out. This is the sticker schedule: the trading
+# card final value percentage plus the fixed per-order fee. Use it to answer
+# "if every card sold at comp, what does the lot bring in?" — a best case, not
+# a forecast, because it assumes a 100% sell-through that never happens.
+EBAY_FVF_PCT = 0.1235          # final value fee on the sale
+EBAY_PER_ORDER = (0.30, 0.40)  # fixed fee: $0.30 at $10 and under, $0.40 above
+EBAY_PER_ORDER_BREAK = 10.00
+
+
+def _as_money(v) -> float:
+    """A price from anywhere in the app, as a number.
+
+    The lot scanner stores comps already formatted — "$1,234.56" — so a bare
+    float() call counts every comped card in the lot as having no comp and
+    reports a projection of zero. Strips currency, commas and whitespace, and
+    treats an empty or unparseable value as nothing rather than raising.
+    """
+    if v is None:
+        return 0.0
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = re.sub(r"[^0-9.\-]", "", str(v))
+    try:
+        return float(s) if s not in ("", "-", ".", "-.") else 0.0
+    except ValueError:
+        return 0.0
+
+
+def ebay_fixed_fee(price: float) -> float:
+    """The per-order fixed fee at this sale price."""
+    low, high = EBAY_PER_ORDER
+    return low if price <= EBAY_PER_ORDER_BREAK else high
+
+
+def ebay_net(price: float, fvf_pct: float = EBAY_FVF_PCT) -> float:
+    """What one card at this price nets on eBay's published schedule.
+
+    Floors at zero: a card cheap enough that the fixed fee exceeds the sale
+    nets nothing, it does not owe money back into the lot total.
+    """
+    if not price or price <= 0:
+        return 0.0
+    return round(max(0.0, price * (1 - fvf_pct) - ebay_fixed_fee(price)), 2)
+
+
+def lot_projection(prices, fvf_pct: float = EBAY_FVF_PCT) -> dict:
+    """Projected revenue for a lot if every card sells at full comp.
+
+    `prices` is any iterable of comp values; blanks and non-numbers are
+    skipped and counted separately, so a lot where half the cards never
+    matched does not quietly report a total as if they had.
+    """
+    vals, skipped = [], 0
+    for p in prices:
+        v = _as_money(p)
+        if v and v > 0:
+            vals.append(v)
+        else:
+            skipped += 1
+    gross = round(sum(vals), 2)
+    fvf = round(sum(v * fvf_pct for v in vals), 2)
+    fixed = round(sum(ebay_fixed_fee(v) for v in vals), 2)
+    net = round(sum(ebay_net(v, fvf_pct) for v in vals), 2)
+    return {
+        "cards": len(vals), "no_comp": skipped,
+        "gross": gross, "fvf": fvf, "fixed": fixed,
+        "fees": round(fvf + fixed, 2), "net": net,
+        "net_per_card": round(net / len(vals), 2) if vals else 0.0,
+        "fee_pct": round((gross - net) / gross * 100, 1) if gross else 0.0,
+    }
+
+
 # ─── Triage ───────────────────────────────────────────────────────────────────
 
 ACTIONS = ["auction", "keep", "reprice", "consign", "bulk", "end"]

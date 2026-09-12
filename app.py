@@ -5752,6 +5752,46 @@ if _active_tab == 2:
                             "Status":      st.column_config.TextColumn("Status",        width="small"),
                         },
                     )
+                    # ── Projected revenue if every card sells at full comp ────
+                    # Best case, not a forecast: it assumes a 100% sell-through
+                    # that never happens. Labelled that way on screen so the
+                    # number is never mistaken for what the lot will actually do.
+                    st.markdown("---")
+                    _pj1, _pj2 = st.columns([1, 3])
+                    _pj_basis = _pj1.radio(
+                        "Price each card at", ["Comp Avg", "FMV"],
+                        key="ab_proj_basis", horizontal=False,
+                        help="Comp Avg is the average of recent sold prices. "
+                             "FMV is CardHedger's smoothed value.",
+                    )
+                    _pj_col = "Comp Avg" if _pj_basis == "Comp Avg" else "FMV"
+                    _pj = buying.lot_projection(_ab_df.get(_pj_col, []))
+                    _pj2.markdown(
+                        f"**If all {_pj['cards']} comped cards sell at full "
+                        f"{_pj_basis.lower()}** — eBay's published schedule: "
+                        f"{buying.EBAY_FVF_PCT*100:.2f}% final value fee plus "
+                        f"${buying.EBAY_PER_ORDER[0]:.2f} per order at "
+                        f"${buying.EBAY_PER_ORDER_BREAK:.0f} and under, "
+                        f"${buying.EBAY_PER_ORDER[1]:.2f} above."
+                    )
+                    _m1, _m2, _m3, _m4 = st.columns(4)
+                    _m1.metric("Gross at comp", f"${_pj['gross']:,.2f}")
+                    _m2.metric("eBay fees", f"−${_pj['fees']:,.2f}",
+                               delta=f"{_pj['fee_pct']:.1f}% of gross", delta_color="off")
+                    _m3.metric("Projected net", f"${_pj['net']:,.2f}")
+                    _m4.metric("Net per card", f"${_pj['net_per_card']:,.2f}")
+                    _pj_bits = [f"Fees break down as ${_pj['fvf']:,.2f} final value "
+                                f"+ ${_pj['fixed']:,.2f} fixed."]
+                    if _pj["no_comp"]:
+                        _pj_bits.append(
+                            f"**{_pj['no_comp']} card(s) have no {_pj_basis.lower()} "
+                            f"and are not in these totals.**")
+                    _pj_bits.append("Best case — assumes every card sells, at comp, "
+                                    "with no promoted-listing spend. Your measured "
+                                    "all-in eBay take is 14.4%.")
+                    st.caption(" ".join(_pj_bits))
+                    st.markdown("---")
+
                     _ab_raw_csv = _ab_df.to_csv(index=False)
                     st.download_button("📥 Export raw CSV", _ab_raw_csv, "ai_batch_scan.csv", "text/csv", key="ai_batch_dl_all")
 
