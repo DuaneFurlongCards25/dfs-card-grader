@@ -2924,7 +2924,7 @@ _NAV_LABELS = [
     "🔍 Card Research", "🔥 Hot Movers", "📷 Scan", "📦 Inventory Check",
     "🧰 Operations", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake",
     "🏷️ Consignments", "📦 Purchases", "💰 Sales & P&L", "📸 Image Prep",
-    "🗂️ Triage", "💵 Buy Desk", "🏷️ Labels", "♻️ Relist",
+    "🗂️ Triage", "💵 Buy Desk", "🏷️ Labels", "♻️ Relist", "🎁 Breaks",
 ]
 
 # If a sidebar feature button was clicked, update both nav state AND the radio widget's own state key
@@ -12469,3 +12469,331 @@ if _active_tab == 15:
                        "nothing. End here, relist there.")
     else:
         st.info("Upload both reports to build the list.")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 17 — Breaks
+#
+# A break is a lot: money out on a date, cards in, sold off over time. It rides
+# on purchase_lots (is_break + the break columns) so lot P&L, the SKU-prefix
+# rollup, the comp projection, consignment picks and relist all work on breaks
+# without a second copy of any of it.
+#
+# The verdict is decided on REALIZED money only. Projection sits beside it so an
+# open break is not read as a loss just because nothing has sold yet.
+# ══════════════════════════════════════════════════════════════════════════════
+if _active_tab == 16:
+    import dfs_breaks as breaks
+
+    st.markdown("## 🎁 Breaks")
+    st.caption("Buy into a team, player or serial range and find out whether the "
+               "spots actually pay. One break tells you nothing — variance is huge. "
+               "Twenty tell you which breaker and which kind of spot returns money.")
+
+    if not WORKER_URL:
+        st.warning("Database not configured — Breaks unavailable in this environment.")
+    else:
+        def _bk_get(table, params=""):
+            return _neon_get(table, params)
+
+        _bk_who = st.session_state.get("access_name") or st.session_state.get("user_name") or ""
+
+        if "bk_lots" not in st.session_state:
+            st.session_state["bk_lots"] = _bk_get(
+                "purchase_lots", "?is_break=eq.true&order=purchase_date.desc") or []
+        _bk_rows = st.session_state["bk_lots"]
+
+        bk_t1, bk_t2, bk_t3 = st.tabs(["🎟️ My Breaks", "➕ Log a Break", "📊 Does It Pay?"])
+
+        # ── Shared: pull sales + unsold comps once, roll up by lot prefix ─────
+        def _bk_load_perf(rows):
+            """Attach realized sales and unsold comps to each break."""
+            if not rows:
+                return []
+            sales = _bk_get("sales_records",
+                            "?select=sku,title,sale_date,gross_revenue,net_proceeds,source"
+                            "&sku=not.is.null&limit=5000") or []
+            listings = _bk_get("listings",
+                               "?select=sku,comp_avg,current_price&sku=not.is.null"
+                               "&limit=10000") or []
+            sold_skus = {str(s.get("sku") or "").strip().upper() for s in sales if s.get("sku")}
+
+            # Prefix match, longest first, so BREAK-091126 beats BREAK
+            known = sorted(
+                [r["lot_prefix"].upper() for r in rows if r.get("lot_prefix")]
+                + [a.strip().upper() for r in rows
+                   for a in (r.get("alias_prefixes") or "").split(",") if a.strip()],
+                key=len, reverse=True)
+            alias = {}
+            for r in rows:
+                p = r["lot_prefix"].upper()
+                alias[p] = p
+                for a in (r.get("alias_prefixes") or "").split(","):
+                    if a.strip():
+                        alias[a.strip().upper()] = p
+
+            def canon(sku):
+                s = str(sku or "").strip().upper()
+                for p in known:
+                    if p.endswith("*"):
+                        if s.startswith(p[:-1]):
+                            return alias.get(p, p)
+                    elif s.startswith(p + "-") or s == p:
+                        return alias.get(p, p)
+                return None
+
+            by_sales, by_comps = {}, {}
+            for s in sales:
+                c = canon(s.get("sku"))
+                if c:
+                    by_sales.setdefault(c, []).append(s)
+            for l in listings:
+                sku = str(l.get("sku") or "").strip()
+                if not sku or sku.upper() in sold_skus:
+                    continue
+                c = canon(sku)
+                if c:
+                    v = l.get("comp_avg")
+                    by_comps.setdefault(c, []).append(
+                        v if v not in (None, "", 0) else l.get("current_price"))
+
+            out = []
+            for r in rows:
+                pfx = r["lot_prefix"].upper()
+                out.append({**r,
+                            "pnl": breaks.break_pnl(r, by_sales.get(pfx, []),
+                                                    by_comps.get(pfx, []))})
+            return out
+
+        # ── MY BREAKS ────────────────────────────────────────────────────────
+        with bk_t1:
+            if not _bk_rows:
+                st.info("No breaks logged yet — add one on the **Log a Break** tab.")
+            else:
+                _bk_perf = _bk_load_perf(_bk_rows)
+                _buyers = sorted({(r.get("bought_by") or "—") for r in _bk_perf})
+                f1, f2 = st.columns([1, 3])
+                _f_buyer = f1.selectbox("Bought by", ["Everyone"] + _buyers, key="bk_f_buyer")
+                _show = [r for r in _bk_perf
+                         if _f_buyer == "Everyone" or (r.get("bought_by") or "—") == _f_buyer]
+
+                _s = breaks.summarize(_show)
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Breaks", f"{_s['breaks']}", delta=f"{_s['open']} still open",
+                          delta_color="off")
+                m2.metric("Spent", f"${_s['cost']:,.2f}")
+                m3.metric("Recovered", f"${_s['realized']:,.2f}",
+                          delta=f"{_s['roi']:+.1f}% ROI" if _s["roi"] is not None else None,
+                          delta_color="normal" if (_s["roi"] or 0) >= 0 else "inverse")
+                m4.metric("Win rate", f"{_s['win_rate']:.0f}%" if _s["win_rate"] is not None else "—",
+                          help="Share of CLOSED breaks that returned more than they cost")
+                st.caption("Win rate and ROI count closed breaks only — one with cards "
+                           "still unsold would flatter or punish a breaker for cards "
+                           "nobody has tried to sell yet.")
+                st.divider()
+
+                for r in sorted(_show, key=lambda z: str(z.get("purchase_date") or ""), reverse=True):
+                    p = r["pnl"]
+                    icon = {"paid": "✅", "lost": "❌", "ahead": "📈", "open": "🟡"}[p["verdict"]]
+                    bits = [r.get("breaker") or "—", r.get("platform") or "—"]
+                    if r.get("spot_detail"):
+                        bits.append(r["spot_detail"])
+                    head = (f"{icon} **{r['lot_prefix']}** — {' · '.join(bits)} · "
+                            f"${p['cost']:,.2f} in")
+                    if p["verdict"] != "open":
+                        head += f" · ${p['realized']:,.2f} back · P&L ${p['pl']:+,.2f}"
+                    else:
+                        head += f" · {p['unsold']} unsold"
+                    with st.expander(head, expanded=False):
+                        if r.get("product"):
+                            st.caption(f"**{r['product']}**"
+                                       + (f" · {r.get('spot_type')}" if r.get("spot_type") else ""))
+                        c1, c2, c3, c4, c5 = st.columns(5)
+                        c1.metric("Cost", f"${p['cost']:,.2f}",
+                                  help="Spots plus shipping — shipping is part of what the cards cost you")
+                        c2.metric("Realized", f"${p['realized']:,.2f}",
+                                  help=f"{p['sold']} card(s) sold")
+                        c3.metric("P&L", f"${p['pl']:+,.2f}")
+                        c4.metric("ROI", f"{p['roi']:+.1f}%" if p["roi"] is not None else "—")
+                        c5.metric("Recovered", f"{p['recovered_pct']:.0f}%"
+                                  if p["recovered_pct"] is not None else "—",
+                                  help="Share of cost already back in cash")
+                        if p["unsold"]:
+                            st.info(f"**{p['unsold']} card(s) still unsold**, comping at "
+                                    f"${p['projected']:,.2f} net. All-in if they sell at comp: "
+                                    f"**${p['all_in_pl']:+,.2f}** "
+                                    f"({p['all_in_roi']:+.1f}% ROI). Best case — not banked.")
+                        if r.get("notes"):
+                            st.caption(r["notes"])
+
+        # ── LOG A BREAK ──────────────────────────────────────────────────────
+        with bk_t2:
+            st.markdown("### Log a break you bought into")
+            _sug = breaks.suggest_prefix(st.session_state.get("bk_breaker_last", ""), date.today())
+            with st.form("bk_new"):
+                b1, b2, b3 = st.columns(3)
+                bk_breaker = b1.text_input("Breaker *", placeholder="Layton Sports")
+                bk_platform = b1.selectbox("Platform", breaks.PLATFORMS)
+                bk_bought_by = b1.text_input("Bought by", value=_bk_who,
+                                             placeholder="who paid for the spot")
+                bk_product = b2.text_input("Product / box",
+                                           placeholder="2025 Panini Prizm Football Hobby Case")
+                bk_spot_type = b2.selectbox("Spot type", breaks.SPOT_TYPES)
+                bk_spot_detail = b2.text_input("What you bought",
+                                               placeholder="Cowboys · or Caleb Williams · or /25 and lower")
+                bk_date = b3.date_input("Break date", value=date.today())
+                bk_cost = b3.number_input("Spot cost ($) *", min_value=0.0, step=0.01, format="%.2f")
+                bk_ship = b3.number_input("Shipping ($)", min_value=0.0, step=0.01, format="%.2f",
+                                          help="Counts toward cost — on a $20 spot, $6 shipping is 30% of the outlay")
+                b4, b5 = st.columns(2)
+                bk_spots = b4.number_input("Spots bought", min_value=1, step=1, value=1)
+                bk_cards = b4.number_input("Cards received", min_value=0, step=1, value=0,
+                                           help="Leave 0 until the cards land")
+                bk_prefix = b5.text_input("SKU prefix *", value=_sug,
+                                          help="Cards you list with this prefix roll up to this break automatically")
+                bk_notes = b5.text_area("Notes", height=68, placeholder="What hit, what was a dud")
+                bk_go = st.form_submit_button("Log Break", type="primary")
+
+            if bk_go:
+                pfx = bk_prefix.strip().upper()
+                if not bk_breaker.strip():
+                    st.error("Breaker is required.")
+                elif len(pfx.split("-")) < 2:
+                    st.error("SKU prefix needs at least 2 dash-separated segments (e.g. LAYTON-091126).")
+                elif bk_cost <= 0:
+                    st.error("Spot cost must be more than $0.")
+                else:
+                    res = _neon_post("purchase_lots", {
+                        "lot_prefix": pfx, "is_break": True,
+                        "source": f"Break — {bk_breaker.strip()}",
+                        "breaker": bk_breaker.strip(), "platform": bk_platform,
+                        "product": bk_product.strip() or None,
+                        "spot_type": bk_spot_type,
+                        "spot_detail": bk_spot_detail.strip() or None,
+                        "spots": int(bk_spots), "ship_cost": float(bk_ship),
+                        "bought_by": bk_bought_by.strip() or None,
+                        "purchase_date": str(bk_date),
+                        "total_cost": float(bk_cost),
+                        "card_count": int(bk_cards),
+                        "notes": bk_notes.strip() or None,
+                    })
+                    if res is not None:
+                        st.session_state["bk_breaker_last"] = bk_breaker.strip()
+                        st.success(f"Break **{pfx}** logged — ${bk_cost + bk_ship:,.2f} all in. "
+                                   f"List the cards with this prefix and the P&L fills itself in.")
+                        st.session_state.pop("bk_lots", None)
+                        st.rerun()
+                    else:
+                        e = (_neon_last_error.get("msg") or "").lower()
+                        if "does not exist" in e or "42p01" in e or "column" in e:
+                            st.error("Break columns missing — run the setup SQL below once in Neon.")
+                        elif "duplicate" in e or "unique" in e:
+                            st.error(f"Prefix **{pfx}** already exists — pick another.")
+                        else:
+                            st.error(f"Save failed: {_neon_last_error.get('msg') or 'Unknown error'}")
+
+            st.divider()
+            st.markdown("### Or convert a lot you already logged")
+            st.caption("Breaks bought before this tab existed are sitting in Purchases as "
+                       "ordinary lots. Converting one only flags the existing row — the "
+                       "prefix, cost, cards and any sales already recorded stay exactly "
+                       "as they are, so nothing has to be re-keyed.")
+
+            _bk_all_lots = _bk_get("purchase_lots", "?order=purchase_date.desc") or []
+            _bk_plain = [l for l in _bk_all_lots if not l.get("is_break")]
+            if not _bk_plain:
+                st.info("No ordinary lots to convert.")
+            else:
+                _cv_pick = st.selectbox(
+                    "Lot to convert", ["— select —"] + [l["lot_prefix"] for l in _bk_plain],
+                    key="bk_cv_pick")
+                if _cv_pick != "— select —":
+                    _cv = next(l for l in _bk_plain if l["lot_prefix"] == _cv_pick)
+                    st.caption(
+                        f"${float(_cv.get('total_cost') or 0):,.2f} paid · "
+                        f"{int(_cv.get('card_count') or 0)} cards · "
+                        f"{_cv.get('purchase_date') or '—'}"
+                        + (f" · {_cv.get('source')}" if _cv.get("source") else ""))
+                    with st.form("bk_convert"):
+                        v1, v2, v3 = st.columns(3)
+                        cv_breaker = v1.text_input("Breaker *", value=(_cv.get("source") or "")
+                                                   .replace("Break — ", ""))
+                        cv_platform = v1.selectbox("Platform", breaks.PLATFORMS, key="bk_cv_plat")
+                        cv_by = v1.text_input("Bought by", value=_bk_who)
+                        cv_product = v2.text_input("Product / box")
+                        cv_spot_type = v2.selectbox("Spot type", breaks.SPOT_TYPES, key="bk_cv_st")
+                        cv_detail = v2.text_input("What you bought",
+                                                  placeholder="e.g. Cowboys, Eagles, Giants, Jets")
+                        cv_spots = v3.number_input("Spots bought", min_value=1, step=1, value=1,
+                                                   help="Buying 4 teams in one break is 4 spots")
+                        cv_ship = v3.number_input("Shipping ($)", min_value=0.0, step=0.01,
+                                                  format="%.2f",
+                                                  value=float(_cv.get("ship_cost") or 0))
+                        st.caption("Cost, card count and date carry over untouched. "
+                                   "Shipping is added to cost — set it if it wasn't already included.")
+                        cv_go = st.form_submit_button("Convert to Break", type="primary")
+                    if cv_go:
+                        if not cv_breaker.strip():
+                            st.error("Breaker is required.")
+                        else:
+                            ok = _neon_patch("purchase_lots", _cv["id"], {
+                                "is_break": True,
+                                "breaker": cv_breaker.strip(),
+                                "platform": cv_platform,
+                                "product": cv_product.strip() or None,
+                                "spot_type": cv_spot_type,
+                                "spot_detail": cv_detail.strip() or None,
+                                "spots": int(cv_spots),
+                                "ship_cost": float(cv_ship),
+                                "bought_by": cv_by.strip() or None,
+                            })
+                            if ok:
+                                st.success(f"**{_cv_pick}** is now a break — "
+                                           f"{int(cv_spots)} spot(s) with {cv_breaker.strip()}. "
+                                           "Its cards and sales came with it.")
+                                st.session_state.pop("bk_lots", None)
+                                st.rerun()
+                            else:
+                                st.error(f"Convert failed: "
+                                         f"{_neon_last_error.get('msg') or 'Unknown error'} — "
+                                         "run the setup SQL below if the break columns are missing.")
+
+            with st.expander("🛠 First-time setup SQL (run once in Neon)", expanded=False):
+                st.code(breaks.SETUP_SQL, language="sql")
+
+        # ── DOES IT PAY? ─────────────────────────────────────────────────────
+        with bk_t3:
+            if not _bk_rows:
+                st.info("Log a few breaks first — this needs history to say anything useful.")
+            else:
+                _perf = _bk_load_perf(_bk_rows)
+                _sum = breaks.summarize(_perf)
+                if not _sum["closed"]:
+                    st.warning(f"All {_sum['breaks']} break(s) still have unsold cards. "
+                               "Nothing here can be judged until cards sell — "
+                               "ROI on an unsold break is a guess.")
+                st.caption("Closed breaks only. A break with cards still unsold is excluded "
+                           "rather than counted at comp — otherwise every breaker looks good "
+                           "until you try to sell.")
+                for label, key in [("Breaker", "by_breaker"), ("Platform", "by_platform"),
+                                   ("Spot type", "by_spot_type"), ("Buyer", "by_buyer")]:
+                    data = _sum[key]
+                    rows_t = [{
+                        label: k,
+                        "Breaks": v["breaks"], "Closed": v["closed"],
+                        "Spent": v["cost"], "Back": v["realized"],
+                        "P&L": v["pl"],
+                        "ROI %": v["roi"] if v["roi"] is not None else None,
+                        "Win %": v["win_rate"] if v["win_rate"] is not None else None,
+                    } for k, v in sorted(data.items(),
+                                         key=lambda x: (x[1]["roi"] is None, -(x[1]["roi"] or 0)))]
+                    if rows_t:
+                        st.markdown(f"**By {label.lower()}**")
+                        st.dataframe(pd.DataFrame(rows_t), use_container_width=True,
+                                     hide_index=True, column_config={
+                                         "Spent": st.column_config.NumberColumn(format="$%.2f"),
+                                         "Back": st.column_config.NumberColumn(format="$%.2f"),
+                                         "P&L": st.column_config.NumberColumn(format="$%.2f"),
+                                         "ROI %": st.column_config.NumberColumn(format="%.1f%%"),
+                                         "Win %": st.column_config.NumberColumn(format="%.0f%%"),
+                                     })
