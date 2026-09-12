@@ -12656,7 +12656,13 @@ if _active_tab == 16:
                 bk_spot_detail = b2.text_input("What you bought",
                                                placeholder="Cowboys · or Caleb Williams · or /25 and lower")
                 bk_date = b3.date_input("Break date", value=date.today())
-                bk_cost = b3.number_input("Spot cost ($) *", min_value=0.0, step=0.01, format="%.2f")
+                # Labelled "total" deliberately. "Spot cost" reads as per-spot,
+                # and four team spots at $45 logged as $45 would show a break
+                # that lost $135 as one that made money.
+                bk_cost = b3.number_input(
+                    "Total paid for spots ($) *", min_value=0.0, step=0.01, format="%.2f",
+                    help="ALL spots combined, not the price of one. Four teams at "
+                         "$45 each is $180.")
                 bk_ship = b3.number_input("Shipping ($)", min_value=0.0, step=0.01, format="%.2f",
                                           help="Counts toward cost — on a $20 spot, $6 shipping is 30% of the outlay")
                 b4, b5 = st.columns(2)
@@ -12675,7 +12681,7 @@ if _active_tab == 16:
                 elif len(pfx.split("-")) < 2:
                     st.error("SKU prefix needs at least 2 dash-separated segments (e.g. LAYTON-091126).")
                 elif bk_cost <= 0:
-                    st.error("Spot cost must be more than $0.")
+                    st.error("Total paid for spots must be more than $0.")
                 else:
                     res = _neon_post("purchase_lots", {
                         "lot_prefix": pfx, "is_break": True,
