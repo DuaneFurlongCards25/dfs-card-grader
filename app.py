@@ -12503,10 +12503,19 @@ if _active_tab == 16:
 
         _bk_who = st.session_state.get("access_name") or st.session_state.get("user_name") or ""
 
+        # Fetch everything and filter here rather than with ?is_break=eq.true.
+        # Querying a column that does not exist yet errors, which would make an
+        # unconfigured Breaks tab look broken instead of simply empty — and the
+        # setup SQL that creates the column lives inside this very tab.
         if "bk_lots" not in st.session_state:
             st.session_state["bk_lots"] = _bk_get(
-                "purchase_lots", "?is_break=eq.true&order=purchase_date.desc") or []
-        _bk_rows = st.session_state["bk_lots"]
+                "purchase_lots", "?order=purchase_date.desc") or []
+        _bk_rows = [r for r in (st.session_state["bk_lots"] or []) if r.get("is_break")]
+        _bk_ready = any("is_break" in (r or {}) for r in (st.session_state["bk_lots"] or []))
+        if not _bk_ready and st.session_state["bk_lots"]:
+            st.warning("**One-time setup needed.** The break columns are not on "
+                       "`purchase_lots` yet — run the SQL under **Log a Break → "
+                       "First-time setup SQL** once in Neon, then come back.")
 
         bk_t1, bk_t2, bk_t3 = st.tabs(["🎟️ My Breaks", "➕ Log a Break", "📊 Does It Pay?"])
 
