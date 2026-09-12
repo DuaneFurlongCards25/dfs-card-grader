@@ -2735,7 +2735,7 @@ def _show_admin():
     import datetime as _dt_adm
     st.caption(f"v{APP_VERSION} · Access code management")
 
-    with st.expander("🛠 First-time setup SQL (run once in Supabase if daily limits aren't saving)", expanded=False):
+    with st.expander("🛠 First-time setup SQL (run once in Neon if daily limits aren't saving)", expanded=False):
         st.code("alter table access_codes add column if not exists daily_limit integer;", language="sql")
 
     codes = admin_get_codes()
@@ -6194,7 +6194,7 @@ alter table scan_cards disable row level security;"""
                                     st.error("Failed to create lot — run the SQL setup first:")
                                     st.code(_STACKS_SQL, language="sql")
 
-                    with st.expander("📋 First-time setup SQL (run once in Supabase)", expanded=False):
+                    with st.expander("📋 First-time setup SQL (run once in Neon)", expanded=False):
                         st.code(_STACKS_SQL, language="sql")
 
                 # Load + display stacks list
@@ -7864,8 +7864,8 @@ if _active_tab == 5:
     st.markdown("## 📬 Submission Tracker")
     if is_beta:
         st.warning("🔒 Submission Tracker is available with full membership. Your beta preview includes Card Research and Inventory Check.")
-    elif not SUPABASE_URL:
-        st.warning("Supabase not configured — tracker unavailable in this environment")
+    elif not WORKER_URL:
+        st.warning("Database not configured — tracker unavailable in this environment")
     else:
         rows = sb_get()
         if not rows:
@@ -8067,8 +8067,8 @@ if _active_tab == 7:
     st.markdown("## 🚚 Shipment Intake")
     st.markdown("Log cards as they arrive. Build a queue to evaluate or send to PSA.")
 
-    if not SUPABASE_URL:
-        st.warning("Supabase not configured — intake log unavailable in this environment.")
+    if not WORKER_URL:
+        st.warning("Database not configured — intake log unavailable in this environment.")
     else:
         # ── Add Card form ─────────────────────────────────────────────────────
         st.markdown("### ➕ Add a Card")
@@ -8329,14 +8329,14 @@ if _active_tab == 4:
             st.markdown("### Sync from eBay")
             st.caption(
                 "eBay Seller Hub → Reports → Active listings → Download CSV. "
-                "Drop it here — all 4,000+ listings sync into Supabase in seconds."
+                "Drop it here — all 4,000+ listings sync into Neon in seconds."
             )
             op_sync_file = st.file_uploader("eBay active listings CSV", type=["csv"], key="op_sync")
             if op_sync_file:
                 sync_df = pd.read_csv(op_sync_file, encoding="utf-8-sig")
                 listing_rows = parse_ebay_csv_to_listings(sync_df)
                 st.caption(f"Parsed {len(listing_rows):,} listings. Click below to sync.")
-                if st.button(f"⬆️ Sync {len(listing_rows):,} listings to Supabase", type="primary", key="op_sync_btn"):
+                if st.button(f"⬆️ Sync {len(listing_rows):,} listings to Neon", type="primary", key="op_sync_btn"):
                     with st.spinner("Syncing… (batches of 500)"):
                         n_synced = upsert_listings(listing_rows)
                     if n_synced:
@@ -8344,19 +8344,19 @@ if _active_tab == 4:
                         st.session_state.pop("op_listings_cache", None)
                         st.rerun()
                     else:
-                        st.error("Sync failed. Run the Supabase SQL to create the `listings` table first, then retry.")
+                        st.error("Sync failed. Run the setup SQL to create the `listings` table in Neon first, then retry.")
 
             st.divider()
 
             # Load from Supabase
             if "op_listings_cache" not in st.session_state:
-                with st.spinner("Loading from Supabase…"):
+                with st.spinner("Loading from Neon…"):
                     st.session_state["op_listings_cache"] = load_listings(min_price=20)
 
             all_ls = st.session_state.get("op_listings_cache", [])
 
             if not all_ls:
-                st.info("No $20+ listings in Supabase yet. Sync your eBay CSV above to get started.")
+                st.info("No $20+ listings in Neon yet. Sync your eBay CSV above to get started.")
             else:
                 today_due = sum(1 for l in all_ls if needs_pricing_today(l.get("last_priced_at"), l.get("price_freq","weekly")))
                 never_priced = sum(1 for l in all_ls if not l.get("last_priced_at"))
@@ -8427,7 +8427,7 @@ if _active_tab == 4:
 
             all_ls2 = st.session_state.get("op_listings_cache", [])
             if not all_ls2:
-                st.info("No listings in Supabase yet. Go to Inventory & Aging → sync your eBay CSV first.")
+                st.info("No listings in Neon yet. Go to Inventory & Aging → sync your eBay CSV first.")
             else:
                 force_all = st.toggle("Price all $20+ listings (ignore schedule)", key="q_force_all")
 
@@ -8484,7 +8484,7 @@ if _active_tab == 4:
                         prog.empty()
                         st.session_state.pop("op_listings_cache", None)
                         st.session_state["q_results"] = q_res
-                        st.success(f"✅ Priced {len(q_res)} cards. Results saved to Supabase.")
+                        st.success(f"✅ Priced {len(q_res)} cards. Results saved to Neon.")
                         st.rerun()
 
                     display_list = st.session_state.get("q_results") or due[:100]
@@ -9399,8 +9399,8 @@ if _active_tab == 8:
     st.markdown("## 🏷️ Consignments")
     st.caption("DC Sports auction consignment tracking — import send history, track what sold and what was paid.")
 
-    if not SUPABASE_URL:
-        st.warning("Supabase not connected. Configure in sidebar to enable Consignments.")
+    if not WORKER_URL:
+        st.warning("Database not connected. Configure the Worker URL to enable Consignments.")
     else:
         # ── Helpers (Neon via Cloudflare Worker) ──────────────────────────────
         def _csn_get(table, params=""):
@@ -10379,8 +10379,8 @@ if _active_tab == 9:
                                             st.error(f"Save failed: {_pur_last_error.get('msg','Unknown error')}")
                         elif lc_state and lot_cards_df is not None and not lot_cards_df.empty:
                             st.divider()
-                            st.markdown(f"**📋 Active Listings CSV ({card_count_csv}) — not yet saved to Supabase**")
-                            st.caption("Go to Import Cards tab → Save to Supabase to make this persistent.")
+                            st.markdown(f"**📋 Active Listings CSV ({card_count_csv}) — not yet saved (session only)**")
+                            st.caption("Go to Import Cards tab → Save to make this persistent.")
                             row_data = {"SKU": lot_cards_df[lc_state["sku_col"]].values}
                             if lc_state["title_col"]: row_data["Title"] = lot_cards_df[lc_state["title_col"]].values
                             if lc_state["price_col"]: row_data["Price ($)"] = lot_cards_df[lc_state["price_col"]].values
