@@ -9961,7 +9961,12 @@ if _active_tab == 9:
         if "pur_lots" not in st.session_state:
             st.session_state["pur_lots"] = _pur_get("purchase_lots", "?order=purchase_date.desc")
 
-        lots_data = st.session_state["pur_lots"]
+        # Breaks live in this table so they inherit lot P&L, the SKU rollup and
+        # the comp projection — but a break is not a lot and must never appear
+        # in the Lots list. Filtered here rather than in the query so it still
+        # works before the is_break column exists.
+        lots_data = [l for l in (st.session_state["pur_lots"] or [])
+                     if not l.get("is_break")]
 
         # Build sorted prefix list (longest first) so NATION-08-18-26 beats NATION-08
         _known_prefixes = sorted(
