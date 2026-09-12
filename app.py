@@ -12501,7 +12501,11 @@ if _active_tab == 16:
         def _bk_get(table, params=""):
             return _neon_get(table, params)
 
-        _bk_who = st.session_state.get("access_name") or st.session_state.get("user_name") or ""
+        # access_name is the key the login actually sets — it reads "Robert Bass"
+        # when Robert is signed in, so breaks attribute to whoever logged them.
+        # The keys I reached for first ("user_name") do not exist and would have
+        # left bought_by blank on every break.
+        _bk_who = st.session_state.get("access_name", "")
 
         # Fetch everything and filter here rather than with ?is_break=eq.true.
         # Querying a column that does not exist yet errors, which would make an
@@ -12571,12 +12575,31 @@ if _active_tab == 16:
                     by_comps.setdefault(c, []).append(
                         v if v not in (None, "", 0) else l.get("current_price"))
 
+            # Per-spot costs live in their own table. Pulled once for every
+            # break on screen rather than per-expander, which would be a
+            # round-trip each time someone opens one.
+            spot_rows = _bk_get("break_spots", "?limit=2000") or []
+            by_spot_rows = {}
+            for sp in spot_rows:
+                by_spot_rows.setdefault(
+                    str(sp.get("break_prefix") or "").upper(), []).append(sp)
+
             out = []
             for r in rows:
                 pfx = r["lot_prefix"].upper()
-                out.append({**r,
-                            "pnl": breaks.break_pnl(r, by_sales.get(pfx, []),
-                                                    by_comps.get(pfx, []))})
+                sales_r = by_sales.get(pfx, [])
+                spots = sorted(by_spot_rows.get(pfx, []),
+                               key=lambda z: str(z.get("spot_value") or ""))
+                rec = {**r,
+                       "pnl": breaks.break_pnl(r, sales_r, by_comps.get(pfx, [])),
+                       "spots_rows": spots}
+                if spots:
+                    att = breaks.attribute(sales_r, spots)
+                    rec["spot_pnl"] = [
+                        {**sp, "p": breaks.spot_pnl(sp, att["by_spot"].get(sp.get("id"), []))}
+                        for sp in spots]
+                    rec["unclaimed"] = att["unclaimed"]
+                out.append(rec)
             return out
 
         # ── MY BREAKS ────────────────────────────────────────────────────────
@@ -12637,6 +12660,46 @@ if _active_tab == 16:
                                     f"${p['projected']:,.2f} net. All-in if they sell at comp: "
                                     f"**${p['all_in_pl']:+,.2f}** "
                                     f"({p['all_in_roi']:+.1f}% ROI). Best case — not banked.")
+                        _sp = r.get("spot_pnl") or []
+                        if _sp:
+                            st.markdown("**Per spot**")
+                            st.dataframe(pd.DataFrame([{
+                                "Spot": z.get("spot_value"),
+                                "Type": z.get("spot_type"),
+                                "Cost": z["p"]["cost"],
+                                "Back": z["p"]["realized"],
+                                "P&L": z["p"]["pl"],
+                                "ROI %": z["p"]["roi"],
+                                "Sold": z["p"]["sold"],
+                            } for z in _sp]), use_container_width=True, hide_index=True,
+                                column_config={
+                                    "Cost": st.column_config.NumberColumn(format="$%.2f"),
+                                    "Back": st.column_config.NumberColumn(format="$%.2f"),
+                                    "P&L": st.column_config.NumberColumn(format="$%.2f"),
+                                    "ROI %": st.column_config.NumberColumn(format="%.1f%%"),
+                                })
+                            _unc = r.get("unclaimed") or []
+                            if _unc:
+                                # Shown with its money, not just a count. Per-spot
+                                # totals will not add up to the break total without
+                                # it, and a gap with no explanation reads as a bug.
+                                _um = sum(breaks._money(c.get("net_proceeds")) for c in _unc)
+                                with st.expander(f"❓ {len(_unc)} sold card(s) matched no spot "
+                                                 f"— ${_um:,.2f}", expanded=False):
+                                    st.caption("Titles that carry no team, player or serial "
+                                               "matching a spot above. Their money is real but "
+                                               "belongs to no spot, so it sits outside the "
+                                               "per-spot rows.")
+                                    st.dataframe(pd.DataFrame([{
+                                        "Card": c.get("title"),
+                                        "Net": breaks._money(c.get("net_proceeds")),
+                                    } for c in _unc]), use_container_width=True, hide_index=True,
+                                        column_config={"Net": st.column_config.NumberColumn(
+                                            format="$%.2f")})
+                        elif r.get("spots") and int(r.get("spots") or 0) > 1:
+                            st.caption("No per-spot costs recorded. Add them under "
+                                       "**Log a Break → Add spots to a break** to see which "
+                                       "of these spots actually paid.")
                         if r.get("notes"):
                             st.caption(r["notes"])
 
@@ -12778,6 +12841,96 @@ if _active_tab == 16:
                                          f"{_neon_last_error.get('msg') or 'Unknown error'} — "
                                          "run the setup SQL below if the break columns are missing.")
 
+            st.divider()
+            st.markdown("### Add spots to a break")
+            st.caption("Spots are never the same price — Cowboys at $60 and Jaguars at $20 "
+                       "in the same break. Recording each one separately is what lets the "
+                       "app tell you which spots paid, instead of only whether the break as "
+                       "a whole did. Cards are matched to a spot by what the title says, so "
+                       "nothing has to be re-SKU'd.")
+
+            if not _bk_rows:
+                st.info("Log a break first, then add its spots here.")
+            else:
+                _sp_pick = st.selectbox(
+                    "Break", ["— select —"] + [r["lot_prefix"] for r in _bk_rows],
+                    key="bk_sp_pick")
+                if _sp_pick != "— select —":
+                    _sp_have = _bk_get(
+                        "break_spots",
+                        f"?break_prefix=eq.{_sp_pick}&order=spot_value.asc") or []
+                    if _sp_have:
+                        _sp_tot = sum(breaks._money(z.get("cost")) for z in _sp_have)
+                        _brk = next(r for r in _bk_rows if r["lot_prefix"] == _sp_pick)
+                        st.dataframe(pd.DataFrame([{
+                            "Spot": z.get("spot_value"), "Type": z.get("spot_type"),
+                            "Cost": breaks._money(z.get("cost")),
+                        } for z in _sp_have]), use_container_width=True, hide_index=True,
+                            column_config={"Cost": st.column_config.NumberColumn(format="$%.2f")})
+                        # The spots must account for what the break says was paid.
+                        # A silent gap here is what makes per-spot P&L wrong later.
+                        _paid = breaks._money(_brk.get("total_cost"))
+                        if abs(_sp_tot - _paid) >= 0.01:
+                            st.warning(f"Spots add to **${_sp_tot:,.2f}** but the break records "
+                                       f"**${_paid:,.2f}** paid — a ${abs(_sp_tot - _paid):,.2f} "
+                                       f"gap. Per-spot P&L only covers the spots listed here.")
+                        else:
+                            st.success(f"Spots account for the full ${_paid:,.2f} paid.")
+                        _sp_del = st.selectbox(
+                            "Remove a spot", ["— none —"] +
+                            [f"{z.get('spot_value')} (${breaks._money(z.get('cost')):,.2f})"
+                             for z in _sp_have], key="bk_sp_del")
+                        if _sp_del != "— none —" and st.button("Remove spot", key="bk_sp_delbtn"):
+                            _tgt = _sp_have[[f"{z.get('spot_value')} "
+                                             f"(${breaks._money(z.get('cost')):,.2f})"
+                                             for z in _sp_have].index(_sp_del)]
+                            # _neon_delete swallows its error and returns a bare
+                            # bool, so this cannot read _neon_last_error — that
+                            # would surface a stale message from an earlier call.
+                            if _neon_delete("break_spots", _tgt["id"]):
+                                st.success(f"Removed **{_tgt.get('spot_value')}**.")
+                                st.rerun()
+                            else:
+                                st.error("Could not remove that spot — it may already be gone.")
+                    else:
+                        st.info("No spots recorded for this break yet.")
+
+                    with st.form("bk_spot_add"):
+                        s1, s2, s3 = st.columns([1, 2, 1])
+                        sp_type = s1.selectbox("Type", breaks.SPOT_TYPES, key="bk_sp_type")
+                        sp_val = s2.text_input(
+                            "What you bought *",
+                            placeholder="Cowboys · or Bobby Witt Jr · or /25")
+                        sp_cost = s3.number_input("Cost of THIS spot ($) *", min_value=0.0,
+                                                  step=0.01, format="%.2f")
+                        st.caption("Team spots match the team nickname in a card's title; "
+                                   "player spots match the name; a serial spot claims every "
+                                   "card numbered to that run or tighter.")
+                        sp_go = st.form_submit_button("Add Spot", type="primary")
+                    if sp_go:
+                        if not sp_val.strip():
+                            st.error("Say what the spot was.")
+                        elif sp_cost <= 0:
+                            st.error("A spot costs more than $0.")
+                        else:
+                            res = _neon_post("break_spots", {
+                                "break_prefix": _sp_pick,
+                                "spot_type": sp_type,
+                                "spot_value": sp_val.strip(),
+                                "cost": float(sp_cost),
+                            })
+                            if res is not None:
+                                st.success(f"Added **{sp_val.strip()}** at ${sp_cost:,.2f}.")
+                                st.rerun()
+                            else:
+                                e = (_neon_last_error.get("msg") or "").lower()
+                                if "does not exist" in e or "42p01" in e:
+                                    st.error("The `break_spots` table is missing — run the "
+                                             "setup SQL below once in Neon.")
+                                else:
+                                    st.error(f"Save failed: "
+                                             f"{_neon_last_error.get('msg') or 'Unknown error'}")
+
             with st.expander("🛠 First-time setup SQL (run once in Neon)", expanded=False):
                 st.code(breaks.SETUP_SQL, language="sql")
 
@@ -12795,6 +12948,44 @@ if _active_tab == 16:
                 st.caption("Closed breaks only. A break with cards still unsold is excluded "
                            "rather than counted at comp — otherwise every breaker looks good "
                            "until you try to sell.")
+                # Which SPOTS paid, across every break that has per-spot costs.
+                # summarize() works on whole breaks and cannot see inside one, so
+                # this rolls the per-spot rows up here. Only spots whose cards
+                # have sold say anything, same rule as the break-level tables.
+                _spot_agg = {}
+                for r in _perf:
+                    for z in (r.get("spot_pnl") or []):
+                        k = (z.get("spot_type") or "Other")
+                        a = _spot_agg.setdefault(k, {"spots": 0, "cost": 0.0,
+                                                     "realized": 0.0, "won": 0, "sold": 0})
+                        a["spots"] += 1
+                        a["cost"] += z["p"]["cost"]
+                        a["realized"] += z["p"]["realized"]
+                        a["sold"] += z["p"]["sold"]
+                        if z["p"]["pl"] > 0:
+                            a["won"] += 1
+                if _spot_agg:
+                    st.markdown("**By individual spot** — which kind of spot returns money")
+                    st.dataframe(pd.DataFrame([{
+                        "Spot type": k,
+                        "Spots": v["spots"],
+                        "Spent": round(v["cost"], 2),
+                        "Back": round(v["realized"], 2),
+                        "P&L": round(v["realized"] - v["cost"], 2),
+                        "ROI %": round((v["realized"] - v["cost"]) / v["cost"] * 100, 1)
+                                 if v["cost"] else None,
+                        "Spots up": v["won"],
+                    } for k, v in sorted(_spot_agg.items(),
+                                         key=lambda x: -(x[1]["realized"] - x[1]["cost"]))]),
+                        use_container_width=True, hide_index=True, column_config={
+                            "Spent": st.column_config.NumberColumn(format="$%.2f"),
+                            "Back": st.column_config.NumberColumn(format="$%.2f"),
+                            "P&L": st.column_config.NumberColumn(format="$%.2f"),
+                            "ROI %": st.column_config.NumberColumn(format="%.1f%%"),
+                        })
+                    st.caption("A break can make money while half its spots lose it. "
+                               "This is the only view that separates the two.")
+
                 for label, key in [("Breaker", "by_breaker"), ("Platform", "by_platform"),
                                    ("Spot type", "by_spot_type"), ("Buyer", "by_buyer")]:
                     data = _sum[key]
