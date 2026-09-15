@@ -10001,6 +10001,10 @@ if _active_tab == 9:
 
         pur_t1, pur_t2, pur_t3, pur_t4 = st.tabs(["📋 Lots", "⬆️ Import Cards", "📊 P&L by Lot", "🃏 Individual Cards"])
 
+        # Where a purchase came from. One list for Lots and Individual Cards so
+        # the two dropdowns can never drift apart.
+        _PURCHASE_SOURCES = ["Whatnot", "Facebook", "Local", "eBay", "Other"]
+
         # ── LOTS ──────────────────────────────────────────────────────────────
         with pur_t1:
             st.markdown("### Purchase Lots")
@@ -10010,7 +10014,7 @@ if _active_tab == 9:
                 st.markdown("**Add Lot**")
                 p1, p2, p3 = st.columns(3)
                 pl_prefix  = p1.text_input("Lot Prefix *", placeholder="MATTSFB-072026")
-                pl_source  = p1.text_input("Source", placeholder="Matt's FB Marketplace")
+                pl_source  = p1.selectbox("Source", _PURCHASE_SOURCES, key="pur_new_src")
                 pl_aliases = p1.text_input("Alias Prefixes", placeholder="RBLOT_-_07, FEAR*", help="Comma-separated alternate SKU prefixes that also belong to this lot. End one with * to match without a dash — FEAR* catches FEAR00001-1746v4, FEAR00002-… as one lot.")
                 pl_date    = p2.date_input("Purchase Date", value=date.today())
                 pl_cost    = p2.number_input("Total Cost Paid ($)", min_value=0.0, step=0.01, format="%.2f")
@@ -10026,7 +10030,7 @@ if _active_tab == 9:
                     aliases_clean = ",".join([a.strip().upper() for a in pl_aliases.split(",") if a.strip()]) or None
                     res = _pur_post("purchase_lots", {
                         "lot_prefix":      prefix_clean,
-                        "source":          pl_source.strip() or None,
+                        "source":          pl_source,
                         "purchase_date":   str(pl_date),
                         "total_cost":      float(pl_cost),
                         "card_count":      int(pl_count),
@@ -10402,7 +10406,16 @@ if _active_tab == 9:
                     el = next(l for l in lots_data if l["lot_prefix"] == edit_sel)
                     with st.form("pur_edit_lot"):
                         e1, e2, e3 = st.columns(3)
-                        e_source   = e1.text_input("Source", value=el.get("source") or "")
+                        # Older lots carry typed sources ("Matt's FB Marketplace").
+                        # Offer that value too and preselect it — otherwise saving
+                        # an old lot would silently overwrite its source.
+                        _e_cur = (el.get("source") or "").strip()
+                        _e_opts = _PURCHASE_SOURCES + (
+                            [_e_cur] if _e_cur and _e_cur not in _PURCHASE_SOURCES else [])
+                        e_source   = e1.selectbox(
+                            "Source", _e_opts,
+                            index=_e_opts.index(_e_cur) if _e_cur in _e_opts else 0,
+                            key=f"pur_edit_src_{el['id']}")
                         e_aliases  = e1.text_input("Alias Prefixes", value=el.get("alias_prefixes") or "",
                                         help="Comma-separated alternate SKU prefixes that roll up to this lot (e.g. RBLOT_-_07). End one with * to match without a dash — FEAR* catches FEAR00001-1746v4, FEAR00002-… as one lot.")
                         e_date     = e2.date_input("Purchase Date",
@@ -10416,7 +10429,7 @@ if _active_tab == 9:
                     if edit_sub:
                         aliases_edit = ",".join([a.strip().upper() for a in e_aliases.split(",") if a.strip()]) or None
                         res = _pur_patch("purchase_lots", f"id=eq.{el['id']}", {
-                            "source":          e_source.strip() or None,
+                            "source":          e_source,
                             "purchase_date":   str(e_date),
                             "total_cost":      float(e_cost),
                             "card_count":      int(e_count),
@@ -10780,7 +10793,7 @@ alter table lot_cards add constraint if not exists lot_cards_prefix_sku_unique u
                     cp_sku    = ca1.text_input("SKU", placeholder="WN-073026-00001",
                                     help="Must match the SKU on your eBay listing exactly")
                     cp_title  = ca1.text_input("Description", placeholder="2023 Bowman Chrome Corbin Carroll")
-                    cp_source = ca2.selectbox("Source", ["Whatnot", "Facebook", "Local", "eBay", "Other"])
+                    cp_source = ca2.selectbox("Source", _PURCHASE_SOURCES)
                     cp_date   = ca2.date_input("Purchase Date", value=date.today())
                     cp_cost   = ca2.number_input("Cost Paid ($)", min_value=0.0, step=0.01, format="%.2f")
                     cp_qty    = ca2.number_input("Qty", min_value=1, step=1, value=1,
