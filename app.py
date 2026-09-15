@@ -2925,6 +2925,7 @@ _NAV_LABELS = [
     "🧰 Operations", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake",
     "🏷️ Consignments", "📦 Purchases", "💰 Sales & P&L", "📸 Image Prep",
     "🗂️ Triage", "💵 Buy Desk", "🏷️ Labels", "♻️ Relist", "🎁 Breaks",
+    "🗃️ Inventory",
 ]
 
 # If a sidebar feature button was clicked, update both nav state AND the radio widget's own state key
@@ -13062,3 +13063,492 @@ if _active_tab == 16:
                                          "ROI %": st.column_config.NumberColumn(format="%.1f%%"),
                                          "Win %": st.column_config.NumberColumn(format="%.0f%%"),
                                      })
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 18 — Inventory
+#
+# The master record for every card owned, not just the ~4,000 live on eBay.
+# Two levels: a row per card worth tracking on its own, and a row per box of
+# bulk that is counted and located but never itemized. Logic in dfs_inventory.
+# ══════════════════════════════════════════════════════════════════════════════
+if _active_tab == 17:
+    import dfs_inventory as inventory
+
+    st.markdown("## 🗃️ Inventory")
+    st.caption("Every card you own and where it sits — listed or not. Cards worth "
+               "tracking one at a time get their own row; bulk is tracked by the box.")
+
+    if is_beta:
+        # Inventory holds cost, value and every card owned. Beta codes are for
+        # testing Card Research, not for seeing the business's stock.
+        st.warning("🔒 Inventory is available with full membership.")
+    elif not WORKER_URL:
+        st.warning("Database not configured — Inventory unavailable in this environment.")
+    else:
+        def _inv_probe(table):
+            """_neon_get() returns [] on ANY failure, so a table the Worker
+            refuses or one that does not exist yet looks exactly like an empty
+            inventory. Ask directly and keep the reason."""
+            try:
+                req = urllib.request.Request(f"{WORKER_URL}/api/db/{table}?limit=1",
+                                             headers=_neon_headers())
+                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=10):
+                    return True, ""
+            except urllib.error.HTTPError as e:
+                try:
+                    d = json.loads(e.read().decode()).get("error", "")
+                except Exception:
+                    d = ""
+                return False, f"HTTP {e.code}: {d}"
+            except Exception as e:
+                return False, str(e)
+
+        _inv_ok, _inv_why = _inv_probe("inventory_cards")
+        _box_ok, _box_why = _inv_probe("inventory_boxes")
+
+        if not (_inv_ok and _box_ok):
+            _why = _inv_why or _box_why
+            st.error("**Inventory needs a one-time setup** before it can save anything.")
+            if "not allowed" in _why:
+                st.markdown(
+                    "1. Run the SQL below once in Neon — console.neon.tech → `dfs-crm-prod` → "
+                    "SQL Editor → `main` branch.\n"
+                    "2. Deploy the Worker so it allows the two new tables "
+                    "(the allow-list line is already edited locally):")
+                st.code('cd "/Users/duanefurlong/Desktop/CRM Duane Furlong Studios/cloudflare-worker" '
+                        '&& npx wrangler deploy', language="bash")
+            else:
+                st.markdown("Run the SQL below once in Neon — console.neon.tech → "
+                            "`dfs-crm-prod` → SQL Editor → `main` branch.")
+            st.caption(f"Database said: {_why}")
+            st.code(inventory.SETUP_SQL, language="sql")
+        else:
+            def _inv_reload():
+                for k in ("inv_cards", "inv_boxes"):
+                    st.session_state.pop(k, None)
+
+            if "inv_cards" not in st.session_state:
+                with st.spinner("Loading inventory…"):
+                    st.session_state["inv_cards"] = inventory.fetch_all(_neon_get, "inventory_cards")
+            if "inv_boxes" not in st.session_state:
+                st.session_state["inv_boxes"] = inventory.fetch_all(_neon_get, "inventory_boxes")
+            inv_cards = st.session_state["inv_cards"]
+            inv_boxes = st.session_state["inv_boxes"]
+
+            it_over, it_cards, it_boxes, it_sync, it_pull, it_setup = st.tabs([
+                "📊 Overview", "🃏 Cards", "📦 Boxes", "🔄 Sync & Reconcile",
+                "🧾 Pull List", "🛠 Setup"])
+
+            # ── OVERVIEW ────────────────────────────────────────────────────
+            with it_over:
+                sm = inventory.summary(inv_cards, inv_boxes)
+                if not inv_cards and not inv_boxes:
+                    st.info("Inventory is empty. Start on **🔄 Sync & Reconcile** — drop in "
+                            "your eBay active-listings report and every live listing, lot "
+                            "card and sold card becomes an inventory row in one pass. Then "
+                            "add your bulk on **📦 Boxes**.")
+                m1, m2, m3, m4, m5 = st.columns(5)
+                m1.metric("Cards on hand", f"{sm['total_on_hand']:,}",
+                          help="Tracked cards not sold, plus the counted cards in boxes")
+                m2.metric("Tracked one by one", f"{sm['on_hand']:,}")
+                m3.metric("In boxes", f"{sm['box_cards']:,}", delta=f"{sm['boxes']} boxes",
+                          delta_color="off")
+                m4.metric("Located", f"{sm['located_pct']:.0f}%" if sm["located_pct"] is not None else "—",
+                          help="Tracked, unsold cards with a Box-Row-Position")
+                m5.metric("Est. value", f"${sm['value']:,.0f}",
+                          help="Saved value, else list price, across unsold tracked cards")
+
+                by = sm["by_status"]
+                st.dataframe(pd.DataFrame([
+                    {"Status": inventory.STATUS_LABEL[k], "Cards": v}
+                    for k, v in by.items() if v]), hide_index=True,
+                    use_container_width=False)
+
+                _now = datetime.utcnow()
+                def _age(c):
+                    try:
+                        return (_now - datetime.fromisoformat(
+                            str(c.get("status_updated_at"))[:19])).days
+                    except Exception:
+                        return None
+                attn_ended = [c for c in inv_cards if c.get("status") == "ended"]
+                attn_intake = [c for c in inv_cards if c.get("status") == "intake"
+                               and (_age(c) or 0) > 3]
+                attn_noloc = [c for c in inv_cards if c.get("status") == "listed"
+                              and not inventory.parse_location(c.get("location"))]
+                if attn_ended or attn_intake or attn_noloc:
+                    st.markdown("#### Needs attention")
+                if attn_ended:
+                    st.warning(f"**{len(attn_ended)} listing(s) ended without selling.** "
+                               "Those cards should be back on a shelf — this is where cards "
+                               "go missing. Filter **Cards** by *Ended*.")
+                if attn_intake:
+                    st.warning(f"**{len(attn_intake)} card(s) in intake over 3 days** and "
+                               "not listed.")
+                if attn_noloc:
+                    st.info(f"**{len(attn_noloc)} live listing(s) have no location.** "
+                            "When one sells you will be searching for it. Use "
+                            "**Cards → Assign locations** to place them in bulk.")
+
+            # ── CARDS ───────────────────────────────────────────────────────
+            with it_cards:
+                f1, f2, f3 = st.columns([2, 3, 1])
+                f_status = f1.multiselect("Status", inventory.STATUSES,
+                                          format_func=lambda s: inventory.STATUS_LABEL[s],
+                                          key="inv_f_status")
+                f_q = f2.text_input("Search SKU, title or location", key="inv_f_q",
+                                    placeholder="e.g. Jaxson Dart · RBLOT · B14")
+                f_noloc = f3.checkbox("No location", key="inv_f_noloc")
+                q = f_q.strip().lower()
+                shown = [c for c in inv_cards
+                         if (not f_status or c.get("status") in f_status)
+                         and (not q or q in str(c.get("sku") or "").lower()
+                              or q in str(c.get("title") or "").lower()
+                              or q in str(c.get("location") or "").lower())
+                         and (not f_noloc or not inventory.parse_location(c.get("location")))]
+                shown.sort(key=inventory.location_sort_key)
+                LIMIT = 500
+                st.caption(f"{len(shown):,} match" + (f" — showing the first {LIMIT}; "
+                           "narrow the filter to edit the rest." if len(shown) > LIMIT else ""))
+
+                EDIT = ["location", "status", "cost", "est_value", "notes"]
+                if shown:
+                    page = shown[:LIMIT]
+                    base = pd.DataFrame([{
+                        "id": c["id"], "sku": c.get("sku"), "title": c.get("title"),
+                        "location": c.get("location") or "",
+                        "status": c.get("status") or "intake",
+                        "list_price": buying._money(c.get("list_price")) or None,
+                        "cost": buying._money(c.get("cost")) or None,
+                        "est_value": buying._money(c.get("est_value")) or None,
+                        "notes": c.get("notes") or "",
+                    } for c in page])
+                    ed = st.data_editor(
+                        base, hide_index=True, use_container_width=True, key="inv_editor",
+                        disabled=["id", "sku", "title", "list_price"],
+                        column_config={
+                            "id": None,
+                            "location": st.column_config.TextColumn(
+                                "Location ✏️", help="B#-R#-P#  (box, row, position)"),
+                            "status": st.column_config.SelectboxColumn(
+                                "Status ✏️", options=inventory.STATUSES),
+                            "list_price": st.column_config.NumberColumn("eBay $", format="$%.2f"),
+                            "cost": st.column_config.NumberColumn("Cost ✏️", format="$%.2f"),
+                            "est_value": st.column_config.NumberColumn("Value ✏️", format="$%.2f"),
+                        })
+                    if st.button("💾 Save changes", type="primary", key="inv_save"):
+                        by_id = {int(r["id"]): r for r in base.to_dict("records")}
+                        bad, saved, failed = [], 0, 0
+                        for r in ed.to_dict("records"):
+                            o = by_id.get(int(r["id"]))
+                            upd = {}
+                            for k in EDIT:
+                                nv, ov = r.get(k), o.get(k)
+                                if pd.isna(nv) if not isinstance(nv, str) else False:
+                                    nv = None
+                                if pd.isna(ov) if not isinstance(ov, str) else False:
+                                    ov = None
+                                if (nv or None) != (ov or None):
+                                    upd[k] = nv
+                            if not upd:
+                                continue
+                            if "location" in upd:
+                                p = inventory.parse_location(upd["location"])
+                                if upd["location"] and not p:
+                                    bad.append(f"{r['sku']}: '{upd['location']}'")
+                                    continue
+                                upd["location"] = inventory.format_location(*p) if p else None
+                                upd["box_code"] = p[0] if p else None
+                            if "status" in upd:
+                                upd["status_updated_at"] = datetime.utcnow().isoformat() + "Z"
+                            upd["updated_at"] = datetime.utcnow().isoformat() + "Z"
+                            # _neon_patch swallows its error and returns a bool
+                            if _neon_patch("inventory_cards", int(r["id"]), upd):
+                                saved += 1
+                            else:
+                                failed += 1
+                        if bad:
+                            st.error("Not saved — location must look like B14-R2-P7: " + "; ".join(bad[:10]))
+                        if failed:
+                            st.error(f"{failed} row(s) failed to save.")
+                        if saved:
+                            st.success(f"Saved {saved} card(s).")
+                            _inv_reload()
+                            st.rerun()
+                        elif not bad and not failed:
+                            st.info("Nothing changed.")
+
+                st.divider()
+                with st.expander("📍 Assign locations in bulk", expanded=False):
+                    st.caption("Paste SKUs in the order they sit in the row, one per line, "
+                               "and give the starting slot. Positions count up from there — "
+                               "the fastest way to locate a row you just filed.")
+                    a1, a2 = st.columns([3, 1])
+                    bl_skus = a1.text_area("SKUs, in shelf order", height=160, key="inv_bl_skus")
+                    bl_start = a2.text_input("Start at", placeholder="B14-R2-P1", key="inv_bl_start")
+                    if st.button("Assign", key="inv_bl_go"):
+                        p = inventory.parse_location(bl_start)
+                        skus = [s.strip() for s in bl_skus.splitlines() if s.strip()]
+                        if not p or p[1] is None:
+                            st.error("Start must include a box and row, e.g. B14-R2-P1.")
+                        elif not skus:
+                            st.error("Paste at least one SKU.")
+                        else:
+                            idx = {str(c.get("sku") or "").strip().upper(): c for c in inv_cards}
+                            missing = [s for s in skus if s.upper() not in idx]
+                            pos, done = p[2] or 1, 0
+                            for s in skus:
+                                c = idx.get(s.upper())
+                                if c is None:
+                                    continue
+                                loc = inventory.format_location(p[0], p[1], pos)
+                                if _neon_patch("inventory_cards", c["id"], {
+                                        "location": loc, "box_code": p[0],
+                                        "updated_at": datetime.utcnow().isoformat() + "Z"}):
+                                    done += 1
+                                pos += 1
+                            if missing:
+                                st.warning(f"{len(missing)} SKU(s) are not in inventory and were "
+                                           f"skipped (their slots were left empty so the rest "
+                                           f"still match the shelf): " + ", ".join(missing[:15]))
+                            st.success(f"Located {done} card(s) starting at "
+                                       f"{inventory.format_location(*p)}.")
+                            _inv_reload()
+
+                with st.expander("➕ Add a card by hand", expanded=False):
+                    with st.form("inv_add", clear_on_submit=True):
+                        n1, n2, n3 = st.columns([2, 4, 2])
+                        na_sku = n1.text_input("SKU *")
+                        na_title = n2.text_input("Title")
+                        na_loc = n3.text_input("Location", placeholder="B14-R2-P7")
+                        n4, n5, n6 = st.columns(3)
+                        na_status = n4.selectbox("Status", inventory.STATUSES,
+                                                 format_func=lambda s: inventory.STATUS_LABEL[s])
+                        na_cost = n5.number_input("Cost ($)", min_value=0.0, step=0.01, format="%.2f")
+                        na_val = n6.number_input("Value ($)", min_value=0.0, step=0.01, format="%.2f")
+                        na_go = st.form_submit_button("Add card", type="primary")
+                    if na_go:
+                        p = inventory.parse_location(na_loc)
+                        if not na_sku.strip():
+                            st.error("SKU is required.")
+                        elif na_loc.strip() and not p:
+                            st.error("Location must look like B14-R2-P7.")
+                        else:
+                            res = _neon_post("inventory_cards", {
+                                "sku": na_sku.strip(), "title": na_title.strip() or None,
+                                "status": na_status,
+                                "location": inventory.format_location(*p) if p else None,
+                                "box_code": p[0] if p else None,
+                                "cost": na_cost or None, "est_value": na_val or None,
+                            })
+                            if res is not None:
+                                st.success(f"Added {na_sku.strip()}.")
+                                _inv_reload()
+                                st.rerun()
+                            else:
+                                e = (_neon_last_error.get("msg") or "")
+                                st.error("That SKU is already in inventory." if "duplicate" in e.lower()
+                                         else f"Save failed: {e}")
+
+            # ── BOXES ───────────────────────────────────────────────────────
+            with it_boxes:
+                st.caption("Bulk you have counted and put away but not itemized. A box of "
+                           "800 base cards is one row here, not 800. Cards come out of a box "
+                           "into **Cards** when you pull them to list.")
+                if inv_boxes:
+                    bdf = pd.DataFrame([{
+                        "id": b["id"], "box_code": b.get("box_code"), "label": b.get("label") or "",
+                        "sport": b.get("sport") or "", "pile": b.get("pile") or "",
+                        "card_count": int(buying._money(b.get("card_count"))),
+                        "est_value": buying._money(b.get("est_value")) or None,
+                        "shelf": b.get("shelf") or "", "notes": b.get("notes") or "",
+                    } for b in sorted(inv_boxes, key=lambda b: inventory.location_sort_key(
+                        {"location": b.get("box_code")}))])
+                    bed = st.data_editor(
+                        bdf, hide_index=True, use_container_width=True, key="inv_box_editor",
+                        disabled=["id", "box_code"],
+                        column_config={
+                            "id": None,
+                            "pile": st.column_config.SelectboxColumn(
+                                "Pile", options=["singles", "doubles", "triples", "home_runs", "mixed"]),
+                            "card_count": st.column_config.NumberColumn("Cards", min_value=0, step=1),
+                            "est_value": st.column_config.NumberColumn("Box value", format="$%.2f"),
+                        })
+                    st.caption(f"{len(inv_boxes)} boxes · {int(bdf['card_count'].sum()):,} cards")
+                    if st.button("💾 Save box changes", key="inv_box_save"):
+                        orig = {int(r["id"]): r for r in bdf.to_dict("records")}
+                        n = 0
+                        for r in bed.to_dict("records"):
+                            o = orig[int(r["id"])]
+
+                            def _norm(v):
+                                # NaN != NaN, so a blank cell compared raw reads as
+                                # "changed" on every save and rewrites every box.
+                                if v is None or (not isinstance(v, str) and pd.isna(v)):
+                                    return None
+                                return v if v != "" else None
+                            upd = {k: _norm(r[k])
+                                   for k in ("label", "sport", "pile", "card_count", "est_value", "shelf", "notes")
+                                   if _norm(r[k]) != _norm(o[k])}
+                            if upd:
+                                if "card_count" in upd:
+                                    upd["counted_at"] = datetime.utcnow().isoformat() + "Z"
+                                upd["updated_at"] = datetime.utcnow().isoformat() + "Z"
+                                n += 1 if _neon_patch("inventory_boxes", int(r["id"]), upd) else 0
+                        st.success(f"Saved {n} box(es).")
+                        _inv_reload()
+                        st.rerun()
+
+                with st.form("inv_box_add", clear_on_submit=True):
+                    st.markdown("**Add a box**")
+                    b1, b2, b3, b4 = st.columns([1, 3, 1, 1])
+                    nb_code = b1.text_input("Box *", placeholder="B14")
+                    nb_label = b2.text_input("What's in it", placeholder="2023 Prizm Football base")
+                    nb_sport = b3.selectbox("Sport", ["Football", "Baseball", "Basketball", "Soccer", "Mixed", "Other"])
+                    nb_pile = b4.selectbox("Pile", ["singles", "doubles", "triples", "home_runs", "mixed"])
+                    b5, b6, b7 = st.columns(3)
+                    nb_count = b5.number_input("Card count", min_value=0, step=1)
+                    nb_val = b6.number_input("Whole-box value ($)", min_value=0.0, step=1.0, format="%.2f")
+                    nb_shelf = b7.text_input("Shelf / where the box sits")
+                    nb_go = st.form_submit_button("Add box", type="primary")
+                if nb_go:
+                    p = inventory.parse_location(nb_code)
+                    if not p:
+                        st.error("Box must look like B14.")
+                    else:
+                        res = _neon_post("inventory_boxes", {
+                            "box_code": p[0], "label": nb_label.strip() or None,
+                            "sport": nb_sport, "pile": nb_pile, "card_count": int(nb_count),
+                            "est_value": nb_val or None, "shelf": nb_shelf.strip() or None,
+                            "counted_at": datetime.utcnow().isoformat() + "Z",
+                        })
+                        if res is not None:
+                            st.success(f"Added box {p[0]}.")
+                            _inv_reload()
+                            st.rerun()
+                        else:
+                            e = (_neon_last_error.get("msg") or "")
+                            st.error(f"Box {p[0]} already exists." if "duplicate" in e.lower()
+                                     else f"Save failed: {e}")
+
+            # ── SYNC & RECONCILE ───────────────────────────────────────────
+            with it_sync:
+                st.caption("Drop in a fresh eBay active-listings report. Live listings become "
+                           "**Listed**, cards that sold become **Sold**, lot cards not on eBay "
+                           "become **Intake**, and a listing that disappeared without selling "
+                           "becomes **Ended**. Location, cost, value and notes are never "
+                           "touched by a sync.")
+                sy_up = st.file_uploader("eBay active-listings report (CSV)", type=["csv"], key="inv_sync_up")
+                if sy_up is not None:
+                    rep = buying.read_ebay_report(sy_up.getvalue().decode("utf-8-sig", errors="replace"))
+                    if not rep:
+                        st.error("No listings found in that file. eBay puts a preamble above the "
+                                 "header — this looks for the row containing 'Item number'.")
+                    else:
+                        with st.spinner("Reading sales and lot cards…"):
+                            sy_sales = inventory.fetch_all(_neon_get, "sales_records")
+                            sy_lots = inventory.fetch_all(_neon_get, "lot_cards")
+                        plan = inventory.sync_rows(rep, sy_sales, sy_lots, inv_cards)
+                        cnt = plan["counts"]
+                        s1, s2, s3, s4 = st.columns(4)
+                        s1.metric("Live on eBay", f"{len(rep):,}")
+                        s2.metric("New to inventory", f"{cnt['new']:,}")
+                        s3.metric("Changed", f"{cnt['changed']:,}")
+                        s4.metric("Already right", f"{cnt['same']:,}")
+                        if plan["rows"]:
+                            st.dataframe(pd.DataFrame(
+                                [{"Status": r["status"]} for r in plan["rows"]]
+                            ).value_counts().rename("Cards").reset_index(), hide_index=True)
+                            if st.button(f"⬆️ Apply {len(plan['rows']):,} change(s)", type="primary",
+                                         key="inv_sync_go"):
+                                done, bad = 0, 0
+                                prog = st.progress(0.0)
+                                rows = plan["rows"]
+                                for i in range(0, len(rows), 500):
+                                    chunk = rows[i:i + 500]
+                                    if _neon_post("inventory_cards", chunk, on_conflict="sku") is None:
+                                        bad += len(chunk)
+                                    else:
+                                        done += len(chunk)
+                                    prog.progress(min(1.0, (i + 500) / len(rows)))
+                                prog.empty()
+                                if bad:
+                                    st.error(f"{bad:,} row(s) failed: {_neon_last_error.get('msg')}")
+                                st.success(f"Inventory updated — {done:,} card(s).")
+                                _inv_reload()
+                                st.rerun()
+                        else:
+                            st.success("Inventory already matches this report.")
+
+                        rec = inventory.reconcile(inv_cards, rep)
+                        if inv_cards:
+                            st.markdown("#### Reconcile — where eBay and inventory disagree")
+                            r1, r2, r3, r4 = st.columns(4)
+                            r1.metric("On eBay, not in inventory", len(rec["live_not_in_inventory"]),
+                                      help="Clears when you apply the sync above")
+                            r2.metric("Inventory says listed, eBay doesn't", len(rec["listed_not_live"]))
+                            r3.metric("Live with no location", len(rec["live_no_location"]))
+                            r4.metric("eBay listings with no SKU", len(rec["no_sku_on_ebay"]),
+                                      help="Can never be matched to a card — fix the SKU on eBay")
+                            if rec["no_sku_on_ebay"]:
+                                with st.expander(f"{len(rec['no_sku_on_ebay'])} listing(s) with no SKU"):
+                                    st.dataframe(pd.DataFrame([{"Item": l.item_id, "Title": l.title,
+                                                                "Price": l.price}
+                                                               for l in rec["no_sku_on_ebay"]]),
+                                                 hide_index=True, use_container_width=True)
+
+            # ── PULL LIST ───────────────────────────────────────────────────
+            with it_pull:
+                st.caption("Drop in the eBay orders report. Out comes a pick ticket sorted in "
+                           "the order you walk the shelves — box, row, position — with the "
+                           "high-value flags that change how a card ships.")
+                pu = st.file_uploader("eBay orders report (CSV)", type=["csv"], key="inv_pull_up")
+                if pu is not None:
+                    orders = inventory.read_orders(pu.getvalue().decode("utf-8-sig", errors="replace"))
+                    if not orders:
+                        st.error("No orders found — expected an eBay Orders report with an "
+                                 "'Item title' column.")
+                    else:
+                        pl = inventory.pull_list(orders, inv_cards)
+                        p1, p2, p3 = st.columns(3)
+                        p1.metric("Cards to pull", len(pl["lines"]))
+                        p2.metric("No location", len(pl["unlocated"]),
+                                  help="These are at the bottom — you'll have to find them")
+                        p3.metric("Not in inventory", len(pl["not_in_inventory"]))
+                        tdf = pd.DataFrame([{
+                            "Pull from": l["location"] or "❓ unknown",
+                            "SKU": l["sku"], "Card": l["title"], "Qty": l["qty"],
+                            "Sold": l["price"],
+                            "Ship": ("✍️ signature + AG" if l["signature"] else
+                                     "🛡️ Authenticity Guarantee" if l["authenticity_guarantee"] else ""),
+                            "Order": l["order"], "Buyer": l["buyer"],
+                        } for l in pl["lines"]])
+                        st.dataframe(tdf, hide_index=True, use_container_width=True,
+                                     column_config={"Sold": st.column_config.NumberColumn(format="$%.2f")})
+                        if any(l["authenticity_guarantee"] for l in pl["lines"]):
+                            st.caption("Ship flags use eBay's $250 Authenticity Guarantee and $750 "
+                                       "signature thresholds — confirm against eBay's current policy.")
+                        st.download_button("⬇️ Pick ticket (CSV)", tdf.to_csv(index=False).encode(),
+                                           file_name=f"pick-ticket-{date.today().isoformat()}.csv",
+                                           mime="text/csv", key="inv_pull_dl")
+                        sellable = [l for l in pl["lines"] if l["in_inventory"]]
+                        if sellable and st.button(f"💵 Mark {len(sellable)} card(s) sold", key="inv_pull_sold"):
+                            idx = {str(c.get("sku") or "").strip().upper(): c for c in inv_cards}
+                            n = 0
+                            for l in sellable:
+                                c = idx[l["sku"].upper()]
+                                if c.get("status") != "sold" and _neon_patch("inventory_cards", c["id"], {
+                                        "status": "sold",
+                                        "status_updated_at": datetime.utcnow().isoformat() + "Z",
+                                        "updated_at": datetime.utcnow().isoformat() + "Z"}):
+                                    n += 1
+                            st.success(f"Marked {n} card(s) sold.")
+                            _inv_reload()
+                            st.rerun()
+
+            # ── SETUP ───────────────────────────────────────────────────────
+            with it_setup:
+                st.caption("Tables are set up. The SQL is here for reference — every statement "
+                           "is `if not exists`, so running it again is harmless.")
+                st.code(inventory.SETUP_SQL, language="sql")
