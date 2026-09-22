@@ -4087,11 +4087,39 @@ def upsert_listings(rows):
             total += len(chunk)
     return total
 
+# Postgres `numeric` columns come back from the Worker as STRINGS ("2.99"),
+# the same way bigint and date do — postgres.js only has parsers registered
+# for those two. Every listing read therefore has to coerce, or the first bit
+# of arithmetic downstream dies: sum() of "2.99" and 0 is a TypeError, which
+# is exactly how the Reprice Queue tab crashed.
+_LISTING_NUMS = ("current_price", "comp_avg", "cost_basis", "suggested_price",
+                 "trend_pct", "sold_qty", "watchers")
+
+
+def _listing_num(v):
+    if v is None or v == "":
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def coerce_listings(rows):
+    """Numbers as numbers, so callers can add them up without thinking."""
+    for r in rows or []:
+        for k in _LISTING_NUMS:
+            if k in r:
+                r[k] = _listing_num(r[k])
+    return rows or []
+
+
 def load_listings(min_price=20, limit=1000):
     if not WORKER_URL:
         return []
-    return _neon_get("listings",
-                     f"?current_price=gte.{min_price}&order=current_price.desc&limit={limit}")
+    return coerce_listings(_neon_get(
+        "listings",
+        f"?current_price=gte.{min_price}&order=current_price.desc&limit={limit}"))
 
 def update_listing(item_number, updates):
     if not WORKER_URL:
@@ -8361,7 +8389,7 @@ if _active_tab == 4:
             else:
                 today_due = sum(1 for l in all_ls if needs_pricing_today(l.get("last_priced_at"), l.get("price_freq","weekly")))
                 never_priced = sum(1 for l in all_ls if not l.get("last_priced_at"))
-                total_value = sum(l.get("current_price") or 0 for l in all_ls)
+                total_value = sum(_listing_num(l.get("current_price")) or 0 for l in all_ls)
                 sc1, sc2, sc3, sc4 = st.columns(4)
                 sc1.metric("$20+ Listings", f"{len(all_ls):,}")
                 sc2.metric("Need Pricing Today", f"{today_due:,}")
@@ -8533,7 +8561,7 @@ if _active_tab == 4:
                                 "Title":         l.get("title",""),
                                 "Current Price": l.get("current_price",""),
                                 "New Price":     round(l["suggested_price"], 2),
-                                "Comp Avg":      round(l["comp_avg"], 2) if l.get("comp_avg") else "",
+                                "Comp Avg":      round(_listing_num(l.get("comp_avg")) or 0, 2) if l.get("comp_avg") else "",
                                 "Trend":         trend_label(l.get("trend_dir"), l.get("trend_pct") or 0),
                                 "Sport":         l.get("sport",""),
                             } for l in ebay_rows]).to_csv(ref_buf, index=False)

@@ -138,7 +138,10 @@ was not in the package, or in the package but not listed, to {html.escape(sender
 def write_pdf(html_text: str, pdf_path) -> Path:
     """Render with headless Chrome — WeasyPrint's native libs are not
     installed on this Mac and reportlab is absent, but Chrome always is."""
-    pdf_path = Path(pdf_path)
+    # Resolved, because Chrome is handed a file:// URI and Path.as_uri()
+    # refuses a relative path — passing "." as the output directory used to
+    # kill the whole run after the marks had already been read.
+    pdf_path = Path(pdf_path).resolve()
     tmp = pdf_path.with_suffix(".html")
     tmp.write_text(html_text, encoding="utf-8")
     subprocess.run([CHROME, "--headless", "--disable-gpu", "--no-pdf-header-footer",
