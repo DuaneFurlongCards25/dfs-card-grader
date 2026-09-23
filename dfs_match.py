@@ -152,3 +152,58 @@ def search_payloads(want: dict) -> list:
     if not out and want["title"]:
         out.append({"search": want["title"][:120], "page": 1, "page_size": 50})
     return out
+
+
+# ─── eBay sold search ────────────────────────────────────────────────────────
+# Verified against live eBay on 23 Sep 2026 with a card CardHedger cannot
+# price (Konnor Griffin 2025 Bowman's Best B25-KG Purple Refractor /75):
+#
+#   full listing title ................ 0 results
+#   without the team nickname ......... 2 exact results ($344.99 / $799.99)
+#
+# Three things in a DFS title are poison to an eBay search, because no other
+# seller writes them the same way: the "#" before the card number, the "/75"
+# print run, and the team nickname the slot format appends. The card number
+# itself stays — it is what makes the search exact.
+
+_EBAY_DROP = re.compile(
+    r"\b(RC|AU|AUTO|AUTOGRAPH|MEM|PATCH|SP|SSP|HOT|LOT|NM|MINT|"
+    r"HOBBY|RETAIL|JUMBO|HTA|CHOICE|ROOKIE)\b", re.I)
+
+
+def _teams():
+    try:
+        from dfs_breaks import ALL_TEAMS
+        return ALL_TEAMS
+    except Exception:
+        return set()
+
+
+def ebay_query(title: str) -> str:
+    """Trim a listing title down to what eBay's sold search can actually find."""
+    q = re.sub(r"\s+", " ", (title or "").strip())
+    q = q.replace("#", " ")                        # "#B25-KG" -> "B25-KG"
+    q = re.sub(r"(?:^|[\s(])/\s?\d{1,5}\b", " ", q)   # print run
+    q = re.sub(r"\b\d{1,5}\s*/\s*\d{1,5}\b", " ", q)  # "22/350"
+    q = _EBAY_DROP.sub(" ", q)
+    q = re.sub(r"[()\[\]!]", " ", q)
+    q = re.sub(r"\s{2,}", " ", q).strip()
+    # Trailing team nickname — one or two words, e.g. "Red Sox", "49ers".
+    teams = {t.lower() for t in _teams()}
+    if teams:
+        for _ in range(2):
+            words = q.split()
+            if len(words) >= 2 and words[-1].lower().strip(".,") in teams:
+                q = " ".join(words[:-1])
+            elif len(words) >= 3 and " ".join(words[-2:]).lower() in teams:
+                q = " ".join(words[:-2])
+            else:
+                break
+    return q.strip()
+
+
+def ebay_sold_url(title: str) -> str:
+    import urllib.parse as _up
+    return ("https://www.ebay.com/sch/i.html?_nkw="
+            + _up.quote_plus(ebay_query(title)[:120])
+            + "&_sacat=261328&LH_Sold=1&LH_Complete=1&_sop=13")

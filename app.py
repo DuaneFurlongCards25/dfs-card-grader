@@ -2,6 +2,7 @@ import streamlit as st
 import dfs_buying as buying
 import dfs_labels as labels
 import dfs_match as chmatch
+import dfs_health as health
 import pandas as pd
 import json
 import urllib.request
@@ -3970,6 +3971,16 @@ def clean_title_for_ch(title: str) -> str:
     # Collapse extra whitespace left by removals
     t = re.sub(r'\s{2,}', ' ', t).strip()
     return t
+
+
+def ebay_sold_url(title: str, sport: str = "") -> str:
+    """eBay SOLD + completed search for this card.
+
+    Checked against live eBay: the full listing title returns 0 results, while
+    the same title without the "#", the print run and the team nickname returns
+    the exact card. dfs_match.ebay_query does that trimming.
+    """
+    return chmatch.ebay_sold_url(title or "")
 
 
 def sane_price(suggested, current, floor_pct=0.20, ceil_mult=4.0):
@@ -8983,6 +8994,7 @@ if _active_tab == 4:
                                     if r.get("suggested") and r["current_price"] else "—"
                                 ),
                                 "Item #":        r["item_number"],
+                                "🔍 Sold":       ebay_sold_url(r["title"], r.get("sport", "")),
                             })
                         st.dataframe(
                             pd.DataFrame(tbl), use_container_width=True, hide_index=True,
@@ -8990,10 +9002,130 @@ if _active_tab == 4:
                                 "Current ($)":   st.column_config.NumberColumn(format="$%.2f"),
                                 "Comp ($)":      st.column_config.NumberColumn(format="$%.2f"),
                                 "Suggested ($)": st.column_config.NumberColumn(format="$%.2f"),
+                                "🔍 Sold":       st.column_config.LinkColumn(
+                                    "🔍 Sold", display_text="eBay", width="small",
+                                    help="What this card actually sold for on eBay, newest first"),
                             },
                         )
                         if no_price:
-                            st.caption(f"⚠️ {len(no_price)} listings had no CardHedger match — excluded from download.")
+                            with st.expander(
+                                    f"🔍 {len(no_price)} listing(s) need a price by hand — "
+                                    "open the sold search", expanded=False):
+                                st.caption(
+                                    "No comp came back for these. Usually CardHedger holds only a "
+                                    "graded price for the card, or it is a product they do not "
+                                    "carry — team sets, Leaf exclusives, multi-player cards. The "
+                                    "link opens eBay sold listings, newest first.")
+                                st.dataframe(
+                                    pd.DataFrame([{
+                                        "Title":       r["title"],
+                                        "Current ($)": r["current_price"],
+                                        "Days":        r["days_listed"],
+                                        "Item #":      r["item_number"],
+                                        "🔍 Sold":     ebay_sold_url(r["title"], r.get("sport", "")),
+                                    } for r in sorted(no_price, key=lambda x: -x["current_price"])]),
+                                    use_container_width=True, hide_index=True,
+                                    column_config={
+                                        "Current ($)": st.column_config.NumberColumn(format="$%.2f"),
+                                        "🔍 Sold":     st.column_config.LinkColumn(
+                                            "🔍 Sold", display_text="search", width="small"),
+                                    })
+                                st.download_button(
+                                    f"📋 Needs-a-price list ({len(no_price)})",
+                                    data=pd.DataFrame([{
+                                        "Item number":  r["item_number"],
+                                        "Title":        r["title"],
+                                        "Current Price": r["current_price"],
+                                        "Days Listed":  r["days_listed"],
+                                        "Why":          ("lookup failed — retry"
+                                                         if r.get("error") else "no comp found"),
+                                        "eBay sold search": ebay_sold_url(r["title"], r.get("sport", "")),
+                                    } for r in no_price]).to_csv(index=False).encode(),
+                                    file_name=f"needs_price_{date.today().isoformat()}.csv",
+                                    mime="text/csv", key="sun_dl_nomatch")
+
+                        if has_price:
+                            # ── Review gate ──────────────────────────────────
+                            # Duane's standing rules, which this tab was not
+                            # applying: a move over 20% gets looked at by a
+                            # person, and the four star players are only ever
+                            # priced UP. A reprice run that quietly cut an
+                            # Ohtani is the exact failure those rules exist to
+                            # prevent.
+                            BIG_MOVE_PCT = st.slider(
+                                "Send changes bigger than this to review (%)",
+                                5, 50, 20, 5, key="sun_bigmove",
+                                help="Your rule: over 20% gets a human look before it goes up.")
+                            _stars, _big, _ok = [], [], []
+                            for r in has_price:
+                                cur, sug = r["current_price"], r["suggested"]
+                                pct = (sug - cur) / cur * 100 if cur else 0
+                                r["_pct"] = pct
+                                if health.NEVER_PRICE_DOWN.search(r["title"] or "") and sug < cur:
+                                    _stars.append(r)
+                                elif abs(pct) > BIG_MOVE_PCT:
+                                    _big.append(r)
+                                else:
+                                    _ok.append(r)
+
+                            up = sum(1 for r in _ok if r["_pct"] > 0)
+                            down = sum(1 for r in _ok if r["_pct"] < 0)
+                            delta_money = sum(r["suggested"] - r["current_price"] for r in _ok)
+                            g1, g2, g3, g4 = st.columns(4)
+                            g1.metric("Ready to upload", len(_ok),
+                                      delta=f"{up} up · {down} down", delta_color="off")
+                            g2.metric("Asking price change", f"${delta_money:+,.2f}",
+                                      help="Total change across the cards ready to upload")
+                            g3.metric("Held for review", len(_big),
+                                      delta=f"over {BIG_MOVE_PCT}%", delta_color="off")
+                            g4.metric("Star players held", len(_stars),
+                                      help="Ohtani / Messi / Yamal / Haaland are only priced up")
+
+                            if _stars:
+                                st.warning(
+                                    f"**{len(_stars)} star-player card(s) would have been priced DOWN** "
+                                    "and were excluded — your rule is up-only for Ohtani, Messi, "
+                                    "Yamal and Haaland.")
+                                st.dataframe(pd.DataFrame([{
+                                    "Title": r["title"], "Current ($)": r["current_price"],
+                                    "Would have been ($)": r["suggested"],
+                                    "🔍 Sold": ebay_sold_url(r["title"]),
+                                } for r in _stars]), hide_index=True, use_container_width=True,
+                                    column_config={
+                                        "Current ($)": st.column_config.NumberColumn(format="$%.2f"),
+                                        "Would have been ($)": st.column_config.NumberColumn(format="$%.2f"),
+                                        "🔍 Sold": st.column_config.LinkColumn("🔍 Sold", display_text="check", width="small")})
+
+                            if _big:
+                                with st.expander(
+                                        f"⚖️ {len(_big)} change(s) over {BIG_MOVE_PCT}% — check these "
+                                        "before uploading", expanded=True):
+                                    st.caption("Biggest moves first. Open the sold search to see "
+                                               "what the card is really doing before you accept it.")
+                                    st.dataframe(pd.DataFrame([{
+                                        "Title": r["title"],
+                                        "Current ($)": r["current_price"],
+                                        "New ($)": r["suggested"],
+                                        "Change": f"{r['_pct']:+.0f}%",
+                                        "Comp ($)": r.get("comp"),
+                                        "Days": r["days_listed"],
+                                        "🔍 Sold": ebay_sold_url(r["title"]),
+                                    } for r in sorted(_big, key=lambda x: -abs(x["_pct"]))]),
+                                        hide_index=True, use_container_width=True,
+                                        column_config={
+                                            "Current ($)": st.column_config.NumberColumn(format="$%.2f"),
+                                            "New ($)": st.column_config.NumberColumn(format="$%.2f"),
+                                            "Comp ($)": st.column_config.NumberColumn(format="$%.2f"),
+                                            "🔍 Sold": st.column_config.LinkColumn("🔍 Sold", display_text="check", width="small")})
+                                    _take_big = st.checkbox(
+                                        f"I have checked these — include all {len(_big)} in the upload",
+                                        key="sun_take_big")
+                                    if _take_big:
+                                        _ok = _ok + _big
+
+                            has_price = _ok
+                            if not has_price:
+                                st.info("Nothing left to upload once the held rows are excluded.")
 
                         if has_price:
                             # eBay Seller Hub bulk-edit upload format
@@ -9018,6 +9150,7 @@ if _active_tab == 4:
                                     f"{(r['suggested']-r['current_price'])/r['current_price']*100:+.1f}%"
                                     if r["current_price"] else ""
                                 ),
+                                "eBay sold search": ebay_sold_url(r["title"]),
                             } for r in has_price]).to_csv(ref_buf2, index=False)
 
                             dl1, dl2 = st.columns(2)
