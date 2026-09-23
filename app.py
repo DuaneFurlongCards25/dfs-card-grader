@@ -16,6 +16,8 @@ import csv
 import re
 import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+import time as _time
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 APP_VERSION = "1.8.2"
@@ -1286,26 +1288,114 @@ def ebay_avg(sold_items):
     return round(sum(prices) / len(prices), 2)
 
 # ─── CardHedger API ───────────────────────────────────────────────────────────
+class CardHedgerError(RuntimeError):
+    """The API did not answer — rate limit, timeout, outage. Not a missing card."""
+
+
+# ─── CardHedger rate limiting ────────────────────────────────────────────────
+# Measured against the live API on 23 Sep 2026: about 19 calls go through, then
+# HTTP 429 "Rate limit exceeded", clearing again after roughly 11 seconds.
+#
+# Before this, the Sunday Reprice run fired every lookup through 6 parallel
+# workers with no pacing and no retry, and _ch_post turned the 429 into a dict
+# with no "match" key — which ch_card_match read as "no card found". A whole
+# 172-card run came back "162 no match" when the truth was that the API had
+# throttled us in the first second. The cards were there all along.
+#
+# So: one shared token bucket across every CardHedger call in the app, and a
+# retry that waits out a 429 instead of reporting it as a missing card.
+# Tunable in secrets without a code change:
+#   [cardhedger]
+#   rps = 1.2
+#   burst = 10
+_CH_RATE = float(get_secret("cardhedger", "rps", 1.2) or 1.2)
+_CH_BURST = float(get_secret("cardhedger", "burst", 10) or 10)
+_CH_RETRIES = 4
+
+_ch_lock = threading.Lock()
+_ch_bucket = {"tokens": _CH_BURST, "at": _time.monotonic()}
+
+# Visible counters so a throttled run can say so instead of looking like a
+# shelf full of cards nobody has ever heard of.
+ch_stats = {"calls": 0, "rate_limited": 0, "retried": 0, "failed": 0}
+
+
+def ch_stats_reset():
+    for k in ch_stats:
+        ch_stats[k] = 0
+
+
+def _ch_token():
+    """Block until this call is allowed to go out."""
+    while True:
+        with _ch_lock:
+            now = _time.monotonic()
+            _ch_bucket["tokens"] = min(
+                _CH_BURST,
+                _ch_bucket["tokens"] + (now - _ch_bucket["at"]) * _CH_RATE)
+            _ch_bucket["at"] = now
+            if _ch_bucket["tokens"] >= 1:
+                _ch_bucket["tokens"] -= 1
+                return
+            wait = (1 - _ch_bucket["tokens"]) / _CH_RATE
+        _time.sleep(min(max(wait, 0.05), 5))
+
+
+def _ch_penalise(seconds: float):
+    """Drain the bucket after a 429 so every other thread slows down too."""
+    with _ch_lock:
+        _ch_bucket["tokens"] = 0
+        _ch_bucket["at"] = _time.monotonic() + max(0.0, seconds)
+
+
 def _ch_post(endpoint: str, payload: dict):
     if not CARDHEDGER_KEY:
         return None
     data = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        f"{CARDHEDGER_BASE}{endpoint}", data=data,
-        headers={"X-API-Key": CARDHEDGER_KEY, "Content-Type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=30) as r:
-            return json.loads(r.read().decode())
-    except urllib.error.HTTPError as e:
-        _body = ""
+    last = None
+    for attempt in range(_CH_RETRIES):
+        _ch_token()
+        req = urllib.request.Request(
+            f"{CARDHEDGER_BASE}{endpoint}", data=data,
+            headers={"X-API-Key": CARDHEDGER_KEY, "Content-Type": "application/json"},
+        )
         try:
-            _body = e.read().decode("utf-8", errors="replace")[:500]
-        except Exception:
-            pass
-        return {"_ch_error": f"HTTP {e.code} {e.reason}", "_ch_body": _body}
-    except Exception as _ex:
-        return {"_ch_error": str(_ex)}
+            with urllib.request.urlopen(req, context=ssl_ctx(), timeout=30) as r:
+                ch_stats["calls"] += 1
+                return json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            _body = ""
+            try:
+                _body = e.read().decode("utf-8", errors="replace")[:500]
+            except Exception:
+                pass
+            last = {"_ch_error": f"HTTP {e.code} {e.reason}", "_ch_body": _body,
+                    "_ch_status": e.code}
+            if e.code == 429 or 500 <= e.code < 600:
+                ch_stats["rate_limited"] += 1 if e.code == 429 else 0
+                # Honour Retry-After when the server sends one; otherwise back
+                # off from the ~11s window measured above.
+                try:
+                    wait = float(e.headers.get("Retry-After") or 0)
+                except (TypeError, ValueError):
+                    wait = 0.0
+                if wait <= 0:
+                    wait = min(12.0, 2.5 * (2 ** attempt))
+                if attempt < _CH_RETRIES - 1:
+                    ch_stats["retried"] += 1
+                    _ch_penalise(wait)
+                    _time.sleep(wait)
+                    continue
+            break
+        except Exception as _ex:
+            last = {"_ch_error": str(_ex)}
+            if attempt < _CH_RETRIES - 1:
+                ch_stats["retried"] += 1
+                _time.sleep(1.0 + attempt)
+                continue
+            break
+    ch_stats["failed"] += 1
+    return last
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def ch_search(query: str):
@@ -1319,8 +1409,15 @@ def ch_search(query: str):
 
 @st.cache_data(ttl=600, show_spinner=False)
 def ch_card_match(query: str):
-    """AI-powered best-match search — returns card with prices by grade."""
+    """AI-powered best-match search — returns card with prices by grade.
+
+    A transport failure is NOT the same as "no such card", and conflating the
+    two is what made a throttled run look like a catalogue full of unknown
+    cards. Errors raise CardHedgerError so callers can report them honestly.
+    """
     result = _ch_post("/v1/cards/card-match", {"query": query, "page": 1, "page_size": 5})
+    if isinstance(result, dict) and result.get("_ch_error"):
+        raise CardHedgerError(result["_ch_error"])
     if not result or "match" not in result:
         return None
     return result["match"]
@@ -3877,12 +3974,19 @@ def detect_grade(desc):
 
 def fetch_market(desc, grade):
     """Look up a card via CardHedger card-match (AI) and return comp avg + 90-day trend."""
-    out = {"grade": grade, "comp_avg": None, "trend_dir": None, "trend_pct": 0.0, "matched": False}
+    out = {"grade": grade, "comp_avg": None, "trend_dir": None, "trend_pct": 0.0,
+           "matched": False, "error": None}
     if not CARDHEDGER_KEY:
         return out
 
     # Use card-match (AI-powered) for better accuracy than card-search
-    match = ch_card_match(desc)
+    try:
+        match = ch_card_match(desc)
+    except CardHedgerError as e:
+        # The lookup never happened. Saying "no match" here is what hid a
+        # rate-limited run behind 162 cards that supposedly did not exist.
+        out["error"] = str(e)
+        return out
     if not match:
         return out
 
@@ -8724,12 +8828,16 @@ if _active_tab == 4:
 
                     if already_run and sun_results:
                         matched  = sum(1 for r in sun_results if r.get("comp"))
-                        no_match = sum(1 for r in sun_results if not r.get("comp"))
+                        errored  = sum(1 for r in sun_results if r.get("error"))
+                        no_match = sum(1 for r in sun_results
+                                       if not r.get("comp") and not r.get("error"))
                         suspect  = sum(1 for r in sun_results if r.get("suspect"))
                         usable   = sum(1 for r in sun_results if r.get("suggested"))
                         parts = [f"✅ Cached — {usable} ready to upload"]
                         if no_match:
                             parts.append(f"{no_match} no match")
+                        if errored:
+                            parts.append(f"{errored} lookup failed")
                         if suspect:
                             parts.append(f"{suspect} suspect (excluded)")
                         st.success("  ·  ".join(parts) + "  ·  Re-run below only to refresh.")
@@ -8757,6 +8865,7 @@ if _active_tab == 4:
                                 return idx, {
                                     **c,
                                     "grade":       grade,
+                                    "error":       mkt.get("error"),
                                     "comp":        mkt["comp_avg"],
                                     "trend":       trend_label(mkt["trend_dir"], mkt["trend_pct"] or 0),
                                     "matched":     mkt["matched"],
@@ -8765,7 +8874,8 @@ if _active_tab == 4:
                                     "hay_matched": c.get("hay_matched", False),
                                 }
 
-                            with ThreadPoolExecutor(max_workers=6) as _sun_ex:
+                            ch_stats_reset()
+                            with ThreadPoolExecutor(max_workers=3) as _sun_ex:
                                 _sun_futures = {
                                     _sun_ex.submit(_sun_lookup, (i, c)): i
                                     for i, c in enumerate(candidates)
@@ -8794,6 +8904,17 @@ if _active_tab == 4:
                         no_price  = [r for r in sun_results if not r.get("suggested")]
                         suspect_rows = [r for r in sun_results if r.get("suspect")]
 
+                        _err_rows = [r for r in sun_results if r.get("error")]
+                        if _err_rows:
+                            st.error(
+                                f"**{len(_err_rows)} lookup(s) never reached CardHedger** — "
+                                "rate limit or timeout, not missing cards. Re-run to retry "
+                                "just these; the ones already priced are cached. If it keeps "
+                                "happening, lower `rps` under `[cardhedger]` in secrets.")
+                            st.caption(f"API calls {ch_stats['calls']} · "
+                                       f"throttled {ch_stats['rate_limited']} · "
+                                       f"retried {ch_stats['retried']} · "
+                                       f"gave up {ch_stats['failed']}")
                         if suspect_rows:
                             st.warning(
                                 f"⚠️ {len(suspect_rows)} listing(s) had a comp that was <20% or >4× "
