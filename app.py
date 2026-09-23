@@ -8898,8 +8898,27 @@ if _active_tab == 4:
                         if not can_run:
                             st.warning(f"Only {budget} look-ups left today — {len(candidates)} needed. Run tomorrow or reduce the range.")
 
+                        # Anything priced today is already saved in Neon, so an
+                        # interrupted run resumes instead of starting over.
+                        _sv_key = f"sun_saved_{date.today().isoformat()}"
+                        _sv_at = st.session_state.get(_sv_key + "_at", 0)
+                        if _time.monotonic() - _sv_at > 120:
+                            st.session_state[_sv_key] = load_listings(min_price=0, limit=10000) or []
+                            st.session_state[_sv_key + "_at"] = _time.monotonic()
+                        _saved = {}
+                        for _l in st.session_state.get(_sv_key, []):
+                            _lp = _l.get("last_priced_at")
+                            if _lp and str(_lp)[:10] == date.today().isoformat() and _l.get("comp_avg"):
+                                _saved[str(_l.get("item_number"))] = _l
+                        _resume = [c for c in candidates if str(c["item_number"]) in _saved]
+                        if _resume:
+                            st.info(f"**{len(_resume)} of {len(candidates)} already priced today** — "
+                                    f"a run only looks up the remaining "
+                                    f"{len(candidates) - len(_resume)}.")
+
                         if st.button(
-                            f"🔄 Run CardHedger on {len(candidates)} listings",
+                            f"🔄 Run CardHedger on {len(candidates) - len(_resume)} listings"
+                            + (f" (resuming — {len(_resume)} already done)" if _resume else ""),
                             type="primary", key="sun_run",
                             disabled=(not can_run),
                         ):
@@ -8911,6 +8930,20 @@ if _active_tab == 4:
                                 idx, c = idx_c
                                 grade = detect_grade(c["title"])
                                 mkt   = fetch_market(c["ch_query"], grade)
+                                # Save the moment it is known. A Streamlit Cloud
+                                # restart — a deploy, a memory trim — used to
+                                # throw away every lookup in the run, because
+                                # results were only written at the very end.
+                                if mkt.get("comp_avg") and c.get("item_number"):
+                                    try:
+                                        save_listing_pricing(
+                                            c["item_number"], mkt["comp_avg"],
+                                            mkt.get("trend_dir"), mkt.get("trend_pct"),
+                                            suggest_reprice(mkt["comp_avg"],
+                                                            mkt.get("trend_pct"),
+                                                            "Match market", 0))
+                                    except Exception:
+                                        pass   # a failed save must not lose the price
                                 raw_sugg = suggest_reprice(mkt["comp_avg"], mkt["trend_pct"], "Match market", 0)
                                 sugg     = sane_price(raw_sugg, c["current_price"])
                                 return idx, {
@@ -8926,10 +8959,31 @@ if _active_tab == 4:
                                 }
 
                             ch_stats_reset()
+                            _todo = []
+                            for i, c in enumerate(candidates):
+                                hit = _saved.get(str(c["item_number"]))
+                                if hit:
+                                    _comp = _listing_num(hit.get("comp_avg"))
+                                    _sug = sane_price(_listing_num(hit.get("suggested_price")),
+                                                      c["current_price"])
+                                    results_map[i] = {
+                                        **c, "grade": detect_grade(c["title"]), "error": None,
+                                        "comp": _comp,
+                                        "trend": trend_label(hit.get("trend_dir"),
+                                                             _listing_num(hit.get("trend_pct")) or 0),
+                                        "matched": True, "suggested": _sug,
+                                        "suspect": False,
+                                        "hay_matched": c.get("hay_matched", False),
+                                        "resumed": True,
+                                    }
+                                else:
+                                    _todo.append((i, c))
+                            completed_count[0] = len(results_map)
+
                             with ThreadPoolExecutor(max_workers=3) as _sun_ex:
                                 _sun_futures = {
-                                    _sun_ex.submit(_sun_lookup, (i, c)): i
-                                    for i, c in enumerate(candidates)
+                                    _sun_ex.submit(_sun_lookup, ic): ic[0]
+                                    for ic in _todo
                                 }
                                 for _fut in as_completed(_sun_futures):
                                     try:
@@ -8939,9 +8993,13 @@ if _active_tab == 4:
                                         pass
                                     completed_count[0] += 1
                                     prog.progress(
-                                        completed_count[0] / len(candidates),
-                                        text=f"Pricing… {completed_count[0]}/{len(candidates)}",
+                                        min(1.0, completed_count[0] / max(1, len(candidates))),
+                                        text=f"Pricing… {completed_count[0]}/{len(candidates)}"
+                                             f"  ·  saved as it goes, so a restart resumes here",
                                     )
+                                    # Keep partial work in session too, so a
+                                    # rerun that is not a full restart is free.
+                                    st.session_state["sun_partial"] = list(results_map.values())
 
                             results = [results_map[i] for i in sorted(results_map)]
                             pricing_bump(len(candidates))
