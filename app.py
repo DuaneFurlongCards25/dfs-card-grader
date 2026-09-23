@@ -4277,20 +4277,45 @@ def load_listings(min_price=20, limit=1000):
         f"?current_price=gte.{min_price}&order=current_price.desc&limit={limit}"))
 
 def update_listing(item_number, updates):
+    """Update a listing by item_number.
+
+    The listings table has no id column — item_number is its key — so the old
+    PATCH-by-id path raised KeyError on every call that got as far as a real
+    row, and returned False for the far more common case of a listing the
+    table had never seen. Upsert on item_number does both jobs: updates what
+    is there, creates what is not.
+    """
     if not WORKER_URL:
         return False
-    rows = _neon_get("listings", f"?item_number=eq.{urllib.parse.quote(str(item_number))}")
-    if not rows:
-        return False
-    return _neon_patch("listings", rows[0]["id"], updates)
+    row = {"item_number": str(item_number), **updates}
+    row.setdefault("updated_at", datetime.utcnow().isoformat() + "Z")
+    return _neon_post("listings", row, on_conflict="item_number") is not None
 
-def save_listing_pricing(item_number, comp_avg, trend_dir, trend_pct, suggested):
-    return update_listing(item_number, {
+def save_listing_pricing(item_number, comp_avg, trend_dir, trend_pct, suggested,
+                         title=None, sku=None, current_price=None):
+    """Save a price, creating the listing row if it is not there yet.
+
+    This used to PATCH an existing row only. The listings table was last
+    synced in May, so none of the cards in a September reprice run existed in
+    it — every save silently did nothing, and the resume-after-restart it was
+    meant to feed never had anything to resume from. Upsert on item_number
+    instead: price a card and it is on record whether or not a sync has caught
+    up with it.
+    """
+    row = {
+        "item_number": str(item_number),
         "comp_avg": comp_avg, "trend_dir": trend_dir,
         "trend_pct": trend_pct, "suggested_price": suggested,
         "last_priced_at": datetime.utcnow().isoformat() + "Z",
         "updated_at":     datetime.utcnow().isoformat() + "Z",
-    })
+    }
+    if title:
+        row["title"] = title
+    if sku:
+        row["sku"] = sku
+    if current_price is not None:
+        row["current_price"] = current_price
+    return _neon_post("listings", row, on_conflict="item_number") is not None
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 7 — Hot Movers (top-movers)
@@ -8941,7 +8966,9 @@ if _active_tab == 4:
                                             mkt.get("trend_dir"), mkt.get("trend_pct"),
                                             suggest_reprice(mkt["comp_avg"],
                                                             mkt.get("trend_pct"),
-                                                            "Match market", 0))
+                                                            "Match market", 0),
+                                            title=c.get("title"), sku=c.get("sku"),
+                                            current_price=c.get("current_price"))
                                     except Exception:
                                         pass   # a failed save must not lose the price
                                 raw_sugg = suggest_reprice(mkt["comp_avg"], mkt["trend_pct"], "Match market", 0)
@@ -9211,7 +9238,53 @@ if _active_tab == 4:
                                 "eBay sold search": ebay_sold_url(r["title"]),
                             } for r in has_price]).to_csv(ref_buf2, index=False)
 
-                            dl1, dl2 = st.columns(2)
+                            def _status_of(r):
+                                if r.get("error"):
+                                    return "lookup failed — rerun"
+                                if not r.get("comp"):
+                                    return "no comp — price by hand"
+                                if r.get("suspect"):
+                                    return "suspect — comp far off list price"
+                                cur, sug = r["current_price"], r.get("suggested")
+                                if not sug:
+                                    return "no suggestion"
+                                if health.NEVER_PRICE_DOWN.search(r["title"] or "") and sug < cur:
+                                    return "star held — up-only rule"
+                                pct = (sug - cur) / cur * 100 if cur else 0
+                                if abs(pct) > BIG_MOVE_PCT:
+                                    return f"review — {pct:+.0f}%"
+                                return "ready"
+
+                            _all_rows = []
+                            for r in sorted(sun_results, key=lambda x: -x["current_price"]):
+                                cur, sug = r["current_price"], r.get("suggested")
+                                pct = ((sug - cur) / cur * 100) if (sug and cur) else None
+                                _all_rows.append({
+                                    "Status":       _status_of(r),
+                                    "Title":        r["title"],
+                                    "Current ($)":  round(cur, 2) if cur else "",
+                                    "Comp ($)":     round(r["comp"], 2) if r.get("comp") else "",
+                                    "New ($)":      round(sug, 2) if sug else "",
+                                    "Change %":     f"{pct:+.0f}%" if pct is not None else "",
+                                    "Change $":     round(sug - cur, 2) if sug else "",
+                                    "Trend":        r.get("trend", "—"),
+                                    "Days Listed":  r["days_listed"],
+                                    "Sport":        r["sport"],
+                                    "Item number":  r["item_number"],
+                                    "SKU":          r.get("sku", ""),
+                                    "eBay sold search": ebay_sold_url(r["title"]),
+                                })
+
+                            dl1, dl2, dl3 = st.columns(3)
+                            dl3.download_button(
+                                f"📊 Everything ({len(_all_rows)})",
+                                data=pd.DataFrame(_all_rows).to_csv(index=False).encode(),
+                                file_name=f"reprice_review_all_{date.today().isoformat()}.csv",
+                                mime="text/csv", key="sun_dl_all",
+                                help="Every listing in the run — priced, held, and unmatched — "
+                                     "with current vs new, the % move, why it was held, and an "
+                                     "eBay sold link for each. The sheet to check before you upload.",
+                            )
                             dl1.download_button(
                                 f"📤 Upload to eBay ({len(has_price)} listings)",
                                 data=ebay_buf.getvalue().encode(),
