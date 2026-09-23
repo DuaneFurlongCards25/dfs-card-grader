@@ -1,6 +1,7 @@
 import streamlit as st
 import dfs_buying as buying
 import dfs_labels as labels
+import dfs_match as chmatch
 import pandas as pd
 import json
 import urllib.request
@@ -1421,6 +1422,37 @@ def ch_card_match(query: str):
     if not result or "match" not in result:
         return None
     return result["match"]
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def ch_search_structured(payload_json: str):
+    """card-search by player (+ number). Cached — the same player recurs a lot."""
+    res = _ch_post("/v1/cards/card-search", json.loads(payload_json))
+    if isinstance(res, dict) and res.get("_ch_error"):
+        raise CardHedgerError(res["_ch_error"])
+    return (res or {}).get("cards") or []
+
+
+def ch_match_by_variant(title: str):
+    """Find the card when the AI matcher cannot.
+
+    card-match only judges the first ten search hits, so for a player with
+    dozens of cards the parallel actually listed is never in front of it —
+    Jac Caglianone's 2026 Topps Chrome Logofractor #131 is in the database at
+    $13.64 raw and card-match still answers null. Searching by player and card
+    number returns every variant, and dfs_match scores the right one.
+
+    Returns (card, why) and refuses below its score threshold rather than
+    guessing: within one card number the variants differ 60x in price, so a
+    confident wrong row is far worse than an empty cell.
+    """
+    want = chmatch.parse_title(title)
+    for payload in chmatch.search_payloads(want):
+        cards = ch_search_structured(json.dumps(payload, sort_keys=True))
+        card, why = chmatch.pick(cards, want)
+        if card:
+            return card, why
+    return None, "no variant match"
 
 
 def ch_card_match_with_alts(query: str):
@@ -3987,6 +4019,14 @@ def fetch_market(desc, grade):
         # rate-limited run behind 162 cards that supposedly did not exist.
         out["error"] = str(e)
         return out
+    if not match:
+        try:
+            match, out["match_note"] = ch_match_by_variant(desc)
+            if match:
+                out["match_via"] = "variant"
+        except CardHedgerError as e:
+            out["error"] = str(e)
+            return out
     if not match:
         return out
 
