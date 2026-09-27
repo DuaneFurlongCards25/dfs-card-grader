@@ -3055,7 +3055,7 @@ _NAV_LABELS = [
     "🧰 Operations", "📬 Submission Tracker", "📥 Downloads", "🚚 Shipment Intake",
     "🏷️ Consignments", "📦 Purchases", "💰 Sales & P&L", "📸 Image Prep",
     "🗂️ Triage", "💵 Buy Desk", "🏷️ Labels", "♻️ Relist", "🎁 Breaks",
-    "🗃️ Inventory",
+    "🗃️ Inventory", "🧮 Calculator",
 ]
 
 # If a sidebar feature button was clicked, update both nav state AND the radio widget's own state key
@@ -14005,3 +14005,201 @@ if _active_tab == 17:
                 st.caption("Tables are set up. The SQL is here for reference — every statement "
                            "is `if not exists`, so running it again is harmless.")
                 st.code(inventory.SETUP_SQL, language="sql")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 19 — Pricing Calculator
+#
+# What a card nets, and what it must sell for to hit a target. Arithmetic in
+# dfs_pricing; this is the screen for it.
+# ══════════════════════════════════════════════════════════════════════════════
+if _active_tab == 18:
+    import dfs_pricing as pricing
+
+    st.markdown("## 🧮 Pricing Calculator")
+    st.caption("What you keep after fees and supplies — and what a card has to "
+               "sell for to make the return you want.")
+
+    _pc_mode = st.radio(
+        "What are you working out?",
+        ["💵 What do I net?", "🎯 What must it sell for?", "🛒 What can I pay?"],
+        horizontal=True, key="pc_mode", label_visibility="collapsed")
+
+    c1, c2, c3 = st.columns(3)
+    _pc_platform_name = c1.selectbox("Where it sells", list(pricing.PLATFORMS.keys()),
+                                     key="pc_platform")
+    _pc_plat = pricing.PLATFORMS[_pc_platform_name]
+    if _pc_platform_name == "Custom":
+        _cf1, _cf2 = c1.columns(2)
+        _pc_plat = pricing.Platform(
+            "Custom",
+            _cf1.number_input("Fee %", 0.0, 60.0, 12.35, 0.05, key="pc_custom_pct") / 100.0,
+            _cf2.number_input("Flat fee ($)", 0.0, 20.0, 0.40, 0.05, key="pc_custom_fixed"))
+    else:
+        c1.caption(_pc_plat.note)
+
+    _pc_cost = c2.number_input("What you paid ($)", min_value=0.0, step=1.0,
+                               value=40.00, format="%.2f", key="pc_cost",
+                               help="Per card. Spreading a lot or case cost is below.")
+    _pc_supplies = c3.number_input(
+        "Supplies ($)", min_value=0.0, step=0.25, value=float(pricing.DEFAULT_SUPPLIES),
+        format="%.2f", key="pc_supplies",
+        help="Envelope, sleeve, top loader, label. Postage on the $0.99 eBay Standard "
+             "Envelope already sits inside the measured rates.")
+    _pc_ship = c3.number_input("Shipping you pay ($)", min_value=0.0, step=0.25,
+                               value=0.00, format="%.2f", key="pc_ship",
+                               help="Only when you eat the postage — free shipping, a "
+                                    "heavy package, a refund.")
+    if _pc_plat.measured:
+        c2.caption("This rate already includes promoted-listing spend — no ad rate to add.")
+        _pc_ads = 0.0
+    else:
+        _pc_ads = c2.number_input(
+            "Promoted ad rate (%)", 0.0, 20.0, 0.0, 0.5, key="pc_ads",
+            help="Your cap is 5% — never eBay's suggested 13%.")
+        if _pc_ads > 5:
+            c2.warning("Above your 5% cap.")
+
+    with st.expander("📦 Spread a lot, case or break cost over several cards", expanded=False):
+        sp1, sp2, sp3 = st.columns(3)
+        _sp_total = sp1.number_input("Total paid for the lot ($)", min_value=0.0,
+                                     step=10.0, value=0.0, format="%.2f", key="pc_lot_total")
+        _sp_cards = sp2.number_input("Cards you expect to sell", min_value=1, step=1,
+                                     value=1, key="pc_lot_cards")
+        _sp_each = round(_sp_total / _sp_cards, 2) if _sp_total else 0.0
+        sp3.metric("Cost per card", f"${_sp_each:,.2f}")
+        if _sp_total and st.button("Use that as the cost", key="pc_lot_use"):
+            st.session_state["pc_cost"] = _sp_each
+            st.rerun()
+        st.caption("A case at $1,200 with 80 sellable cards is $15 a card — the number "
+                   "that decides whether a $20 sale is worth listing.")
+
+    st.divider()
+
+    def _pc_show(r, headline=""):
+        if headline:
+            st.markdown(headline)
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("You keep", f"${r['proceeds']:,.2f}",
+                  help="Sale price less platform fees, before your own costs")
+        m2.metric("Net profit", f"${r['profit']:,.2f}",
+                  delta=f"{r['roi']:+.0f}% on cost" if r["roi"] is not None else None,
+                  delta_color="normal" if r["profit"] >= 0 else "inverse")
+        m3.metric("Margin", f"{r['margin']:.1f}%" if r["margin"] is not None else "—",
+                  help="Profit as a share of what the buyer pays")
+        m4.metric("Breakeven", f"${r['breakeven']:,.2f}" if r["breakeven"] else "—",
+                  help="Sell below this and you lose money")
+        rows = [
+            ("Sale price", r["price"]),
+            (f"Platform fee ({_pc_plat.fee_pct*100:.2f}%)", -r["fee_pct"]),
+        ]
+        if r["fixed"]:
+            rows.append(("Fixed per-order fee", -r["fixed"]))
+        if r["ads"]:
+            rows.append((f"Promoted listings ({_pc_ads:.1f}%)", -r["ads"]))
+        rows += [("Supplies", -r["supplies"])]
+        if r["shipping"]:
+            rows.append(("Shipping you pay", -r["shipping"]))
+        rows += [("What you paid", -r["cost"]), ("**Net profit**", r["profit"])]
+        st.dataframe(
+            pd.DataFrame([{"": k, "Amount": v} for k, v in rows]),
+            hide_index=True, use_container_width=True,
+            column_config={"Amount": st.column_config.NumberColumn(format="$%.2f")})
+        if r["profit"] < 0:
+            st.error(f"**Loses ${abs(r['profit']):,.2f}.** It needs "
+                     f"${r['breakeven']:,.2f} just to break even.")
+        st.caption(f"Fees and costs take {r['take_pct']:.1f}% of the sale price."
+                   if r["take_pct"] is not None else "")
+
+    # ── What do I net? ───────────────────────────────────────────────────────
+    if _pc_mode.startswith("💵"):
+        n1, n2 = st.columns([1, 2])
+        _pc_price = n1.number_input("Sell it for ($)", min_value=0.0, step=1.0,
+                                    value=120.00, format="%.2f", key="pc_price")
+        _pc_qty = n1.number_input("How many like this", min_value=1, step=1, value=1,
+                                  key="pc_qty")
+        r = pricing.net(_pc_price, _pc_cost, _pc_plat, supplies=_pc_supplies,
+                        shipping=_pc_ship, ad_pct=_pc_ads, qty=_pc_qty)
+        _pc_show(r)
+        if _pc_qty > 1:
+            st.info(f"**{_pc_qty} cards at this price: ${r['profit_total']:,.2f} profit.**")
+
+        st.markdown("#### Does it hit your target?")
+        t1, t2 = st.columns([1, 3])
+        _pc_target = t1.number_input("Target (%)", 0.0, 95.0, 12.0, 1.0, key="pc_target_fwd")
+        _pc_basis = t2.radio(
+            "Measured against",
+            ["Margin — % of what the buyer pays", "Return — % of what you paid"],
+            key="pc_basis_fwd", horizontal=True)
+        basis = "margin" if _pc_basis.startswith("Margin") else "roi"
+        got = r["margin"] if basis == "margin" else r["roi"]
+        need = pricing.price_for(_pc_cost, _pc_plat, target=_pc_target, basis=basis,
+                                 supplies=_pc_supplies, shipping=_pc_ship, ad_pct=_pc_ads)
+        if need.get("price") is None:
+            st.warning(need.get("why", "That target cannot be reached."))
+        elif got is not None and got >= _pc_target:
+            st.success(f"**Yes — {got:.1f}%.** The target needs ${need['price']:,.2f}; "
+                       f"you are asking ${_pc_price:,.2f}, "
+                       f"${_pc_price - need['price']:,.2f} above it.")
+        else:
+            st.warning(f"**Not yet — {got:.1f}% against a {_pc_target:.0f}% target.** "
+                       f"It needs to sell for **${need['price']:,.2f}** "
+                       f"(${need['price'] - _pc_price:,.2f} more).")
+
+    # ── What must it sell for? ──────────────────────────────────────────────
+    elif _pc_mode.startswith("🎯"):
+        t1, t2 = st.columns([1, 3])
+        _pc_target = t1.number_input("I want to make (%)", 0.0, 95.0, 12.0, 1.0,
+                                     key="pc_target_rev")
+        _pc_basis = t2.radio(
+            "Measured against",
+            ["Margin — % of what the buyer pays", "Return — % of what you paid"],
+            key="pc_basis_rev", horizontal=True,
+            help="A $250 case hit at 12%: margin means $34 profit on a $332 sale; "
+                 "return means $30 profit on a $321 sale.")
+        basis = "margin" if _pc_basis.startswith("Margin") else "roi"
+        r = pricing.price_for(_pc_cost, _pc_plat, target=_pc_target, basis=basis,
+                              supplies=_pc_supplies, shipping=_pc_ship, ad_pct=_pc_ads)
+        if r.get("price") is None:
+            st.error(r.get("why", "That target cannot be reached."))
+        else:
+            st.success(f"### Sell it for ${r['price']:,.2f}")
+            _pc_show(r)
+
+    # ── What can I pay? ─────────────────────────────────────────────────────
+    else:
+        b1, b2, b3 = st.columns([1, 1, 2])
+        _pc_sells = b1.number_input("It sells for ($)", min_value=0.0, step=1.0,
+                                    value=120.00, format="%.2f", key="pc_sells")
+        _pc_target = b2.number_input("I want to make (%)", 0.0, 400.0, 35.0, 5.0,
+                                     key="pc_target_buy")
+        _pc_basis = b3.radio(
+            "Measured against",
+            ["Return — % of what you paid", "Margin — % of what the buyer pays"],
+            key="pc_basis_buy", horizontal=True)
+        basis = "roi" if _pc_basis.startswith("Return") else "margin"
+        cap = pricing.max_buy(_pc_sells, _pc_plat, target=_pc_target, basis=basis,
+                              supplies=_pc_supplies, shipping=_pc_ship, ad_pct=_pc_ads)
+        if cap is None or cap <= 0:
+            st.error("At that price there is nothing left to pay with.")
+        else:
+            st.success(f"### Pay no more than ${cap:,.2f}")
+            _pc_show(pricing.net(_pc_sells, cap, _pc_plat, supplies=_pc_supplies,
+                                 shipping=_pc_ship, ad_pct=_pc_ads),
+                     f"At ${cap:,.2f} paid and ${_pc_sells:,.2f} sold:")
+            st.caption("The Buy Desk tab does this for a whole list of cards at once.")
+
+    with st.expander("Where these rates come from", expanded=False):
+        st.dataframe(pd.DataFrame([{
+            "Platform": n,
+            "Rate": f"{p.fee_pct*100:.2f}%",
+            "Flat fee": (f"${p.fixed:.2f}" + (f" / ${p.fixed_over:.2f} over ${p.fixed_break:.0f}"
+                                              if p.fixed_over is not None and p.fixed_over != p.fixed else "")
+                         ) if p.fixed else "—",
+            "Includes ad spend": "yes" if p.measured else "no",
+            "Note": p.note,
+        } for n, p in pricing.PLATFORMS.items() if n != "Custom"]),
+            hide_index=True, use_container_width=True)
+        st.caption("Measured rates come from real payouts and already include "
+                   "promoted-listing spend; the published schedule does not, which is "
+                   "why adding an ad rate on top of a measured rate would count it twice.")
