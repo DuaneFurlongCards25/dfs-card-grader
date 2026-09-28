@@ -21,7 +21,16 @@ from dataclasses import dataclass, field
 
 # Measured over 1,492 real payouts, so promoted-listing spend and per-order
 # fees are already inside these numbers.
-TAKE_RATE = {"ebay": 0.144, "dc_sports": 0.177, "collx": 0.213}
+#
+# CollX was 0.213 and that was wrong. CollX's fee line includes the shipping
+# label, and gross includes the shipping the buyer paid, so dividing one by
+# the other counted postage as commission — on a $100 sale the $19.49 "fee"
+# is $8.00 commission and an $11.49 label. Duane pays the commission; the
+# buyer pays the shipping, and it is not part of the commission structure.
+# Re-measured across all 129 CollX sales, what actually leaves is 8-10% of
+# the sale price (median 10.0%, never more). 0.10 is the worst case, which is
+# the right default for deciding what to pay.
+TAKE_RATE = {"ebay": 0.144, "dc_sports": 0.177, "collx": 0.10}
 DEFAULT_TAKE = 0.165
 
 # Envelope, sleeve, top loader, label. Postage on the $0.99 eBay Standard
