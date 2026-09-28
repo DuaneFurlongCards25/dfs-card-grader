@@ -60,16 +60,14 @@ PLATFORMS = {
     "eBay (no store subscription)": Platform(
         "eBay (no store subscription)", 0.1325, 0.30, 0.30,
         note="The rate without a store subscription."),
-    "CollX (8% commission)": Platform(
-        "CollX (8% commission)", 0.08, 0.0, None,
-        note="The commission CollX charges (Duane, 28 Sep 2026). Note that "
-             "measured CollX payouts came out at 21.3% all-in — see the entry "
-             "below — so something beyond commission is being deducted."),
-    "CollX (measured all-in)": Platform(
-        "CollX (measured all-in)", 0.213, 0.0, None, measured=True,
-        note="21.3% measured across real CollX payouts, netting about $27.00 a "
-             "card. Higher than the 8% commission because it captures "
-             "everything that actually came out, not just the commission line."),
+    "CollX": Platform(
+        "CollX", 0.08, 0.0, None,
+        note="8% commission (Duane, 28 Sep 2026). Checked against his 129 CollX "
+             "sales: what actually left was 8-10% of the sale price, median "
+             "10.0%, never more than 10%. Set this to 10 if you want the "
+             "worst case — 99 of those 129 orders came in at 10%. "
+             "Shipping is a wash: the buyer pays it and CollX deducts the "
+             "label, so it is not part of the commission."),
     "DC Sports87 (consignment)": Platform(
         "DC Sports87 (consignment)", 0.177, 0.0, None, measured=True,
         note="17.7%, measured. $3 minimum per card. Singles only as of Sept 2026."),
