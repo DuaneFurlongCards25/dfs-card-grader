@@ -19,18 +19,27 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-# Measured over 1,492 real payouts, so promoted-listing spend and per-order
-# fees are already inside these numbers.
+# What each channel actually costs, checked against sales_records on
+# 28 Sep 2026. The provenance matters, because it was wrong before:
 #
-# CollX was 0.213 and that was wrong. CollX's fee line includes the shipping
-# label, and gross includes the shipping the buyer paid, so dividing one by
-# the other counted postage as commission — on a $100 sale the $19.49 "fee"
-# is $8.00 commission and an $11.49 label. Duane pays the commission; the
-# buyer pays the shipping, and it is not part of the commission structure.
-# Re-measured across all 129 CollX sales, what actually leaves is 8-10% of
-# the sale price (median 10.0%, never more). 0.10 is the worst case, which is
-# the right default for deciding what to pay.
-TAKE_RATE = {"ebay": 0.144, "dc_sports": 0.177, "collx": 0.10}
+# ebay 0.144 — NOT measured, whatever earlier comments claimed. Every fee in
+#   sales_records for eBay is COMPUTED at import as 12.35% of gross plus the
+#   $0.30/$0.40 per-order fee (app.py builds it; only the Financial Ledger
+#   import carries eBay's real numbers). Across 1,113 sales the stored fees
+#   match that formula to $7.87 in total, which is the $10 tier boundary and
+#   nothing else. So 14.4% is the published schedule expressed against gross,
+#   and it EXCLUDES promoted-listing spend — on a promoted card at the 5% cap
+#   the real take is nearer 19%. Treat 0.144 as a floor, not a measurement,
+#   until an eBay transaction/payout report is imported.
+#
+# collx 0.10 — genuinely measured across 129 sales: 8-10% of sale price,
+#   median 10.0%, never more. Shipping is the buyer's and is not commission.
+#
+# dc_sports 0.185 — measured across 418 sales with a real payout, was 0.177.
+#   Note the spread: 18.5% of money overall but a median of 25.5% per card,
+#   because the percentage lands hardest on small cards. A further 25 cards
+#   sold at $0.99 returned exactly $0.00.
+TAKE_RATE = {"ebay": 0.144, "dc_sports": 0.185, "collx": 0.10}
 DEFAULT_TAKE = 0.165
 
 # Envelope, sleeve, top loader, label. Postage on the $0.99 eBay Standard

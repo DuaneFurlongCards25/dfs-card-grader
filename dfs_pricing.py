@@ -52,11 +52,13 @@ PLATFORMS = {
         note="Trading-card final value fee plus the per-order fee: $0.30 at "
              "$10 and under, $0.40 above. Promoted-listing spend is NOT in "
              "this — add an ad rate below if the listing is promoted."),
-    "eBay (measured all-in)": Platform(
-        "eBay (measured all-in)", 0.144, 0.0, None, measured=True,
-        note="14.4%, measured across 1,492 real payouts. Already includes "
-             "promoted spend and the per-order fee — do not add an ad rate "
-             "on top."),
+    "eBay (schedule as % of gross)": Platform(
+        "eBay (schedule as % of gross)", 0.144, 0.0, None,
+        note="14.4% — the same 12.35% plus per-order fee, expressed as one "
+             "rate against the whole sale. Checked against 1,113 eBay sales: "
+             "the stored fees match that formula to $7.87 in total. It is NOT "
+             "a measurement and does NOT include promoted-listing spend, so "
+             "add an ad rate if the card is promoted."),
     "eBay (no store subscription)": Platform(
         "eBay (no store subscription)", 0.1325, 0.30, 0.30,
         note="The rate without a store subscription."),
@@ -69,8 +71,11 @@ PLATFORMS = {
              "Shipping is a wash: the buyer pays it and CollX deducts the "
              "label, so it is not part of the commission."),
     "DC Sports87 (consignment)": Platform(
-        "DC Sports87 (consignment)", 0.177, 0.0, None, measured=True,
-        note="17.7%, measured. $3 minimum per card. Singles only as of Sept 2026."),
+        "DC Sports87 (consignment)", 0.185, 0.0, None, measured=True,
+        note="18.5% of the money across 418 real DC payouts — but the median "
+             "card gives up 25.5%, because the cut lands hardest on cheap "
+             "cards. 25 cards sold at $0.99 returned $0.00. $3 minimum, "
+             "singles only as of Sept 2026."),
     "QuickConsign (consignment)": Platform(
         "QuickConsign (consignment)", 0.20, 0.0, None,
         note="Rate not yet measured — confirm with them and edit. $5 minimum."),
