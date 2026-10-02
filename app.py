@@ -13589,9 +13589,162 @@ if _active_tab == 17:
             inv_cards = st.session_state["inv_cards"]
             inv_boxes = st.session_state["inv_boxes"]
 
-            it_over, it_cards, it_boxes, it_sync, it_pull, it_setup = st.tabs([
-                "📊 Overview", "🃏 Cards", "📦 Boxes", "🔄 Sync & Reconcile",
-                "🧾 Pull List", "🛠 Setup"])
+            it_over, it_intake, it_cards, it_boxes, it_sync, it_pull, it_setup = st.tabs([
+                "📊 Overview", "📥 Intake", "🃏 Cards", "📦 Boxes",
+                "🔄 Sync & Reconcile", "🧾 Pull List", "🛠 Setup"])
+
+            # ── INTAKE ──────────────────────────────────────────────────────
+            # One door in. A scanner export becomes located inventory in a
+            # single pass, carrying the images and specifics eBay never had —
+            # which is what lets the same card go to a website or Instagram
+            # later without being re-photographed or re-typed.
+            with it_intake:
+                import dfs_intake as intake
+
+                st.caption("Drop in a stack export from Heystack or Card Dealer Pro. "
+                           "Every card arrives with its photos, specifics, grade and "
+                           "price — enough to list anywhere, not just eBay.")
+                ik_file = st.file_uploader("Scanner export (CSV)", type=["csv"], key="inv_ik_file")
+
+                if ik_file is not None:
+                    _ik = intake.read_export(ik_file.getvalue().decode("utf-8-sig", errors="replace"))
+                    _cards, _sum = _ik["cards"], intake.summarize(_ik["cards"])
+                    if not _cards:
+                        st.error("No cards found in that file. Expected an eBay File Exchange "
+                                 "export with a Title column.")
+                    else:
+                        k1, k2, k3, k4 = st.columns(4)
+                        k1.metric("Cards", f"{_sum['cards']:,}")
+                        k2.metric("Asking value", f"${_sum['value']:,.2f}")
+                        k3.metric("With photos", f"{_sum['with_images']:,}",
+                                  delta=f"{_sum['images_total']:,} images", delta_color="off")
+                        k4.metric("$20+", f"{_sum['over_20']:,}",
+                                  help="The cards worth tracking one at a time")
+                        if _ik["skipped"]:
+                            st.warning(f"{len(_ik['skipped'])} row(s) had no SKU and were skipped — "
+                                       "a card with no identity cannot be tracked or pulled.")
+                        if _sum["no_player"]:
+                            st.warning(f"{_sum['no_player']} card(s) have no player — check the "
+                                       "match in Heystack before listing.")
+
+                        _chk = intake.check_skus(_cards)
+                        _use = _cards
+                        if not _chk["ok"]:
+                            st.error(f"**SKUs are not unique** — {_chk['why']}")
+                            if _chk["batch_label"] and st.checkbox(
+                                    "Add a per-card number so they can be tracked "
+                                    "(only safe if these are NOT listed yet)", key="inv_ik_fix"):
+                                _use = intake.suffix_skus(_cards)
+                                st.info(f"Will import as {_use[0]['sku']} … {_use[-1]['sku']}. "
+                                        "eBay freezes the SKU once a listing exists, so never do "
+                                        "this to cards already live.")
+
+                        st.markdown("#### Where these cards came from, and where they are going")
+                        f1, f2, f3 = st.columns(3)
+                        _lots = [l["lot_prefix"] for l in (st.session_state.get("pur_lots") or [])
+                                 if l.get("lot_prefix")] or []
+                        if not _lots:
+                            _lots = sorted({str(c["sku"]).rsplit("-", 2)[0] for c in _use})
+                        _guess = str(_use[0]["sku"]).rsplit("-", 2)[0]
+                        _lot = f1.selectbox(
+                            "Purchase lot", ["— none —"] + sorted(set(_lots + [_guess])),
+                            index=(sorted(set(_lots + [_guess])).index(_guess) + 1)
+                                  if _guess in set(_lots + [_guess]) else 0,
+                            key="inv_ik_lot",
+                            help="Register this in Purchases spelled exactly as the eBay Custom "
+                                 "Label, or the cards will not roll up to their cost.")
+                        _tool = f2.selectbox("Scanned with", ["heystack", "cdp", "other"],
+                                             key="inv_ik_tool")
+                        _status = f3.selectbox(
+                            "Status on arrival", ["intake", "priced", "listed"],
+                            key="inv_ik_status",
+                            help="'listed' only if these are already live on eBay.")
+
+                        g1, g2 = st.columns([1, 2])
+                        _start = g1.text_input("File them starting at", placeholder="B14-R2-P1",
+                                               key="inv_ik_loc",
+                                               help="Positions count up from here, in the order "
+                                                    "the cards were scanned. Leave blank to "
+                                                    "locate them later.")
+                        _cost_total = g2.number_input(
+                            "Total paid for this stack ($)", min_value=0.0, step=10.0,
+                            format="%.2f", key="inv_ik_cost",
+                            help="Split evenly across the cards. Leave 0 if the lot already "
+                                 "carries the cost.")
+                        _loc = inventory.parse_location(_start) if _start.strip() else None
+                        if _start.strip() and not _loc:
+                            st.error("Location must look like B14-R2-P1.")
+                        _cost_each = round(_cost_total / len(_use), 2) if _cost_total else None
+                        if _cost_each:
+                            g2.caption(f"${_cost_each:,.2f} a card across {len(_use)} cards.")
+
+                        st.dataframe(pd.DataFrame([{
+                            "SKU": c["sku"], "Player": c["player"], "Card": c["title"],
+                            "Price": c["list_price"], "Photos": len(c["images"]),
+                            "Grade": (c["grader"] or "") + (" " + c["grade"] if c["grade"] else ""),
+                        } for c in _use[:200]]), hide_index=True, use_container_width=True,
+                            column_config={"Price": st.column_config.NumberColumn(format="$%.2f")})
+                        if len(_use) > 200:
+                            st.caption(f"Showing the first 200 of {len(_use):,}.")
+
+                        if st.button(f"📥 Take in {len(_use):,} card(s)", type="primary",
+                                     key="inv_ik_go",
+                                     disabled=bool(_start.strip() and not _loc)):
+                            _batch = intake.batch_code(_tool)
+                            _rows = intake.to_rows(
+                                _use, batch=_batch, tool=_tool,
+                                lot_prefix="" if _lot == "— none —" else _lot,
+                                status=_status, cost_each=_cost_each)
+                            # Location is assigned here, at the door. A card that
+                            # enters without one is unfindable the day it sells.
+                            if _loc:
+                                pos = _loc[2] or 1
+                                for r in _rows:
+                                    r["location"] = inventory.format_location(_loc[0], _loc[1], pos)
+                                    r["box_code"] = _loc[0]
+                                    pos += 1
+                            prog = st.progress(0.0, text="Taking cards in…")
+                            done = bad = 0
+                            for i in range(0, len(_rows), 200):
+                                chunk = _rows[i:i + 200]
+                                if _neon_post("inventory_cards", chunk, on_conflict="sku") is None:
+                                    bad += len(chunk)
+                                else:
+                                    done += len(chunk)
+                                prog.progress(min(1.0, (i + 200) / len(_rows)))
+                            prog.empty()
+                            _neon_post("intake_batches", {
+                                "batch_code": _batch, "source_tool": _tool,
+                                "lot_prefix": None if _lot == "— none —" else _lot,
+                                "file_name": ik_file.name, "cards": done,
+                                "total_cost": _cost_total or None,
+                                "located": bool(_loc),
+                                "imported_by": st.session_state.get("access_name", ""),
+                            })
+                            if bad:
+                                st.error(f"{bad:,} card(s) failed: {_neon_last_error.get('msg')}")
+                            if done:
+                                st.success(
+                                    f"**{done:,} card(s) in, batch {_batch}.**"
+                                    + (f" Filed from {inventory.format_location(*_loc)}."
+                                       if _loc else
+                                       "  ⚠️ No location — set one on the Cards tab before "
+                                       "these sell."))
+                                _inv_reload()
+                                st.rerun()
+
+                st.divider()
+                with st.expander("How this fits together", expanded=not inv_cards):
+                    st.markdown(
+                        "**Scan → export → here.** The export carries about ten photos and "
+                        "fourteen specifics per card. eBay only ever told us a card was "
+                        "listed; this says what the card *is*, which is what a website or "
+                        "Instagram needs.\n\n"
+                        "**Give every card a location as it comes in.** That is the one rule "
+                        "that makes a sale a thirty-second pull instead of a search.\n\n"
+                        "**Register the lot in Purchases exactly as the eBay Custom Label** "
+                        "(`GIRKSWHT_09-25-26`). Spelled differently, the cards will not roll "
+                        "up to what you paid.")
 
             # ── OVERVIEW ────────────────────────────────────────────────────
             with it_over:
