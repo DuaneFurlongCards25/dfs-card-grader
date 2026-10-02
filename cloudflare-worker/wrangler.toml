@@ -1,0 +1,22 @@
+# DFS Cards API — the card business's own Worker.
+#
+# Deliberately separate from the studio's `dfs-api`. That Worker runs client
+# bookings, the portal, invoices and Square checkout for DFS Studios; this one
+# serves CardPulse for DFS Cards LLC — a different company. A bad deploy here
+# must not be able to stop a client paying for a headshot session, and the
+# cards app has no business being able to read leads or payroll.
+#
+# Same Neon database, its own connection secret, and only the card tables.
+name = "dfs-cards-api"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Card photos mirrored out of the scanner vendors' S3, so the website and
+# Instagram do not depend on an account we might stop paying.
+[[r2_buckets]]
+binding = "CARD_IMAGES"
+bucket_name = "dfs-card-images"
+
+# Secrets (set once, never committed):
+#   npx wrangler secret put DATABASE_URL   — the same Neon connection string
