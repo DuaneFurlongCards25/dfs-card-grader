@@ -358,4 +358,76 @@ create table if not exists inventory_boxes (
   counted_at   timestamptz,
   created_at   timestamptz default now(),
   updated_at   timestamptz default now()
-);"""
+);
+
+-- ── Built for the Burbank model: scan once, sell anywhere ──────────────────
+-- Everything below is additive. Run it again safely.
+
+-- What the scanner already knows and eBay never told us: the photos and the
+-- item specifics. Without these a card can only ever be relisted on eBay;
+-- with them it can go to a website, Instagram or anywhere else.
+alter table inventory_cards add column if not exists images      jsonb default '[]'::jsonb;
+alter table inventory_cards add column if not exists specifics   jsonb default '{}'::jsonb;
+alter table inventory_cards add column if not exists team        text;
+alter table inventory_cards add column if not exists manufacturer text;
+alter table inventory_cards add column if not exists condition   text;
+alter table inventory_cards add column if not exists description text;
+alter table inventory_cards add column if not exists intake_batch text;
+alter table inventory_cards add column if not exists source_tool text;   -- cdp | haystack | manual
+alter table inventory_cards add column if not exists sold_at    timestamptz;
+alter table inventory_cards add column if not exists sold_channel text;
+alter table inventory_cards add column if not exists sold_price numeric;
+create index if not exists idx_inv_batch on inventory_cards(intake_batch);
+create index if not exists idx_inv_player on inventory_cards(player);
+
+-- One card, many channels. This is the table that stops the same physical
+-- card being sold twice once eBay is not the only place it lives.
+create table if not exists card_listings (
+  id            bigint primary key generated always as identity,
+  sku           text not null,
+  channel       text not null,          -- ebay | shopify | instagram | collx | dc_sports | whatnot
+  external_id   text,                   -- eBay item number, Shopify product id, IG post id
+  url           text,
+  price         numeric,
+  status        text not null default 'live',   -- live | sold | ended | pending_delist
+  listed_at     timestamptz default now(),
+  ended_at      timestamptz,
+  delist_needed boolean default false,   -- sold elsewhere; pull it from this channel
+  notes         text,
+  created_at    timestamptz default now(),
+  updated_at    timestamptz default now()
+);
+create unique index if not exists idx_cl_unique on card_listings(sku, channel, coalesce(external_id,''));
+create index if not exists idx_cl_sku     on card_listings(sku);
+create index if not exists idx_cl_channel on card_listings(channel, status);
+create index if not exists idx_cl_delist  on card_listings(delist_needed) where delist_needed;
+
+-- One row per scan session imported. Makes "what came in Tuesday" answerable
+-- and gives every card a batch to be filed under.
+create table if not exists intake_batches (
+  id           bigint primary key generated always as identity,
+  batch_code   text not null unique,     -- CDP-2026-10-02-01
+  source_tool  text,                     -- cdp | haystack
+  lot_prefix   text,
+  file_name    text,
+  cards        integer default 0,
+  total_cost   numeric,
+  located      boolean default false,
+  imported_by  text,
+  notes        text,
+  created_at   timestamptz default now()
+);
+
+-- A card's history. At Burbank volume "where did this go" cannot be answered
+-- by the current row alone.
+create table if not exists card_events (
+  id         bigint primary key generated always as identity,
+  sku        text not null,
+  event      text not null,              -- intake | located | listed | priced | sold | delisted | moved
+  channel    text,
+  detail     text,
+  amount     numeric,
+  at         timestamptz default now(),
+  who        text
+);
+create index if not exists idx_ce_sku on card_events(sku, at desc);"""
