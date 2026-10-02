@@ -10,7 +10,7 @@ import urllib.parse
 import ssl
 import random
 import string
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 import io
 import base64
@@ -13589,9 +13589,199 @@ if _active_tab == 17:
             inv_cards = st.session_state["inv_cards"]
             inv_boxes = st.session_state["inv_boxes"]
 
-            it_over, it_intake, it_cards, it_boxes, it_sync, it_pull, it_setup = st.tabs([
-                "📊 Overview", "📥 Intake", "🃏 Cards", "📦 Boxes",
-                "🔄 Sync & Reconcile", "🧾 Pull List", "🛠 Setup"])
+            (it_over, it_intake, it_cards, it_chan, it_delist, it_boxes,
+             it_sync, it_pull, it_setup) = st.tabs([
+                "📊 Overview", "📥 Intake", "🃏 Cards", "📣 Channels",
+                "🔻 Delist Queue", "📦 Boxes", "🔄 Sync & Reconcile",
+                "🧾 Pull List", "🛠 Setup"])
+
+            def _inv_listings():
+                if "inv_listings" not in st.session_state:
+                    st.session_state["inv_listings"] = inventory.fetch_all(
+                        _neon_get, "card_listings")
+                return st.session_state["inv_listings"]
+
+            # ── CHANNELS ────────────────────────────────────────────────────
+            # Heystack reaches eBay and nothing else, and CDP will not take
+            # those cards on. So this is how a $20+ card gets onto the website
+            # or Instagram — and gets recorded as listed there, which is what
+            # makes the delist queue possible later.
+            with it_chan:
+                import dfs_channels as channels
+
+                st.caption("Send cards to the channels Heystack cannot reach. Every send is "
+                           "recorded, so when the card sells anywhere the others can be "
+                           "pulled down.")
+                _live = [c for c in inv_cards if c.get("status") not in ("sold", "consigned")]
+                if not _live:
+                    st.info("No cards to send yet — take a stack in on **📥 Intake** first.")
+                else:
+                    ch1, ch2, ch3 = st.columns(3)
+                    _ch_channel = ch1.selectbox(
+                        "Send to", ["shopify", "instagram"],
+                        format_func=lambda c: channels.CHANNEL_LABEL[c], key="inv_ch_chan")
+                    _batches = sorted({c.get("intake_batch") for c in _live if c.get("intake_batch")})
+                    _ch_batch = ch2.selectbox("Batch", ["All"] + _batches, key="inv_ch_batch")
+                    _ch_min = ch3.number_input("Only cards priced at or above ($)",
+                                               min_value=0.0, value=20.0, step=5.0,
+                                               key="inv_ch_min",
+                                               help="The $20+ cards are the ones worth "
+                                                    "putting on a second channel.")
+                    _already = {(str(l.get("sku")).upper(), l.get("channel"))
+                                for l in _inv_listings() if (l.get("status") or "live") == "live"}
+                    _pool = [c for c in _live
+                             if (_ch_batch == "All" or c.get("intake_batch") == _ch_batch)
+                             and buying._money(c.get("list_price") or c.get("est_value")) >= _ch_min]
+                    _new = [c for c in _pool
+                            if (str(c.get("sku")).upper(), _ch_channel) not in _already]
+                    _dupe = len(_pool) - len(_new)
+
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("Match the filter", f"{len(_pool):,}")
+                    m2.metric("Not yet on this channel", f"{len(_new):,}")
+                    m3.metric("Already listed there", f"{_dupe:,}",
+                              help="Skipped — listing the same card twice on one channel is "
+                                   "how a card gets sold twice.")
+                    if not _new:
+                        st.info("Nothing new to send with these filters.")
+                    else:
+                        st.dataframe(pd.DataFrame([{
+                            "SKU": c.get("sku"), "Card": c.get("title"),
+                            "Price": buying._money(c.get("list_price")),
+                            "Photos": len(c.get("images") or []),
+                            "Location": c.get("location") or "",
+                        } for c in _new[:200]]), hide_index=True, use_container_width=True,
+                            column_config={"Price": st.column_config.NumberColumn(format="$%.2f")})
+
+                        _no_img = sum(1 for c in _new if not (c.get("images") or []))
+                        if _no_img:
+                            st.warning(f"{_no_img} card(s) have no photos — a website listing "
+                                       "without an image will not sell. Check these came from "
+                                       "a scanner export.")
+
+                        if _ch_channel == "shopify":
+                            _csv = channels.shopify_csv(_new)
+                            st.download_button(
+                                f"🛒 Shopify import CSV ({len(_new):,} cards)",
+                                data=_csv.encode(),
+                                file_name=f"shopify-import-{date.today().isoformat()}.csv",
+                                mime="text/csv", key="inv_ch_shopify", type="primary")
+                            st.caption("Shopify admin → Products → Import. Every card goes in at "
+                                       "quantity 1 with inventory policy *deny*, so the site "
+                                       "cannot sell a card that is already gone.")
+                        else:
+                            _pack = channels.ig_pack(_new)
+                            _ig_csv = io.StringIO()
+                            _w = csv.writer(_ig_csv, lineterminator="\n")
+                            _w.writerow(["SKU", "Caption", "Image 1", "Image 2", "Image 3"])
+                            for p in _pack:
+                                _w.writerow([p["sku"], p["caption"]] + (p["images"] + ["", "", ""])[:3])
+                            st.download_button(
+                                f"📸 Instagram pack ({len(_pack):,} cards)",
+                                data=_ig_csv.getvalue().encode(),
+                                file_name=f"instagram-pack-{date.today().isoformat()}.csv",
+                                mime="text/csv", key="inv_ch_ig", type="primary")
+                            with st.expander("Preview the first caption"):
+                                st.code(_pack[0]["caption"])
+
+                        if st.button(f"✅ Mark these {len(_new):,} as listed on "
+                                     f"{channels.CHANNEL_LABEL[_ch_channel]}",
+                                     key="inv_ch_record"):
+                            rows = channels.listing_rows(_new, _ch_channel)
+                            ok = 0
+                            for i in range(0, len(rows), 200):
+                                if _neon_post("card_listings", rows[i:i + 200]) is not None:
+                                    ok += len(rows[i:i + 200])
+                            st.session_state.pop("inv_listings", None)
+                            st.success(f"Recorded {ok:,} listing(s). They are now watched by the "
+                                       "Delist Queue.")
+                            st.rerun()
+                        st.caption("Record them only once the file is actually uploaded — this is "
+                                   "what the delist queue reads.")
+
+            # ── DELIST QUEUE ────────────────────────────────────────────────
+            with it_delist:
+                import dfs_channels as channels
+
+                st.caption("A card sold in one place is still for sale everywhere else until "
+                           "someone takes it down. This finds those, and produces the file or "
+                           "the list each channel needs.")
+                _ls = _inv_listings()
+                if not _ls:
+                    st.info("Nothing is being watched yet. Send cards to a channel on "
+                            "**📣 Channels** first.")
+                else:
+                    with st.spinner("Reading sales…"):
+                        _sales_raw = inventory.fetch_all(
+                            _neon_get, "sales_records",
+                            "?select=sku,sale_date,gross_revenue,source&sku=not.is.null")
+                    _since = st.date_input("Sales since", value=date.today() - timedelta(days=30),
+                                           key="inv_dl_since")
+                    _sold = [{"sku": s.get("sku"),
+                              "channel": {"ebay": "ebay", "collx": "collx",
+                                          "dc_sports": "dc_sports"}.get(s.get("source"), s.get("source")),
+                              "price": buying._money(s.get("gross_revenue")),
+                              "date": s.get("sale_date")}
+                             for s in _sales_raw
+                             if str(s.get("sale_date") or "")[:10] >= _since.isoformat()]
+                    plan = channels.delist_plan(_sold, _ls)
+
+                    d1, d2, d3 = st.columns(3)
+                    d1.metric("Listings to pull", plan["total"])
+                    d2.metric("Sales watched", f"{len(_sold):,}")
+                    d3.metric("Sold, SKU unknown", len(plan["unknown_sku"]),
+                              help="These sales match no tracked listing — if they were listed "
+                                   "elsewhere, nothing here can pull them down.")
+                    if not plan["total"]:
+                        st.success("Nothing is double-listed. Every sold card is already down "
+                                   "everywhere else.")
+                    for ch, rows in plan["by_channel"].items():
+                        with st.expander(f"{channels.CHANNEL_LABEL.get(ch, ch)} — {len(rows)} to pull",
+                                         expanded=True):
+                            st.caption(channels.DELIST_METHOD.get(ch, "end it"))
+                            st.dataframe(pd.DataFrame([{
+                                "SKU": r["sku"], "Listing": r.get("external_id") or "—",
+                                "Sold on": channels.CHANNEL_LABEL.get(r["sold_on"], r["sold_on"]),
+                                "Price": r.get("price"),
+                            } for r in rows]), hide_index=True, use_container_width=True,
+                                column_config={"Price": st.column_config.NumberColumn(format="$%.2f")})
+                            if ch == "ebay":
+                                st.download_button(
+                                    "⬇️ eBay End file", key="inv_dl_ebay",
+                                    data=channels.ebay_end_csv(rows).encode(),
+                                    file_name=f"ebay-END-sold-elsewhere-{date.today().isoformat()}.csv",
+                                    mime="text/csv")
+                    if plan["total"]:
+                        st.download_button(
+                            "📋 Everything that needs doing by hand",
+                            data=channels.manual_delist_csv(plan["by_channel"]).encode(),
+                            file_name=f"delist-worklist-{date.today().isoformat()}.csv",
+                            mime="text/csv", key="inv_dl_manual")
+                        if st.button("✅ Mark these listings ended", key="inv_dl_done"):
+                            n = 0
+                            _by_key = {(str(l.get("sku")).upper(), l.get("channel")): l
+                                       for l in _ls}
+                            for ch, rows in plan["by_channel"].items():
+                                for r in rows:
+                                    l = _by_key.get((str(r["sku"]).upper(), ch))
+                                    if l and l.get("id") and _neon_patch("card_listings", l["id"], {
+                                            "status": "ended",
+                                            "ended_at": datetime.utcnow().isoformat() + "Z",
+                                            "delist_needed": False}):
+                                        n += 1
+                            st.session_state.pop("inv_listings", None)
+                            st.success(f"Marked {n} listing(s) ended.")
+                            st.rerun()
+                    if plan["unknown_sku"]:
+                        with st.expander(f"{len(plan['unknown_sku'])} sale(s) match no tracked listing"):
+                            st.caption("Sold, but this card was never recorded as listed on a "
+                                       "second channel — so nothing can be pulled down for it. "
+                                       "Normal for cards that only ever lived on eBay.")
+                            st.dataframe(pd.DataFrame([{
+                                "SKU": s["sku"], "Sold on": s.get("channel"),
+                                "Price": s.get("price"), "Date": s.get("date"),
+                            } for s in plan["unknown_sku"][:200]]), hide_index=True,
+                                use_container_width=True)
 
             # ── INTAKE ──────────────────────────────────────────────────────
             # One door in. A scanner export becomes located inventory in a
