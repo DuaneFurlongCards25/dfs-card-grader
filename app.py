@@ -13924,6 +13924,76 @@ if _active_tab == 17:
                                 st.rerun()
 
                 st.divider()
+                # ── Mirror the photos into our own storage ──────────────────
+                # The scanner's S3 is the only place these images live. If that
+                # account lapses or they prune old files, every product photo on
+                # the website dies at once — and the cards are filed away by
+                # then, so "retake them" means pulling thousands back out of
+                # boxes. This copies the same bytes into our R2, once.
+                _VENDOR_HOSTS = ("tccentral", "amazonaws.com", "heystack")
+                _needs_mirror = [c for c in inv_cards
+                                 if any(h in (c.get("images") or [""])[0] for h in _VENDOR_HOSTS)]
+                with st.expander(
+                        f"🪞 Keep our own copy of the photos"
+                        + (f" — {len(_needs_mirror):,} card(s) still on the scanner's server"
+                           if _needs_mirror else " — all mirrored"),
+                        expanded=bool(_needs_mirror)):
+                    st.caption("Nothing is re-photographed. The scanner already took these; this "
+                               "copies the same files into your own storage so the website and "
+                               "Instagram do not depend on a vendor you stopped paying.")
+                    if not _needs_mirror:
+                        st.success("Every card's photos are already on your own storage.")
+                    else:
+                        _mb = st.number_input("How many cards this run", 1,
+                                              max(1, len(_needs_mirror)),
+                                              min(50, len(_needs_mirror)), key="inv_mir_n",
+                                              help="Each card copies up to 10 photos. Runs "
+                                                   "server-side, so it is not using your "
+                                                   "connection.")
+                        if st.button(f"🪞 Mirror {int(_mb)} card(s)", key="inv_mir_go",
+                                     type="primary"):
+                            prog = st.progress(0.0, text="Copying photos…")
+                            ok = failed = imgs = 0
+                            batch = _needs_mirror[:int(_mb)]
+                            for i, c in enumerate(batch, 1):
+                                try:
+                                    req = urllib.request.Request(
+                                        f"{WORKER_URL}/api/inventory/mirror",
+                                        data=json.dumps({"sku": c["sku"],
+                                                         "urls": c.get("images") or []}).encode(),
+                                        headers=_neon_headers(), method="POST")
+                                    with urllib.request.urlopen(req, context=ssl_ctx(),
+                                                                timeout=120) as r:
+                                        res = json.loads(r.read().decode())
+                                    new_urls = res.get("urls") or []
+                                    if new_urls:
+                                        # Only swap the card over once the copies
+                                        # exist — a half-written list would point
+                                        # the website at images that are not there.
+                                        if _neon_post("inventory_cards", {
+                                                "sku": c["sku"], "images": new_urls,
+                                                "updated_at": datetime.utcnow().isoformat() + "Z"},
+                                                on_conflict="sku") is not None:
+                                            ok += 1
+                                            imgs += len(new_urls)
+                                        else:
+                                            failed += 1
+                                    else:
+                                        failed += 1
+                                except Exception:
+                                    failed += 1
+                                prog.progress(i / len(batch), text=f"Copying photos… {i}/{len(batch)}")
+                            prog.empty()
+                            if ok:
+                                st.success(f"**{ok:,} card(s) mirrored — {imgs:,} photos now on "
+                                           f"your own storage.**")
+                            if failed:
+                                st.warning(f"{failed:,} card(s) could not be copied. Their photos "
+                                           "are unchanged and still point at the scanner, so "
+                                           "nothing is broken — run it again.")
+                            _inv_reload()
+                            st.rerun()
+
                 with st.expander("How this fits together", expanded=not inv_cards):
                     st.markdown(
                         "**Scan → export → here.** The export carries about ten photos and "
