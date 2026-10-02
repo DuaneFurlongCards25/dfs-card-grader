@@ -17,6 +17,15 @@ card is listed; the export tells you what the card IS. A card can only reach a
 website or Instagram if its photos and specifics live somewhere we own, and
 this is where they come from.
 
+## Verified against both tools
+
+A Heystack stack export and a Card Dealer Pro export are the same 39-column
+eBay File Exchange shape (checked 2 Oct 2026 on GIRKSWHATNOT 10-01-26: three
+cards, unique SKUs, 10 images and 14 specifics each). Heystack's Custom Name
+strategy gives every card its own SKU — {eBay Custom Label}-{position}-{random}
+— and once generated that SKU is saved to the card and reused on later
+listings, which is what makes it usable as a durable identity.
+
 ## Two scanners, one pipe
 
 Card Dealer Pro and Haystack One both publish eBay File Exchange files, so both
