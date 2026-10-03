@@ -1154,9 +1154,28 @@ def _today_iso():
 def _pricing_key():
     return str(st.session_state.get("access_code_id") or st.session_state.get("access_name") or "anon")
 
+def is_owner_account() -> bool:
+    """Is this the DFS Cards account, rather than another tenant?
+
+    Keyed on the access code, not the display name. A name is typed into a
+    form when an account is created, so "Duane" was all that stood between a
+    tenant and the admin panel. The code maps to a tenant schema and is what
+    the Worker already trusts.
+    """
+    return st.session_state.get("access_code", "") == "DFS-MASTER"
+
+
 def pricing_unlimited():
-    """Owner + Robert (marketing partner) are never capped."""
-    return st.session_state.get("access_name", "") in ("Duane", "Robert Bass")
+    """Only the owner's account is uncapped.
+
+    Everyone else spends Duane's CardHedger key, so the per-code daily_limit
+    is the only thing standing between a curious tester and his rate limit.
+    Robert was named here as an uncapped marketing partner back when he was
+    the only other person with a code; as a tenant that silently reinstated
+    unlimited look-ups on someone else's bill. Raise his daily_limit instead
+    — it is one UPDATE and it is visible.
+    """
+    return is_owner_account()
 
 def pricing_used_today():
     """Live look-ups already used today (max of Neon + this session)."""
@@ -2889,7 +2908,7 @@ with st.sidebar:
         st.session_state["show_guide"] = True
 
     # ── Admin (Duane only) ────────────────────────────────────────────────────
-    if st.session_state.get("access_name") == "Duane":
+    if is_owner_account():
         st.markdown("---")
         if st.button("🔐 Admin Panel", use_container_width=True, key="open_admin_btn"):
             st.session_state["show_admin"] = True
@@ -3096,7 +3115,7 @@ if st.session_state.get("show_guide"):
     st.session_state["show_guide"] = False
     _show_guide()
 
-if st.session_state.get("show_admin") and st.session_state.get("access_name") == "Duane":
+if st.session_state.get("show_admin") and is_owner_account():
     st.session_state["show_admin"] = False
     _show_admin()
 
@@ -7337,7 +7356,7 @@ alter table scan_cards disable row level security;"""
                         ]
     
                         # Block export if Duane has graded cards without Grade filled
-                        _is_duane_export = st.session_state.get("access_name") == "Duane"
+                        _is_duane_export = is_owner_account()
                         _grade_warnings = [r.get("Player","Card") for r in edited_records
                                            if r.get("✓") and r.get("Graded") and not (r.get("Grade") or "").strip()] if _is_duane_export else []
                         if _grade_warnings:
@@ -7412,7 +7431,7 @@ alter table scan_cards disable row level security;"""
                                 _cert_num   = (row.get("Cert #") or "").strip()
                                 # CD: graded-card fields (27501/27502) only active for Duane
                                 # until the eBay option ID mapping is fully verified.
-                                _graded_export_enabled = st.session_state.get("access_name") == "Duane"
+                                _graded_export_enabled = is_owner_account()
                                 _has_grade  = bool(_is_graded and _grade_val and _graded_export_enabled)
                                 _cd_grader  = EBAY_GRADER_VALUES.get(_grader_key, _grader_key) if _has_grade else ""
                                 _cd_grade   = EBAY_GRADE_VALUES.get(str(_grade_val), f"{_grade_val} - (ID: 275020)") if _has_grade else ""
@@ -7859,7 +7878,7 @@ alter table scan_cards disable row level security;"""
 if _active_tab == 3:
     st.markdown("## 📦 Inventory Check")
 
-    _is_owner = st.session_state.get("access_name", "") == "Duane"
+    _is_owner = is_owner_account()
     _wb_label = "DFS Operations Workbook" if _is_owner else "your Operations Workbook"
 
     st.markdown(
