@@ -79,6 +79,21 @@ PLATFORMS = {
     "QuickConsign (consignment)": Platform(
         "QuickConsign (consignment)", 0.20, 0.0, None,
         note="Rate not yet measured — confirm with them and edit. $5 minimum."),
+    # Facebook groups, Instagram DMs, card shows, cash in hand. No marketplace
+    # takes a cut, so the only deductions are supplies and postage — which is
+    # the whole argument for selling this way, and worth being able to see
+    # beside the eBay number rather than assumed.
+    "Direct sale (Facebook / Instagram / show / cash)": Platform(
+        "Direct sale (Facebook / Instagram / show / cash)", 0.0, 0.0, None,
+        note="No marketplace commission. If you take PayPal Goods & Services "
+             "or Venmo for business, add that fee as a Custom rate instead "
+             "(~2.99% + $0.49) — friends-and-family and cash are free, but "
+             "G&S is what gives you seller protection."),
+    "PayPal Goods & Services (direct sale)": Platform(
+        "PayPal Goods & Services (direct sale)", 0.0299, 0.49, 0.49,
+        note="A direct sale taken through PayPal G&S: 2.99% + $0.49 at the "
+             "published US rate. Confirm against your own statement — rates "
+             "move and vary by account."),
     "Custom": Platform("Custom", 0.0, 0.0, None, note="Type your own rate."),
 }
 

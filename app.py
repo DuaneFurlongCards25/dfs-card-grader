@@ -2972,11 +2972,14 @@ def _show_guide():
              "**Everything you enter is yours alone.** Your cards, costs and sales sit in "
              "your own private database. Nobody else using CardPulse can see them, and you "
              "cannot see theirs.",
-             "You start empty. The fastest way to fill it is **🗃️ Inventory → Intake** — "
-             "drop in an export from Heystack or Card Dealer Pro and every card arrives "
-             "with its photos, player, set, parallel and condition already filled in.",
-             "No scanner export? Add cards one at a time in **🗃️ Inventory → Cards**, or "
-             "start with **🔍 Card Research** to price something before you buy it.",
+             "You start empty. Add cards in **🗃️ Inventory → Cards → ➕ Add a card by "
+             "hand** — name, year, set, what you paid and where it's filed. That one row "
+             "is what every other screen works from.",
+             "Already use a scanner? **🗃️ Inventory → Intake** reads a Heystack or Card "
+             "Dealer Pro export and brings in photos, player, set, parallel and condition "
+             "for the whole batch at once. Not required — plenty of people never use one.",
+             "Not sure what something's worth? **🔍 Card Research** prices it before you "
+             "buy, and before you quote a number in a DM.",
              "Pricing look-ups are metered — the sidebar shows how many you have left "
              "today. Ask Duane if you need more.",
              "Stuck, or something looks wrong? **💬 Help / Suggestion** in the sidebar "
@@ -2993,12 +2996,42 @@ def _show_guide():
              "**Delist Queue** is what to pull down elsewhere when something sells, so you "
              "never sell the same physical card twice.",
          ]),
+        ("📱", "Selling on Facebook, Instagram or at shows",
+         [
+             "**You keep more, and the app can prove it.** In **🧮 Calculator**, price the "
+             "same card as a *Direct sale* and as an *eBay* sale. On a $100 card that is "
+             "about **$12.75** more in your pocket — eBay's cut is 12.35% plus a per-order "
+             "fee, a direct sale is zero. That gap is your room to undercut eBay prices "
+             "and still come out ahead.",
+             "**Price from real sold comps, not vibes.** Pull the card up in **🔍 Card "
+             "Research**, hit **📋 Copy Comps**, and paste recent actual sale prices "
+             "straight into the DM or the group post. It ends the haggling faster than "
+             "any argument.",
+             "**Post-ready captions:** mark cards in **🗃️ Inventory → Channels** and it "
+             "writes the Instagram caption — title, price, hashtags built from the card's "
+             "own player, team and parallel — and lists which photos to attach. Works just "
+             "as well pasted into a Facebook group post.",
+             "**Log the sale the moment it happens.** **💰 Sales & P&L → Import → Manual "
+             "entry** is built for exactly this: social sales, cash sales, show sales. "
+             "Without it a direct sale is invisible and your P&L quietly undercounts the "
+             "most profitable thing you do.",
+             "**Taking PayPal G&S?** Use that preset in the Calculator instead of *Direct "
+             "sale* — 2.99% + $0.49 still beats eBay comfortably, and it is the one that "
+             "gives you seller protection. Friends-and-family and cash are free but carry "
+             "no protection either way.",
+             "**Sold the same card twice?** If you also list on eBay, **🗃️ Inventory → "
+             "Delist Queue** tells you exactly what to pull down when something sells in a "
+             "DM — the one mistake that costs you a defect and a buyer.",
+         ]),
         ("🧮", "Calculator — before you buy",
          [
              "Enter a purchase price and a sell price to see the real net after fees, "
              "supplies and shipping — eBay and CollX take very different cuts.",
              "Work backwards instead: set a target margin and it tells you the most you "
-             "can pay for the card.",
+             "can pay for the card — the number to hold in your head at a show or in a "
+             "group buy, before emotion gets involved.",
+             "Compare the same card across *eBay*, *CollX* and *Direct sale* to see what "
+             "each channel really costs you before you decide where it goes.",
          ]),
         ("🔍", "Card Research — your first stop",
          [
