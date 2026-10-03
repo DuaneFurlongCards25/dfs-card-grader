@@ -13670,20 +13670,44 @@ if _active_tab == 17:
 
         if not (_inv_ok and _box_ok):
             _why = _inv_why or _box_why
-            st.error("**Inventory needs a one-time setup** before it can save anything.")
-            if "not allowed" in _why:
+            # An auth or tenant failure is NOT a missing table. Showing setup
+            # SQL here sent Duane to run a migration he had already run, which
+            # is worse than useless — it hides the real cause.
+            if "HTTP 401" in _why:
+                st.error("**Can't reach the database** — this app is missing the Worker key.")
                 st.markdown(
-                    "1. Run the SQL below once in Neon — console.neon.tech → `dfs-crm-prod` → "
-                    "SQL Editor → `main` branch.\n"
-                    "2. Deploy the Worker so it allows the two new tables "
-                    "(the allow-list line is already edited locally):")
-                st.code('cd "/Users/duanefurlong/Desktop/CRM Duane Furlong Studios/cloudflare-worker" '
-                        '&& npx wrangler deploy', language="bash")
+                    "The key lives in two independent places and only one is filled:\n\n"
+                    "- `.streamlit/secrets.toml` on the Mac (local runs) — set\n"
+                    "- **Streamlit Cloud → Manage app → Settings → Secrets** (the hosted app)\n\n"
+                    "Add `key = \"…\"` under the existing `[worker]` section there. "
+                    "Nothing is wrong with your tables.")
+                st.caption(f"Database said: {_why}")
+            elif "HTTP 400" in _why or "HTTP 403" in _why:
+                st.error("**Signed in, but the app didn't say which tenant you are.**")
+                st.markdown(
+                    "Every request carries your access code so the Worker knows whose "
+                    "data to read. This session was started before that was added, or "
+                    "the code has been suspended.\n\n"
+                    "**Sign out and sign in again.** Your tables are fine.")
+                st.caption(f"Database said: {_why}")
             else:
-                st.markdown("Run the SQL below once in Neon — console.neon.tech → "
-                            "`dfs-crm-prod` → SQL Editor → `main` branch.")
-            st.caption(f"Database said: {_why}")
-            st.code(inventory.SETUP_SQL, language="sql")
+                st.error("**Inventory needs a one-time setup** before it can save anything.")
+                if "not allowed" in _why:
+                    st.markdown(
+                        "1. Run the SQL below once in Neon — console.neon.tech → "
+                        "`dfs-cards-prod` → SQL Editor → `main` branch.\n"
+                        "2. Deploy the Worker so it allows the two new tables "
+                        "(the allow-list line is already edited locally):")
+                    st.code('cd "/Users/duanefurlong/Desktop/The CardPulse/cloudflare-worker" '
+                            '&& npx wrangler deploy', language="bash")
+                else:
+                    st.markdown("Run the SQL below once in Neon — console.neon.tech → "
+                                "`dfs-cards-prod` → SQL Editor → `main` branch.")
+                st.caption(f"Database said: {_why}")
+                # Only shown when the tables really are the problem. A tenant
+                # schema that is merely behind is fixed with support_tenant.py
+                # --migrate, never by re-running this by hand.
+                st.code(inventory.SETUP_SQL, language="sql")
         else:
             def _inv_reload():
                 for k in ("inv_cards", "inv_boxes"):
