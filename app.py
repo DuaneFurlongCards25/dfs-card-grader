@@ -695,6 +695,58 @@ if st.query_params.get("admin") == "true":
     st.stop()
 
 # ─── Access code gate ─────────────────────────────────────────────────────────
+# ─── Microsoft 365 sign-in ────────────────────────────────────────────────────
+# Streamlit does OIDC natively (st.login / st.user), so this needs none of the
+# Worker callback plumbing the CRM required.
+#
+# It sits ALONGSIDE access codes rather than replacing them: the 14 codes in
+# use belong to testers and partners — Robert, Jeff, Ty, Justin, Tracy — who
+# have no mailbox in this tenant. Microsoft-only sign-in would lock every one
+# of them out.
+MS_DOMAIN = "duanefurlongstudios.com"
+MS_STAFF = {
+    "duane@duanefurlongstudios.com":   "Duane",
+    "becca@duanefurlongstudios.com":   "Becca",
+    "taylor@duanefurlongstudios.com":  "Taylor",
+    "heather@duanefurlongstudios.com": "Heather",
+}
+
+
+def ms_auth_ready() -> bool:
+    """Is Microsoft sign-in configured? Without this guard st.user raises on
+    every run in an environment where [auth] was never set — which is every
+    environment until the secrets are in place."""
+    try:
+        return bool(dict(st.secrets.get("auth", {})).get("microsoft"))
+    except Exception:
+        return False
+
+
+def ms_user():
+    """The signed-in Microsoft identity, mapped to an app identity.
+
+    Returns None when nobody is signed in, and also when someone outside the
+    company is — a Microsoft account proves who you are, not that you belong
+    here, and the tenant can contain guests.
+    """
+    if not ms_auth_ready():
+        return None
+    try:
+        if not st.user.is_logged_in:
+            return None
+        email = str(st.user.get("email") or "").strip().lower()
+    except Exception:
+        return None
+    if not email:
+        return None
+    name = MS_STAFF.get(email)
+    if not name:
+        if not email.endswith("@" + MS_DOMAIN):
+            return {"email": email, "name": None, "allowed": False}
+        name = str(st.user.get("name") or email.split("@")[0]).strip()
+    return {"email": email, "name": name, "allowed": True}
+
+
 def validate_code(code: str):
     """Returns (name, code_id, error_key, daily_limit) — error_key is None on success."""
     if not WORKER_URL:
@@ -772,8 +824,29 @@ if not st.session_state.get("access_granted"):
     }})();
     </script>
     """, height=0)
+    _msu = ms_user()
+    if _msu and _msu.get("allowed"):
+        st.session_state.access_granted = True
+        st.session_state.access_name = _msu["name"]
+        # The email is the identity for metering; no access-code row exists.
+        st.session_state.access_code_id = _msu["email"]
+        st.session_state.agreed = True
+        st.session_state.is_beta = False
+        st.rerun()
+
     gc1, gc2, gc3 = st.columns([1, 2, 1])
     with gc2:
+        if _msu and not _msu.get("allowed"):
+            st.error(f"**{_msu['email']}** is not a {MS_DOMAIN} account. "
+                     "Sign out and use an access code, or sign in with your "
+                     "work account.")
+            st.button("Sign out", on_click=st.logout, use_container_width=True)
+        elif ms_auth_ready():
+            st.button("🔑 Sign in with Microsoft", use_container_width=True,
+                      type="primary", on_click=st.login, args=("microsoft",))
+            st.caption("For the DFS team. Everyone else, use an access code below.")
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
         entered_code = st.text_input("Access Code", value=_saved_code, placeholder="XXXX-XXXX", label_visibility="collapsed", autocomplete="off")
         if st.button("Enter", use_container_width=True, type="primary"):
             clean_code = entered_code.strip().upper()
@@ -2746,6 +2819,14 @@ with st.sidebar:
                 f'<div style="font-size:0.8rem;color:#94a3b8;padding:2px 0 10px 0;">👤 {access_name}</div>',
                 unsafe_allow_html=True,
             )
+        # A Microsoft session lives in a cookie Streamlit owns — clearing
+        # session state would leave it signed in and straight back through the
+        # gate on the next run. st.logout() is what actually ends it.
+        _side_ms = ms_user()
+        if _side_ms and _side_ms.get("allowed"):
+            st.caption(f"Signed in with Microsoft · {_side_ms['email']}")
+            st.button("Sign out", key="side_ms_out", use_container_width=True,
+                      on_click=st.logout)
 
     st.markdown("---")
 
