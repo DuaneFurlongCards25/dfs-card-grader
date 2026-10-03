@@ -35,7 +35,8 @@ import sys
 
 PSQL = "/opt/homebrew/opt/libpq/bin/psql"
 ENV = pathlib.Path.home() / "dfs-backup" / ".env"
-SHARED = {"access_codes", "pricing_usage", "tenants", "support_log"}
+SHARED = {"access_codes", "pricing_usage", "tenants", "support_log",
+          "support_tickets"}
 
 LOG_DDL = """
 create table if not exists support_log (

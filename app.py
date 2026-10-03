@@ -3288,6 +3288,7 @@ def render_claim_sale(key: str = "cs"):
             "SKU": c["sku"],
             "Card": c.get("title") or c.get("player") or c["sku"],
             "Grade": " ".join(x for x in [c.get("grader"), c.get("grade")] if x) or "raw",
+            "Cost": float(c.get("cost") or 0),
             "Price": float(c.get("list_price") or 0),
         } for c in _cands[:400]])
         if _df.empty:
@@ -3297,14 +3298,24 @@ def render_claim_sale(key: str = "cs"):
                 _df, use_container_width=True, hide_index=True, key=f"{key}_pick_ed",
                 column_config={
                     "Post": st.column_config.CheckboxColumn("Post", width="small"),
+                    "Cost": st.column_config.NumberColumn(
+                        "Cost", format="$%.2f",
+                        help="What you paid. Fill it in here if it is blank — "
+                             "without it the sale shows revenue but no profit."),
                     "Price": st.column_config.NumberColumn("Price", format="$%.2f"),
                 },
                 disabled=["SKU", "Card", "Grade"])
             st.session_state[_sel_key] = _ed[_ed["Post"]]["SKU"].tolist()
             # Prices are editable here on purpose: a claim sale price is often
             # decided the moment it is posted, not when the card was logged.
-            st.session_state[f"{key}_prices"] = dict(
-                zip(_ed["SKU"], _ed["Price"]))
+            st.session_state[f"{key}_prices"] = dict(zip(_ed["SKU"], _ed["Price"]))
+            st.session_state[f"{key}_costs"] = dict(zip(_ed["SKU"], _ed["Cost"]))
+            _nocost = [s for s, c in zip(_ed["SKU"], _ed["Cost"])
+                       if s in st.session_state[_sel_key] and not c]
+            if _nocost:
+                st.warning(f"{len(_nocost)} picked card(s) have no cost. Type it in the "
+                           f"**Cost** column above and it saves with the sale — "
+                           f"otherwise profit on those is unknown.")
         st.success(f"**{len(st.session_state[_sel_key])} card(s)** in this sale")
 
     _picked = [c for c in _all if c["sku"] in st.session_state[_sel_key]]
@@ -3377,6 +3388,31 @@ def render_claim_sale(key: str = "cs"):
             st.info("Pick some cards first.")
         else:
             st.caption("As claims come in, type who got each card. Blank = unclaimed.")
+
+            # Everyone who has bought before, so a regular is recognised rather
+            # than re-asked. The names come from past sales, which is the whole
+            # reason buyer is stored on the sale row.
+            _past = {}
+            for _s in (_neon_get("sales_records",
+                                 "?order=sale_date.desc&limit=1000") or []):
+                _b = (_s.get("buyer") or "").strip()
+                if not _b:
+                    continue
+                _p = _past.setdefault(_b, {"orders": set(), "spent": 0.0, "last": ""})
+                _p["orders"].add(_s.get("order_id") or _s.get("id"))
+                _p["spent"] += float(_s.get("gross_revenue") or 0)
+                _p["last"] = max(_p["last"], str(_s.get("sale_date") or ""))
+            if _past:
+                with st.expander(f"👥 {len(_past)} past buyer(s) — type the name to "
+                                 f"reuse it", expanded=False):
+                    st.dataframe(pd.DataFrame(
+                        [{"Buyer": b, "Orders": len(v["orders"]),
+                          "Spent": round(v["spent"], 2), "Last": v["last"][:10]}
+                         for b, v in sorted(_past.items(),
+                                            key=lambda kv: -kv[1]["spent"])][:50]),
+                        use_container_width=True, hide_index=True,
+                        column_config={"Spent": st.column_config.NumberColumn(
+                            format="$%.2f")})
             _s1, _s2, _s3 = st.columns(3)
             _ship_s = _s1.number_input("Shipping", 0.0, value=6.0, step=1.0,
                                        key=f"{key}_ss")
@@ -3409,6 +3445,9 @@ def render_claim_sale(key: str = "cs"):
                 _m2.metric("Card sales", f"${_sold:,.2f}")
                 _m3.metric("Buyers", len(_totals))
                 st.markdown("##### What each buyer owes")
+                st.caption("Charged is your flat rate. Paid is what the label actually "
+                           "cost — the difference comes out of your pocket, so it is "
+                           "worth knowing.")
                 for _t in _totals:
                     with st.expander(f"**{_t['buyer']}** — {_t['cards']} card(s) · "
                                      f"${_t['total']:,.2f}", expanded=True):
@@ -3416,8 +3455,20 @@ def render_claim_sale(key: str = "cs"):
                             _card = next((c for c in _picked if c["sku"] == _it["sku"]), {})
                             st.markdown(f"- {_card.get('title') or _it['sku']} — "
                                         f"${float(_it['price']):,.2f}")
-                        st.markdown(f"Cards **${_t['cards_total']:,.2f}** + shipping "
-                                    f"**${_t['shipping']:,.2f}** = **${_t['total']:,.2f}**")
+                        _actual = st.number_input(
+                            "Postage you actually paid ($)", 0.0, step=0.50,
+                            value=float(_t["shipping"]),
+                            key=f"{key}_ship_actual_{_t['buyer']}",
+                            help="The real label cost. Leave as-is if it matched "
+                                 "what you charged.")
+                        _gap = round(float(_actual) - float(_t["shipping"]), 2)
+                        st.markdown(
+                            f"Cards **${_t['cards_total']:,.2f}** + shipping charged "
+                            f"**${_t['shipping']:,.2f}** = **${_t['total']:,.2f}**"
+                            + (f"  \n:red[Postage cost you ${_gap:,.2f} more than you "
+                               f"charged]" if _gap > 0 else
+                               f"  \n:green[You kept ${abs(_gap):,.2f} on postage]"
+                               if _gap < 0 else ""))
                         st.code(
                             f"Hi {_t['buyer']} — {_t['cards']} card(s), "
                             f"${_t['cards_total']:,.2f} + ${_t['shipping']:,.2f} shipping "
@@ -3444,6 +3495,9 @@ def render_claim_sale(key: str = "cs"):
                              type="primary", use_container_width=True, key=f"{key}_sold"):
                     _marked, _logged, _failed = 0, 0, 0
                     _order_fee_total = 0.0
+                    _costs = st.session_state.get(f"{key}_costs", {})
+                    _profit_total, _cogs_total, _ship_gap = 0.0, 0.0, 0.0
+                    _unknown_cost = 0
                     for _t in _totals:
                         # The processor charges the order, not the card, so the
                         # fee is worked out per buyer and then split across their
@@ -3459,6 +3513,9 @@ def render_claim_sale(key: str = "cs"):
                         _order_fee_total += _order_fee
                         _order_id = f"CLAIM-{_sale_date:%Y%m%d}-" + \
                                     re.sub(r"[^A-Za-z0-9]", "", _t["buyer"])[:12].upper()
+                        _paid_ship = float(st.session_state.get(
+                            f"{key}_ship_actual_{_t['buyer']}", _t["shipping"]) or 0)
+                        _ship_gap += round(_paid_ship - float(_t["shipping"]), 2)
 
                         for _i, _it in enumerate(_t["items"]):
                             _row = next((r for r in _all if r["sku"] == _it["sku"]), None)
@@ -3467,9 +3524,17 @@ def render_claim_sale(key: str = "cs"):
                             # order totals to exactly what they paid, and is not
                             # counted once per card.
                             _ship = _t["shipping"] if _i == 0 else 0.0
+                            # Real postage sits with the charge it offsets, on the
+                            # buyer's first card, so neither is double counted.
+                            _ship_paid = _paid_ship if _i == 0 else 0.0
                             _share = round(_order_fee * (_price / _t["cards_total"]), 2) \
                                 if _t["cards_total"] else 0.0
                             _title = (_row or {}).get("title") or _it["sku"]
+                            _cost = float(_costs.get(_it["sku"]) or
+                                          (_row or {}).get("cost") or 0)
+                            if not _cost:
+                                _unknown_cost += 1
+                            _cogs_total += _cost
                             _gross = round(_price + _ship, 2)
                             _rec = {
                                 "source": "manual",
@@ -3484,6 +3549,9 @@ def render_claim_sale(key: str = "cs"):
                                 "gross_revenue": _gross,
                                 "platform_fee": _share,
                                 "net_proceeds": round(_gross - _share, 2),
+                                "buyer": _t["buyer"],        # customer history
+                                "item_cost": _cost or None,  # COGS, for profit
+                                "shipping_cost": _ship_paid or None,
                                 "status": "completed",
                                 # Re-clicking the button must not double-count
                                 # the sale; the SKU and date make it idempotent.
@@ -3492,6 +3560,8 @@ def render_claim_sale(key: str = "cs"):
                             if _neon_post("sales_records", _rec,
                                           on_conflict="dedup_key") is not None:
                                 _logged += 1
+                                _profit_total += round(_gross - _share - _cost
+                                                       - _ship_paid, 2)
                             else:
                                 _failed += 1
                             if _row and _neon_patch(
@@ -3508,12 +3578,34 @@ def render_claim_sale(key: str = "cs"):
                                  f"{_neon_last_error['msg'] or ''}. "
                                  f"{_marked} card(s) marked sold.")
                     else:
-                        st.success(
-                            f"✅ {_marked} card(s) sold · {_logged} sale(s) logged to "
-                            f"**💰 Sales & P&L** · "
-                            f"${sum(t['total'] for t in _totals):,.2f} collected"
-                            + (f" · ${_order_fee_total:,.2f} in fees" if _order_fee_total
-                               else " · no fees"))
+                        st.success(f"✅ {_marked} card(s) sold · {_logged} sale(s) "
+                                   f"logged to **💰 Sales & P&L**")
+                        # Five figures that reconcile. Collected already includes
+                        # the postage charged, so the full postage PAID has to be
+                        # subtracted — showing only the shortfall left the row
+                        # looking like bad arithmetic.
+                        _postage_paid = sum(
+                            float(st.session_state.get(f"{key}_ship_actual_{x['buyer']}",
+                                                       x["shipping"]) or 0)
+                            for x in _totals)
+                        _r1, _r2, _r3, _r4, _r5 = st.columns(5)
+                        _r1.metric("Collected",
+                                   f"${sum(t['total'] for t in _totals):,.2f}")
+                        _r2.metric("Card cost", f"−${_cogs_total:,.2f}")
+                        _r3.metric("Fees", f"−${_order_fee_total:,.2f}")
+                        _r4.metric("Postage paid", f"−${_postage_paid:,.2f}",
+                                   delta=(f"${_ship_gap:,.2f} over what you charged"
+                                          if _ship_gap else "matched what you charged"),
+                                   delta_color="inverse" if _ship_gap > 0 else "off")
+                        _r5.metric("Profit", f"${_profit_total:,.2f}")
+                        if _ship_gap > 0:
+                            st.warning(f"Postage cost **${_ship_gap:,.2f}** more than you "
+                                       f"charged across these orders. Worth knowing before "
+                                       f"you set next week's flat rate.")
+                        if _unknown_cost:
+                            st.info(f"{_unknown_cost} card(s) had no cost recorded, so "
+                                    f"profit excludes them. Add it in the **Cost** column "
+                                    f"on *1️⃣ Pick cards* and re-run to correct it.")
 
 
 # ─── Help / suggestion dialog ─────────────────────────────────────────────────
