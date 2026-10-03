@@ -75,6 +75,16 @@ const ALLOWED_TABLES = new Set([
   'access_codes', 'pricing_usage',
 ]);
 
+/**
+ * Tables that are the same for everyone and live only in `public`.
+ *
+ * Login has to work before a tenant is known — resolving the tenant means
+ * reading `access_codes`, so it cannot itself be per-tenant. Metering is
+ * deliberately shared too: a daily look-up budget that each tenant could
+ * reset by writing to their own copy is not a budget.
+ */
+const SHARED_TABLES = new Set(['access_codes', 'pricing_usage', 'tenants']);
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
@@ -177,20 +187,71 @@ function parseFilters(url: URL) {
   };
 }
 
+/**
+ * Which tenant's data is this request for?
+ *
+ * One Postgres schema per tenant. Not one row-filter per tenant: `app.py` is
+ * 14,000 lines and every query would have to carry the filter forever, where
+ * one omission silently serves another dealer their competitor's costs. A
+ * schema cannot be forgotten — the table does not exist outside it.
+ *
+ * The caller proves two separate things. `X-DFS-Key` proves the request came
+ * from our deployment (see `authed`). `X-DFS-Tenant` says which tenant the
+ * signed-in user belongs to, and is their access code — the thing the app
+ * already has at login.
+ *
+ * The header is REQUIRED, with no default. A default of "public" would mean
+ * any bug that drops the header hands a beta user the owner's books, which is
+ * the exact failure this design exists to make impossible. The owner is not
+ * special-cased: DFS-MASTER is a row in `tenants` like everyone else.
+ */
+const SCHEMA_OK = /^[a-z_][a-z0-9_]*$/;
+
+async function tenantSchema(request: Request, sql: any): Promise<string> {
+  const code = (request.headers.get('X-DFS-Tenant') || '').trim();
+  if (!code) throw new TenantError('X-DFS-Tenant header required', 400);
+
+  const rows = await sql`
+    select t.schema_name, t.active as t_active, c.active as c_active, c.expires_at
+      from access_codes c
+      join tenants t on t.id = c.tenant_id
+     where c.code = ${code}
+     limit 1`;
+  if (!rows.length) throw new TenantError('unknown tenant', 403);
+
+  const r = rows[0];
+  if (!r.c_active) throw new TenantError('access suspended', 403);
+  if (!r.t_active) throw new TenantError('tenant suspended', 403);
+  if (r.expires_at && new Date(r.expires_at) < new Date())
+    throw new TenantError('access expired', 403);
+
+  // Interpolated into SQL below, so it is validated rather than trusted —
+  // even though it comes from our own table and not the request.
+  if (!SCHEMA_OK.test(r.schema_name)) throw new TenantError('bad schema name', 500);
+  return r.schema_name;
+}
+
+class TenantError extends Error {
+  status: number;
+  constructor(message: string, status: number) { super(message); this.status = status; }
+}
+
 async function handleDb(request: Request, env: Env, table: string, id: string | null) {
   if (!ALLOWED_TABLES.has(table)) return err(`table not allowed: ${table}`, 403);
   const sql = getSql(env);
   try {
     const url = new URL(request.url);
+    // Tables shared across tenants (login, metering) always live in public.
+    const schema = SHARED_TABLES.has(table) ? 'public' : await tenantSchema(request, sql);
 
     if (request.method === 'GET') {
       if (id) {
-        const rows = await sql.unsafe(`SELECT * FROM public."${table}" WHERE id = $1`, [id]);
+        const rows = await sql.unsafe(`SELECT * FROM "${schema}"."${table}" WHERE id = $1`, [id]);
         return rows.length ? json(rows[0]) : err('not found', 404);
       }
       const { whereSql, params, orderSql, limit } = parseFilters(url);
       const rows = await sql.unsafe(
-        `SELECT * FROM public."${table}" ${whereSql} ${orderSql} LIMIT ${limit || 500}`.trim(),
+        `SELECT * FROM "${schema}"."${table}" ${whereSql} ${orderSql} LIMIT ${limit || 500}`.trim(),
         params);
       return json({ data: rows, count: rows.length });
     }
@@ -208,7 +269,7 @@ async function handleDb(request: Request, env: Env, table: string, id: string | 
       const colSql = cols.map(c => `"${c}"`).join(',');
       const onConflict = url.searchParams.get('on_conflict');
       let sqlText =
-        `INSERT INTO public."${table}" (${colSql}) OVERRIDING SYSTEM VALUE ` +
+        `INSERT INTO "${schema}"."${table}" (${colSql}) OVERRIDING SYSTEM VALUE ` +
         `VALUES ${tuples.join(',')}`;
       if (onConflict) {
         const keys = onConflict.split(',').map(c => c.trim()).filter(c => IDENT.test(c));
@@ -231,19 +292,22 @@ async function handleDb(request: Request, env: Env, table: string, id: string | 
       const params: any[] = [];
       const sets = cols.map(c => `"${c}" = $${params.push(body[c])}`).join(', ');
       const out = await sql.unsafe(
-        `UPDATE public."${table}" SET ${sets} WHERE id = $${params.push(id)} RETURNING *`, params);
+        `UPDATE "${schema}"."${table}" SET ${sets} WHERE id = $${params.push(id)} RETURNING *`, params);
       return out.length ? json({ data: out }) : err('not found', 404);
     }
 
     if (request.method === 'DELETE') {
       if (!id) return err('id required');
       const out = await sql.unsafe(
-        `DELETE FROM public."${table}" WHERE id = $1 RETURNING *`, [id]);
+        `DELETE FROM "${schema}"."${table}" WHERE id = $1 RETURNING *`, [id]);
       return out.length ? json({ data: out }) : err('not found', 404);
     }
 
     return err('method not allowed', 405);
   } catch (e: any) {
+    // A tenant that cannot be resolved is a 403, not a 500 — and must never
+    // fall through to a query, which is why it throws rather than returning.
+    if (e instanceof TenantError) return err(e.message, e.status);
     return err(`db error: ${String(e?.message || e).slice(0, 300)}`, 500);
   } finally {
     await sql.end({ timeout: 5 }).catch(() => {});

@@ -830,6 +830,9 @@ if not st.session_state.get("access_granted"):
         st.session_state.access_name = _msu["name"]
         # The email is the identity for metering; no access-code row exists.
         st.session_state.access_code_id = _msu["email"]
+        # Microsoft sign-in is the DFS team only, so it maps to the owner's
+        # data. A tester never reaches this branch — ms_user() checks domain.
+        st.session_state.access_code = "DFS-MASTER"
         st.session_state.agreed = True
         st.session_state.is_beta = False
         st.rerun()
@@ -853,6 +856,7 @@ if not st.session_state.get("access_granted"):
             # Owner bypass — never touches Supabase
             if clean_code == "DFS-MASTER":
                 st.query_params["k"] = clean_code
+                st.session_state.access_code = clean_code
                 st.session_state.access_granted = True
                 st.session_state.access_name = "Duane"
                 st.session_state.access_code_id = 1
@@ -863,6 +867,8 @@ if not st.session_state.get("access_granted"):
                 name, code_id, err, daily_limit = validate_code(entered_code)
                 if name and code_id:
                     st.query_params["k"] = clean_code
+                    # Identifies the tenant on every API call — see _neon_headers.
+                    st.session_state.access_code = clean_code
                     st.session_state.access_granted = True
                     st.session_state.access_name = name
                     st.session_state.access_code_id = code_id
@@ -961,9 +967,27 @@ def sb_headers():
 WORKER_KEY = get_secret("worker", "key", "")
 
 def _neon_headers():
+    """Two headers, two different jobs.
+
+    X-DFS-Key proves the request came from this deployment. X-DFS-Tenant says
+    whose data to read, and is the signed-in person's access code — the Worker
+    maps it to a Postgres schema.
+
+    No fallback when the code is missing. Defaulting to the owner would mean a
+    bug that loses the session shows a tester someone else's purchase costs,
+    so the call fails instead (400 from the Worker). Login itself reads
+    access_codes, which the Worker treats as shared and never tenant-scopes,
+    so signing in still works before a tenant is known.
+    """
+    code = ""
+    try:
+        code = (st.session_state.get("access_code") or "").strip()
+    except Exception:
+        pass
     return {
         "Content-Type": "application/json",
         **({"X-DFS-Key": WORKER_KEY} if WORKER_KEY else {}),
+        **({"X-DFS-Tenant": code} if code else {}),
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     }
 
