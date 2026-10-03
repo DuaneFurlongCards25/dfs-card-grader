@@ -2998,8 +2998,31 @@ def _show_admin():
     codes = admin_get_codes()
     now_utc = _dt_adm.datetime.utcnow().replace(tzinfo=_dt_adm.timezone.utc)
 
+    # Which tenant each code reads. A code created here has no tenant, so the
+    # Worker refuses it — the person gets "unknown tenant" and cannot sign in,
+    # with nothing on this screen explaining why. Worse, a code pointing at
+    # `public` would show them Duane's books. Both now say so, in place.
+    _tenant_by_id = {}
+    try:
+        for _t in (_neon_get("tenants") or []):
+            _tenant_by_id[_t["id"]] = _t
+    except Exception:
+        pass
+
     st.markdown(f"### 👥 Access Codes ({len(codes)} total)")
     for row in codes:
+        _ten = _tenant_by_id.get(row.get("tenant_id"))
+        if _ten is None:
+            st.warning(
+                f"**{row['name']}** has no workspace — this code cannot sign in. "
+                f"Give it one (their own empty data):  \n"
+                f"`python3 provision_tenant.py --attach {row['code']} "
+                f"{re.sub(r'[^a-z0-9]', '', (row['name'] or 'tester').lower())[:20] or 'tester'}`")
+        elif _ten.get("schema_name") == "public" and row["code"] != "DFS-MASTER":
+            st.error(
+                f"⚠️ **{row['name']}** reads YOUR data (schema `public`). "
+                f"Revoke it, or move them to their own workspace with "
+                f"`provision_tenant.py --attach`.")
         c1, c2, c3, c4, c5, c6 = st.columns([2, 2, 1, 1, 1, 2])
         c1.markdown(f"**{row['name']}**")
         c2.code(row["code"])

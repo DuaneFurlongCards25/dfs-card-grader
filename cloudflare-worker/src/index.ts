@@ -73,6 +73,8 @@ const ALLOWED_TABLES = new Set([
   'consignment_items', 'consignment_lots', 'consignment_shipments',
   // app plumbing
   'access_codes', 'pricing_usage',
+  // Owner-only; see the guard in handleDb.
+  'tenants',
 ]);
 
 /**
@@ -242,6 +244,11 @@ async function handleDb(request: Request, env: Env, table: string, id: string | 
   try {
     const url = new URL(request.url);
     // Tables shared across tenants (login, metering) always live in public.
+    // `tenants` is the exception among them: it is the list of everyone using
+    // CardPulse, so only the owner's account may read it — otherwise any
+    // tester could enumerate the others.
+    if (table === 'tenants' && (await tenantSchema(request, sql)) !== 'public')
+      return err('owner only', 403);
     const schema = SHARED_TABLES.has(table) ? 'public' : await tenantSchema(request, sql);
 
     if (request.method === 'GET') {

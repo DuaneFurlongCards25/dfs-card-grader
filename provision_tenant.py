@@ -138,6 +138,38 @@ def provision(url: str, name: str, slug: str) -> None:
     print(f"   They sign in with that code and see only their own data.")
 
 
+def attach(url: str, code: str, slug: str) -> None:
+    """Point a code made in the Admin panel at its own tenant.
+
+    The Admin panel predates tenants: it writes an access_codes row with no
+    tenant_id, and the Worker then refuses it as "unknown tenant". Rather
+    than issuing a second code and asking someone to ignore the first, this
+    gives the existing code a schema — so a code already sent still works.
+    """
+    code = code.strip().upper()
+    if not psql(url, f"select 1 from access_codes where code = '{code}'"):
+        sys.exit(f"no access code '{code}' — check the Admin panel")
+    owned = psql(url, f"""select t.slug from access_codes c join tenants t on t.id = c.tenant_id
+                           where c.code = '{code}'""")
+    if owned:
+        sys.exit(f"{code} already belongs to tenant '{owned}'")
+
+    name = psql(url, f"select name from access_codes where code = '{code}'") or slug
+    if not psql(url, f"select 1 from tenants where slug = '{slug}'"):
+        provision(url, name, slug)
+        # provision() issues its own code; this one replaces it, so the person
+        # keeps the code they were given.
+        psql(url, f"""delete from access_codes
+                       where tenant_id = (select id from tenants where slug = '{slug}')
+                         and code <> '{code}'""")
+    psql(url, f"""update access_codes
+                     set tenant_id = (select id from tenants where slug = '{slug}'),
+                         daily_limit = coalesce(daily_limit, 25)
+                   where code = '{code}'""")
+    schema = psql(url, f"select schema_name from tenants where slug = '{slug}'")
+    print(f"\n✅ {code} ({name}) now reads schema {schema} — their own empty data.")
+
+
 def rewrite_schema(ddl: str, schema: str) -> str:
     """Point a public-schema dump at `schema` instead.
 
@@ -184,6 +216,8 @@ def main() -> None:
     ap.add_argument("slug", nargs="?", help="short id, e.g. robert")
     ap.add_argument("--list", action="store_true", help="show tenants and row counts")
     ap.add_argument("--drop", metavar="SLUG", help="delete a tenant and ALL their data")
+    ap.add_argument("--attach", nargs=2, metavar=("CODE", "SLUG"),
+                    help="give an existing Admin-panel code its own tenant")
     a = ap.parse_args()
 
     url = db_url()
@@ -191,6 +225,8 @@ def main() -> None:
         list_tenants(url)
     elif a.drop:
         drop(url, a.drop)
+    elif a.attach:
+        attach(url, a.attach[0], a.attach[1])
     elif a.name and a.slug:
         provision(url, a.name, a.slug)
     else:
