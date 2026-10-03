@@ -575,6 +575,42 @@ def gen_code():
 def admin_get_codes():
     return _neon_get("access_codes", "?order=id.asc")
 
+
+# ─── Support tickets ──────────────────────────────────────────────────────────
+# Tenants are isolated by schema, so a ticket written into a tester's own
+# schema would be invisible to Duane — the one thing a support channel cannot
+# be. These rows live in public and the Worker scopes them: a tester sees only
+# their own, and the tenant is stamped from their access code, not the form.
+
+def support_submit(kind, subject, body, where_in_app=""):
+    return _neon_post("support_tickets", [{
+        "from_name": st.session_state.get("access_name") or "unknown",
+        "kind": kind, "subject": (subject or "").strip()[:200],
+        "body": (body or "").strip(), "where_in_app": where_in_app,
+        # tenant_slug and status are set by the Worker; anything sent here for
+        # them is overwritten, so a tester cannot file into someone else's queue.
+    }])
+
+
+def support_my_tickets():
+    """This signed-in person's tickets. Empty for anyone not signed in yet."""
+    if not st.session_state.get("access_granted"):
+        return []
+    try:
+        return _neon_get("support_tickets", "?order=created_at.desc&limit=25") or []
+    except Exception:
+        return []
+
+
+def support_open_count():
+    """Unanswered tickets — the number behind Duane's 🔔."""
+    if not is_owner_account():
+        return 0
+    try:
+        return len(_neon_get("support_tickets", "?status=eq.open&limit=200") or [])
+    except Exception:
+        return 0
+
 def admin_insert_code(code, name, trial_days=None):
     import datetime as _dt
     payload = {"code": code, "name": name}
@@ -2907,10 +2943,21 @@ with st.sidebar:
     if st.button("📖 How to Maximize This App", use_container_width=True, key="open_guide_btn"):
         st.session_state["show_guide"] = True
 
+    # ── Help & suggestions ────────────────────────────────────────────────────
+    # A tester who hits a wall otherwise has only a text message to Duane, at
+    # which point nobody knows which screen they were on or what the app said.
+    if st.button("💬 Help / Suggestion", use_container_width=True, key="open_support_btn"):
+        st.session_state["show_support"] = True
+    _my_open = len([t for t in support_my_tickets() if t.get("status") != "closed"])
+    if _my_open:
+        st.caption(f"📬 {_my_open} open with Duane")
+
     # ── Admin (Duane only) ────────────────────────────────────────────────────
     if is_owner_account():
         st.markdown("---")
-        if st.button("🔐 Admin Panel", use_container_width=True, key="open_admin_btn"):
+        _open_n = support_open_count()
+        if st.button(f"🔐 Admin Panel{f'  ·  🔔 {_open_n}' if _open_n else ''}",
+                     use_container_width=True, key="open_admin_btn"):
             st.session_state["show_admin"] = True
 
     st.markdown("---")
@@ -2920,6 +2967,39 @@ with st.sidebar:
 def _show_guide():
     st.markdown("### Get the most out of every feature")
     _GUIDE_SECTIONS = [
+        ("👋", "Start here — your workspace",
+         [
+             "**Everything you enter is yours alone.** Your cards, costs and sales sit in "
+             "your own private database. Nobody else using CardPulse can see them, and you "
+             "cannot see theirs.",
+             "You start empty. The fastest way to fill it is **🗃️ Inventory → Intake** — "
+             "drop in an export from Heystack or Card Dealer Pro and every card arrives "
+             "with its photos, player, set, parallel and condition already filled in.",
+             "No scanner export? Add cards one at a time in **🗃️ Inventory → Cards**, or "
+             "start with **🔍 Card Research** to price something before you buy it.",
+             "Pricing look-ups are metered — the sidebar shows how many you have left "
+             "today. Ask Duane if you need more.",
+             "Stuck, or something looks wrong? **💬 Help / Suggestion** in the sidebar "
+             "goes straight to him, and tells him which screen you were on.",
+         ]),
+        ("🗃️", "Inventory — the master record",
+         [
+             "Every card you own, listed or not. Cards worth tracking individually get "
+             "their own row; bulk is counted and located by the box.",
+             "**Intake** reads a scanner export and routes each card by its file prefix, "
+             "so photos land on the right person's card without renaming anything.",
+             "**Location** is B#-R#-P# (box, row, position) — the point is being able to "
+             "physically find a card the day it sells.",
+             "**Delist Queue** is what to pull down elsewhere when something sells, so you "
+             "never sell the same physical card twice.",
+         ]),
+        ("🧮", "Calculator — before you buy",
+         [
+             "Enter a purchase price and a sell price to see the real net after fees, "
+             "supplies and shipping — eBay and CollX take very different cuts.",
+             "Work backwards instead: set a target margin and it tells you the most you "
+             "can pay for the card.",
+         ]),
         ("🔍", "Card Research — your first stop",
          [
              "Type any player, year, set, or parallel into the search bar — no image needed.",
@@ -2986,6 +3066,58 @@ def _show_guide():
             unsafe_allow_html=True,
         )
 
+# ─── Help / suggestion dialog ─────────────────────────────────────────────────
+@st.dialog("💬 Help & Suggestions", width="large")
+def _show_support():
+    st.caption("Goes straight to Duane. He sees it next time he opens CardPulse.")
+    _kind = st.radio("What is it?",
+                     ["🐛 Something's broken", "💡 Suggestion", "❓ Question"],
+                     horizontal=True, key="sup_kind")
+    _subject = st.text_input("One line summary",
+                             placeholder="e.g. Can't save a purchase lot")
+    _body = st.text_area(
+        "What happened?", height=140,
+        placeholder="What you were doing, what you expected, and what the app "
+                    "said. If there was an error message, paste it here.")
+    # The screen they were on is the first thing Duane would otherwise have to
+    # ask for, and the one thing they are least likely to volunteer.
+    # Looked up at call time: this dialog can be opened from the sidebar before
+    # _NAV_LABELS is defined further down the script, and a NameError here
+    # would break the one screen someone reaches when something is already
+    # wrong.
+    _nav = globals().get("_NAV_LABELS") or []
+    _where = st.selectbox("Which screen?", ["(not sure)"] + list(_nav), key="sup_where")
+    if st.button("Send to Duane", type="primary", use_container_width=True):
+        if len((_body or "").strip()) < 10:
+            st.error("Add a bit more detail — a sentence or two is plenty.")
+        else:
+            kind = {"🐛 Something's broken": "problem", "💡 Suggestion": "suggestion",
+                    "❓ Question": "question"}[_kind]
+            if support_submit(kind, _subject, _body,
+                              "" if _where == "(not sure)" else _where) is not None:
+                st.success("Sent. Duane will come back to you.")
+                st.session_state["show_support"] = False
+                st.rerun()
+            else:
+                st.error(f"Couldn't send: {_neon_last_error['msg'] or 'unknown error'}. "
+                         "Text Duane directly if this keeps happening.")
+
+    _mine = support_my_tickets()
+    if _mine:
+        st.markdown("---")
+        st.markdown("##### Your previous messages")
+        for _t in _mine[:8]:
+            _icon = {"problem": "🐛", "suggestion": "💡"}.get(_t.get("kind"), "❓")
+            _stat = {"open": "⏳ waiting", "answered": "✅ answered",
+                     "closed": "closed"}.get(_t.get("status"), _t.get("status"))
+            st.markdown(f"{_icon} **{_t.get('subject') or _t['body'][:60]}** — {_stat}  \n"
+                        f"<span style='color:#64748b;font-size:0.78rem;'>"
+                        f"{(_t.get('created_at') or '')[:16]}</span>",
+                        unsafe_allow_html=True)
+            if _t.get("reply"):
+                st.info(f"**Duane:** {_t['reply']}")
+
+
 # ─── Admin dialog (Duane only) ────────────────────────────────────────────────
 @st.dialog(f"🔐 {APP_NAME} — Admin", width="large")
 def _show_admin():
@@ -2994,6 +3126,46 @@ def _show_admin():
 
     with st.expander("🛠 First-time setup SQL (run once in Neon if daily limits aren't saving)", expanded=False):
         st.code("alter table access_codes add column if not exists daily_limit integer;", language="sql")
+
+    # ── Support queue ─────────────────────────────────────────────────────────
+    _tickets = _neon_get("support_tickets", "?order=created_at.desc&limit=100") or []
+    _open_t = [t for t in _tickets if t.get("status") == "open"]
+    st.markdown(f"### 💬 Support ({len(_open_t)} open)")
+    if not _tickets:
+        st.caption("No messages yet.")
+    for _t in _tickets[:25]:
+        _icon = {"problem": "🐛", "suggestion": "💡"}.get(_t.get("kind"), "❓")
+        _is_open = _t.get("status") == "open"
+        with st.expander(
+                f"{_icon} {_t.get('subject') or (_t.get('body') or '')[:60]} — "
+                f"**{_t.get('from_name')}** ({_t.get('tenant_slug')})"
+                f"{'  ⏳' if _is_open else '  ✅'}",
+                expanded=_is_open):
+            st.caption(f"{(_t.get('created_at') or '')[:16]}"
+                       + (f" · on **{_t['where_in_app']}**" if _t.get("where_in_app") else ""))
+            st.markdown(_t.get("body") or "")
+            if _t.get("reply"):
+                st.info(f"Your reply: {_t['reply']}")
+            if _is_open:
+                _r = st.text_area("Reply (they see this in the app)",
+                                  key=f"sup_reply_{_t['id']}", height=80)
+                _rc1, _rc2 = st.columns(2)
+                if _rc1.button("Send reply", key=f"sup_send_{_t['id']}",
+                               use_container_width=True, type="primary"):
+                    _neon_patch("support_tickets", _t["id"],
+                                {"reply": _r, "status": "answered",
+                                 "answered_at": _dt_adm.datetime.utcnow()
+                                 .strftime("%Y-%m-%dT%H:%M:%SZ")})
+                    st.session_state.pop("_sup_checked", None)
+                    st.session_state["_sup_open"] = 0
+                    st.rerun()
+                if _rc2.button("Close without reply", key=f"sup_close_{_t['id']}",
+                               use_container_width=True):
+                    _neon_patch("support_tickets", _t["id"], {"status": "closed"})
+                    st.session_state.pop("_sup_checked", None)
+                    st.session_state["_sup_open"] = 0
+                    st.rerun()
+    st.markdown("---")
 
     codes = admin_get_codes()
     now_utc = _dt_adm.datetime.utcnow().replace(tzinfo=_dt_adm.timezone.utc)
@@ -3138,9 +3310,34 @@ if st.session_state.get("show_guide"):
     st.session_state["show_guide"] = False
     _show_guide()
 
+if st.session_state.get("show_support"):
+    st.session_state["show_support"] = False
+    _show_support()
+
 if st.session_state.get("show_admin") and is_owner_account():
     st.session_state["show_admin"] = False
     _show_admin()
+
+# ─── "Someone needs help" ─────────────────────────────────────────────────────
+# Duane asked to be notified rather than having to go looking. Two levels: a
+# toast once per session so it is not nagging, and a banner that stays until
+# the queue is empty — a toast alone disappears while he is mid-task and the
+# ticket is then never seen.
+if is_owner_account() and not st.session_state.get("_sup_checked"):
+    st.session_state["_sup_checked"] = True
+    st.session_state["_sup_open"] = support_open_count()
+    if st.session_state["_sup_open"]:
+        st.toast(f"🔔 {st.session_state['_sup_open']} support message(s) waiting",
+                 icon="💬")
+
+if is_owner_account() and st.session_state.get("_sup_open"):
+    _n = st.session_state["_sup_open"]
+    _b1, _b2 = st.columns([5, 1])
+    _b1.warning(f"🔔 **{_n} support message{'s' if _n != 1 else ''}** waiting from "
+                f"your testers.")
+    if _b2.button("Read", use_container_width=True, key="sup_banner_open"):
+        st.session_state["show_admin"] = True
+        st.rerun()
 
 # ─── Dashboard KPI tiles ──────────────────────────────────────────────────────
 if not is_beta and SUPABASE_URL:

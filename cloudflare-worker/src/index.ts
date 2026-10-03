@@ -72,7 +72,7 @@ const ALLOWED_TABLES = new Set([
   // consignment
   'consignment_items', 'consignment_lots', 'consignment_shipments',
   // app plumbing
-  'access_codes', 'pricing_usage',
+  'access_codes', 'pricing_usage', 'support_tickets',
   // Owner-only; see the guard in handleDb.
   'tenants',
 ]);
@@ -85,7 +85,8 @@ const ALLOWED_TABLES = new Set([
  * deliberately shared too: a daily look-up budget that each tenant could
  * reset by writing to their own copy is not a budget.
  */
-const SHARED_TABLES = new Set(['access_codes', 'pricing_usage', 'tenants']);
+const SHARED_TABLES = new Set(['access_codes', 'pricing_usage', 'tenants',
+                               'support_tickets']);
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -209,12 +210,13 @@ function parseFilters(url: URL) {
  */
 const SCHEMA_OK = /^[a-z_][a-z0-9_]*$/;
 
-async function tenantSchema(request: Request, sql: any): Promise<string> {
+async function resolveTenant(request: Request, sql: any): Promise<{ slug: string; schema: string }> {
   const code = (request.headers.get('X-DFS-Tenant') || '').trim();
   if (!code) throw new TenantError('X-DFS-Tenant header required', 400);
 
   const rows = await sql`
-    select t.schema_name, t.active as t_active, c.active as c_active, c.expires_at
+    select t.slug, t.schema_name, t.active as t_active,
+           c.active as c_active, c.expires_at
       from access_codes c
       join tenants t on t.id = c.tenant_id
      where c.code = ${code}
@@ -230,7 +232,11 @@ async function tenantSchema(request: Request, sql: any): Promise<string> {
   // Interpolated into SQL below, so it is validated rather than trusted —
   // even though it comes from our own table and not the request.
   if (!SCHEMA_OK.test(r.schema_name)) throw new TenantError('bad schema name', 500);
-  return r.schema_name;
+  return { slug: r.slug, schema: r.schema_name };
+}
+
+async function tenantSchema(request: Request, sql: any): Promise<string> {
+  return (await resolveTenant(request, sql)).schema;
 }
 
 class TenantError extends Error {
@@ -249,6 +255,34 @@ async function handleDb(request: Request, env: Env, table: string, id: string | 
     // tester could enumerate the others.
     if (table === 'tenants' && (await tenantSchema(request, sql)) !== 'public')
       return err('owner only', 403);
+
+    /**
+     * Support tickets are shared on purpose: Duane has to see a tester's
+     * problem, and a ticket filed into the tester's own schema would be
+     * invisible to him — which is the one thing a support channel must not be.
+     *
+     * So the row is scoped here instead. A tester reads only their own
+     * tickets, and the tenant on a new ticket is stamped from their access
+     * code rather than taken from the request, so it cannot be forged or
+     * mistyped into someone else's queue.
+     */
+    if (table === 'support_tickets') {
+      const t = await resolveTenant(request, sql);
+      if (t.schema !== 'public') {
+        if (request.method === 'DELETE') return err('owner only', 403);
+        if (request.method === 'GET') url.searchParams.set('tenant_slug', `eq.${t.slug}`);
+        if (request.method === 'POST') {
+          const body = await request.json().catch(() => null);
+          const rows = (Array.isArray(body) ? body : [body]).filter(Boolean)
+            .map((r: any) => ({ ...r, tenant_slug: t.slug, status: 'open' }));
+          request = new Request(request.url, {
+            method: 'POST', headers: request.headers, body: JSON.stringify(rows),
+          });
+        }
+        if (request.method === 'PATCH') return err('owner only', 403);
+      }
+    }
+
     const schema = SHARED_TABLES.has(table) ? 'public' : await tenantSchema(request, sql);
 
     if (request.method === 'GET') {
