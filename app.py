@@ -3037,6 +3037,9 @@ def _show_guide():
              "**Then mark them sold in one click** — the sale, the buyer, your cost "
              "and the real postage all land in 💰 Sales & P&L, so you see profit per "
              "card, not just revenue.",
+             "**Record how each buyer paid** — PayPal or Venmo G&S, F&F, Zelle, cash. "
+             "The fee is worked out per order from that, and G&S is flagged, so months "
+             "later you can see which sales were protected and which were not.",
              "**Somebody backs out?** *↩️ Backed out* removes the sale and puts the card "
              "back on the shelf. If they were taking several cards, the postage they "
              "paid moves to the rest of the order instead of disappearing.",
@@ -3516,6 +3519,11 @@ def render_claim_sale(key: str = "cs"):
                 _m1.metric("Claimed", f"{len(_claims)} of {len(_picked)}")
                 _m2.metric("Card sales", f"${_sold:,.2f}")
                 _m3.metric("Buyers", len(_totals))
+                _default_pay = st.selectbox(
+                    "Payment method most of them use",
+                    list(channels.PAYMENT_METHODS), key=f"{key}_defpay",
+                    help="Pre-selects it for each buyer below. Change any one of them "
+                         "individually.")
                 st.markdown("##### What each buyer owes")
                 st.caption("Charged is your flat rate. Paid is what the label actually "
                            "cost — the difference comes out of your pocket, so it is "
@@ -3527,12 +3535,30 @@ def render_claim_sale(key: str = "cs"):
                             _card = next((c for c in _picked if c["sku"] == _it["sku"]), {})
                             st.markdown(f"- {_card.get('title') or _it['sku']} — "
                                         f"${float(_it['price']):,.2f}")
-                        _actual = st.number_input(
+                        _pc1, _pc2 = st.columns(2)
+                        _methods = list(channels.PAYMENT_METHODS)
+                        _bm = _pc1.selectbox(
+                            "How did they pay?", _methods,
+                            index=_methods.index(_default_pay)
+                            if _default_pay in _methods else 0,
+                            key=f"{key}_paym_{_t['buyer']}",
+                            help="G&S costs a fee but is protected. F&F and Zelle are "
+                                 "free with no recourse if they dispute it.")
+                        _actual = _pc2.number_input(
                             "Postage you actually paid ($)", 0.0, step=0.50,
                             value=float(_t["shipping"]),
                             key=f"{key}_ship_actual_{_t['buyer']}",
                             help="The real label cost. Leave as-is if it matched "
                                  "what you charged.")
+                        _bfee = channels.payment_fee(_bm, _t["total"])
+                        if _bm == "Other":
+                            _bfee = st.number_input(
+                                "Fee they cost you ($)", 0.0, step=0.50,
+                                key=f"{key}_fee_{_t['buyer']}")
+                        st.caption(
+                            f"{channels.PAYMENT_METHODS[_bm]['note']}"
+                            + (f"  ·  fee **${_bfee:,.2f}** on ${_t['total']:,.2f}"
+                               if _bfee else ""))
                         _gap = round(float(_actual) - float(_t["shipping"]), 2)
                         st.markdown(
                             f"Cards **${_t['cards_total']:,.2f}** + shipping charged "
@@ -3548,20 +3574,10 @@ def render_claim_sale(key: str = "cs"):
 
                 st.markdown("---")
                 _p1, _p2 = st.columns(2)
-                _pay = _p1.selectbox(
-                    "How were you paid?",
-                    ["Cash / Zelle / Venmo F&F / PayPal F&F — no fee",
-                     "PayPal Goods & Services — 2.99% + $0.49",
-                     "Other — enter the fee yourself"],
-                    key=f"{key}_pay",
-                    help="Charged on the whole order including shipping, which is how "
-                         "the processor actually bills it.")
-                _sale_date = _p2.date_input("Sale date", value=date.today(),
+                _sale_date = _p1.date_input("Sale date", value=date.today(),
                                             key=f"{key}_date")
-                _man_fee = 0.0
-                if _pay.startswith("Other"):
-                    _man_fee = st.number_input("Total fee across all these sales ($)",
-                                               0.0, step=1.0, key=f"{key}_manfee")
+                _p2.caption("Payment method is set per buyer above — one claim sale "
+                            "usually has a Zelle, a Venmo and a PayPal in it.")
 
                 if st.button(f"✅ Mark {len(_claims)} card(s) sold and log the sales",
                              type="primary", use_container_width=True, key=f"{key}_sold"):
@@ -3575,13 +3591,14 @@ def render_claim_sale(key: str = "cs"):
                         # fee is worked out per buyer and then split across their
                         # cards — otherwise the $0.49 is charged once per card
                         # and the P&L understates every claim sale.
-                        if _pay.startswith("PayPal Goods"):
-                            _order_fee = round(_t["total"] * 0.0299 + 0.49, 2)
-                        elif _pay.startswith("Other"):
-                            _order_fee = round(_man_fee * (_t["total"] / sum(
-                                x["total"] for x in _totals)), 2) if _totals else 0.0
-                        else:
-                            _order_fee = 0.0
+                        _bmethod = st.session_state.get(
+                            f"{key}_paym_{_t['buyer']}", "Cash / in person")
+                        _order_fee = (
+                            float(st.session_state.get(f"{key}_fee_{_t['buyer']}", 0) or 0)
+                            if _bmethod == "Other"
+                            else channels.payment_fee(_bmethod, _t["total"]))
+                        _is_gs = bool(channels.PAYMENT_METHODS.get(
+                            _bmethod, {}).get("gs"))
                         _order_fee_total += _order_fee
                         _order_id = f"CLAIM-{_sale_date:%Y%m%d}-" + \
                                     re.sub(r"[^A-Za-z0-9]", "", _t["buyer"])[:12].upper()
@@ -3622,6 +3639,8 @@ def render_claim_sale(key: str = "cs"):
                                 "platform_fee": _share,
                                 "net_proceeds": round(_gross - _share, 2),
                                 "buyer": _t["buyer"],        # customer history
+                                "payment_method": _bmethod,
+                                "goods_services": _is_gs,
                                 "item_cost": _cost or None,  # COGS, for profit
                                 "shipping_cost": _ship_paid or None,
                                 "status": "completed",

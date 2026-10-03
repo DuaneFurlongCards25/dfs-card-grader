@@ -419,6 +419,41 @@ def fb_caption(card, *, price=None, note: str = "", tagline: str = "",
     return "\n".join(l for l in lines if l)
 
 
+# How buyers actually pay in these groups, and what each costs the seller.
+# Goods & Services is the one that carries seller protection; friends-and-
+# family and Zelle do not, which is why the distinction is recorded rather
+# than assumed — it decides both the fee and whether there is any recourse.
+PAYMENT_METHODS = {
+    "PayPal G&S":      {"pct": 0.0299, "fixed": 0.49, "gs": True,
+                        "note": "2.99% + $0.49. Protected."},
+    "PayPal F&F":      {"pct": 0.0,    "fixed": 0.0,  "gs": False,
+                        "note": "Free, but no protection and against PayPal's terms "
+                                "for goods."},
+    "Venmo G&S":       {"pct": 0.019,  "fixed": 0.10, "gs": True,
+                        "note": "1.9% + $0.10 on a business profile. Protected."},
+    "Venmo F&F":       {"pct": 0.0,    "fixed": 0.0,  "gs": False,
+                        "note": "Free, no protection."},
+    "Zelle":           {"pct": 0.0,    "fixed": 0.0,  "gs": False,
+                        "note": "Free and instant, but no protection and no reversals."},
+    "Cash / in person":{"pct": 0.0,    "fixed": 0.0,  "gs": False, "note": "Free."},
+    "Other":           {"pct": 0.0,    "fixed": 0.0,  "gs": False,
+                        "note": "Enter the fee yourself."},
+}
+
+
+def payment_fee(method: str, order_total: float) -> float:
+    """What the processor takes from one order.
+
+    Charged on the whole order including shipping, which is how they bill it —
+    worked out per order, never per card, or the fixed part is counted once
+    for every card in a multi-card claim.
+    """
+    m = PAYMENT_METHODS.get(method) or PAYMENT_METHODS["Other"]
+    if not m["pct"] and not m["fixed"]:
+        return 0.0
+    return round(_money(order_total) * m["pct"] + m["fixed"], 2)
+
+
 DEFAULT_SHIP_NOTE = ("Shipping is $6 bubble mailer with tracking for as many cards "
                      "as you buy! $10 priority mail for orders over $350+")
 
