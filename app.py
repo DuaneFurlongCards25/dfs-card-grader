@@ -3423,22 +3423,97 @@ def render_claim_sale(key: str = "cs"):
                             f"${_t['cards_total']:,.2f} + ${_t['shipping']:,.2f} shipping "
                             f"= ${_t['total']:,.2f} total. Thanks!", language=None)
 
-                if st.button(f"✅ Mark {len(_claims)} claimed card(s) as sold",
+                st.markdown("---")
+                _p1, _p2 = st.columns(2)
+                _pay = _p1.selectbox(
+                    "How were you paid?",
+                    ["Cash / Zelle / Venmo F&F / PayPal F&F — no fee",
+                     "PayPal Goods & Services — 2.99% + $0.49",
+                     "Other — enter the fee yourself"],
+                    key=f"{key}_pay",
+                    help="Charged on the whole order including shipping, which is how "
+                         "the processor actually bills it.")
+                _sale_date = _p2.date_input("Sale date", value=date.today(),
+                                            key=f"{key}_date")
+                _man_fee = 0.0
+                if _pay.startswith("Other"):
+                    _man_fee = st.number_input("Total fee across all these sales ($)",
+                                               0.0, step=1.0, key=f"{key}_manfee")
+
+                if st.button(f"✅ Mark {len(_claims)} card(s) sold and log the sales",
                              type="primary", use_container_width=True, key=f"{key}_sold"):
-                    _ok = 0
-                    for _c in _claims:
-                        _row = next((r for r in _all if r["sku"] == _c["sku"]), None)
-                        if not _row:
-                            continue
-                        if _neon_patch("inventory_cards", _row["id"],
-                                       {"status": "sold",
-                                        "status_updated_at": datetime.utcnow()
-                                        .strftime("%Y-%m-%dT%H:%M:%SZ")}) is not None:
-                            _ok += 1
+                    _marked, _logged, _failed = 0, 0, 0
+                    _order_fee_total = 0.0
+                    for _t in _totals:
+                        # The processor charges the order, not the card, so the
+                        # fee is worked out per buyer and then split across their
+                        # cards — otherwise the $0.49 is charged once per card
+                        # and the P&L understates every claim sale.
+                        if _pay.startswith("PayPal Goods"):
+                            _order_fee = round(_t["total"] * 0.0299 + 0.49, 2)
+                        elif _pay.startswith("Other"):
+                            _order_fee = round(_man_fee * (_t["total"] / sum(
+                                x["total"] for x in _totals)), 2) if _totals else 0.0
+                        else:
+                            _order_fee = 0.0
+                        _order_fee_total += _order_fee
+                        _order_id = f"CLAIM-{_sale_date:%Y%m%d}-" + \
+                                    re.sub(r"[^A-Za-z0-9]", "", _t["buyer"])[:12].upper()
+
+                        for _i, _it in enumerate(_t["items"]):
+                            _row = next((r for r in _all if r["sku"] == _it["sku"]), None)
+                            _price = float(_it["price"] or 0)
+                            # Shipping lands on the buyer's first card so their
+                            # order totals to exactly what they paid, and is not
+                            # counted once per card.
+                            _ship = _t["shipping"] if _i == 0 else 0.0
+                            _share = round(_order_fee * (_price / _t["cards_total"]), 2) \
+                                if _t["cards_total"] else 0.0
+                            _title = (_row or {}).get("title") or _it["sku"]
+                            _gross = round(_price + _ship, 2)
+                            _rec = {
+                                "source": "manual",
+                                "order_id": _order_id,
+                                "sale_date": str(_sale_date),
+                                "title": _title,
+                                "sku": _it["sku"],      # links the sale to the card
+                                "item_number": None,
+                                "quantity": 1,
+                                "sale_price": _price,
+                                "shipping_collected": _ship,
+                                "gross_revenue": _gross,
+                                "platform_fee": _share,
+                                "net_proceeds": round(_gross - _share, 2),
+                                "status": "completed",
+                                # Re-clicking the button must not double-count
+                                # the sale; the SKU and date make it idempotent.
+                                "dedup_key": f"claim|{_it['sku']}|{_sale_date}|{_price:.2f}",
+                            }
+                            if _neon_post("sales_records", _rec,
+                                          on_conflict="dedup_key") is not None:
+                                _logged += 1
+                            else:
+                                _failed += 1
+                            if _row and _neon_patch(
+                                    "inventory_cards", _row["id"],
+                                    {"status": "sold",
+                                     "status_updated_at": datetime.utcnow()
+                                     .strftime("%Y-%m-%dT%H:%M:%SZ")}) is not None:
+                                _marked += 1
+
                     st.session_state.pop("inv_cards", None)
-                    st.success(f"✅ {_ok} card(s) marked sold. Log the money in "
-                               f"**💰 Sales & P&L → Import → Manual entry** so it "
-                               f"reaches your P&L.")
+                    st.session_state.pop("sal_data", None)
+                    if _failed:
+                        st.error(f"{_logged} sale(s) logged, **{_failed} failed** — "
+                                 f"{_neon_last_error['msg'] or ''}. "
+                                 f"{_marked} card(s) marked sold.")
+                    else:
+                        st.success(
+                            f"✅ {_marked} card(s) sold · {_logged} sale(s) logged to "
+                            f"**💰 Sales & P&L** · "
+                            f"${sum(t['total'] for t in _totals):,.2f} collected"
+                            + (f" · ${_order_fee_total:,.2f} in fees" if _order_fee_total
+                               else " · no fees"))
 
 
 # ─── Help / suggestion dialog ─────────────────────────────────────────────────
