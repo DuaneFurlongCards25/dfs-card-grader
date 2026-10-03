@@ -3034,8 +3034,12 @@ def _show_guide():
              "buyer's total with shipping combined — one charge however many cards they "
              "take — and writes the message you send them. That is the arithmetic that "
              "goes wrong by hand at eleven at night with forty comments to read.",
-             "**Then mark them sold in one click**, and log the money in 💰 Sales & P&L "
-             "so the channel shows up in your numbers.",
+             "**Then mark them sold in one click** — the sale, the buyer, your cost "
+             "and the real postage all land in 💰 Sales & P&L, so you see profit per "
+             "card, not just revenue.",
+             "**Somebody backs out?** *↩️ Backed out* removes the sale and puts the card "
+             "back on the shelf. If they were taking several cards, the postage they "
+             "paid moves to the rest of the order instead of disappearing.",
              "The handwritten name-and-date card in your photo is a group rule and is "
              "yours to write — nothing here touches it.",
          ]),
@@ -3282,8 +3286,9 @@ def render_claim_sale(key: str = "cs"):
                 "then come back to build a sale.")
         return
 
-    _t1, _t2, _t4, _t3 = st.tabs(["1️⃣ Pick cards", "2️⃣ Facebook / Discord",
-                                  "📸 Instagram", "3️⃣ Claims & totals"])
+    _t1, _t2, _t4, _t3, _t5 = st.tabs(["1️⃣ Pick cards", "2️⃣ Facebook / Discord",
+                                       "📸 Instagram", "3️⃣ Claims & totals",
+                                       "↩️ Backed out"])
 
     _sel_key = f"{key}_picked"
     st.session_state.setdefault(_sel_key, [])
@@ -3673,6 +3678,74 @@ def render_claim_sale(key: str = "cs"):
                             st.info(f"{_unknown_cost} card(s) had no cost recorded, so "
                                     f"profit excludes them. Add it in the **Cost** column "
                                     f"on *1️⃣ Pick cards* and re-run to correct it.")
+
+    with _t5:
+        # Claims fall through. Someone commits in a comment and never pays, or
+        # asks to swap a card. Without this the card is stuck "sold", invisible
+        # to the next sale, and the P&L counts money that never arrived.
+        st.caption("Buyer backed out, or you logged the wrong card? Undo it here — "
+                   "the sale is removed and the card goes back on the shelf.")
+        _recent = [s for s in (_neon_get(
+            "sales_records", "?order=sale_date.desc&limit=300") or [])
+            if (s.get("buyer") or "").strip()]
+        if not _recent:
+            st.info("No logged sales with a buyer yet.")
+        else:
+            _pick = st.multiselect(
+                "Which sale(s)?",
+                options=[s["id"] for s in _recent],
+                format_func=lambda i: (lambda s: (
+                    f"{s.get('sale_date', '')[:10]} · {s.get('buyer')} · "
+                    f"{s.get('title') or s.get('sku')} · "
+                    f"${float(s.get('sale_price') or 0):,.2f}"))(
+                    next(x for x in _recent if x["id"] == i)),
+                key=f"{key}_undo_pick")
+            _back_to = st.selectbox("Put the card back as",
+                                    ["listed", "priced", "intake"],
+                                    key=f"{key}_undo_status")
+            if _pick and st.button(f"↩️ Undo {len(_pick)} sale(s)",
+                                   type="primary", use_container_width=True,
+                                   key=f"{key}_undo_go"):
+                _undone, _moved = 0, 0
+                for _id in _pick:
+                    _s = next((x for x in _recent if x["id"] == _id), None)
+                    if not _s:
+                        continue
+                    # The buyer's shipping and any card still in the order were
+                    # recorded on one row. Deleting that row would erase postage
+                    # the buyer actually paid for the cards they kept, so it
+                    # moves to a surviving row in the same order first.
+                    _ship = float(_s.get("shipping_collected") or 0)
+                    if _ship and _s.get("order_id"):
+                        _sibs = [x for x in _recent
+                                 if x.get("order_id") == _s["order_id"]
+                                 and x["id"] != _s["id"] and x["id"] not in _pick]
+                        if _sibs:
+                            _sib = _sibs[0]
+                            _neon_patch("sales_records", _sib["id"], {
+                                "shipping_collected": _ship,
+                                "shipping_cost": _s.get("shipping_cost"),
+                                "gross_revenue": round(
+                                    float(_sib.get("gross_revenue") or 0) + _ship, 2),
+                                "net_proceeds": round(
+                                    float(_sib.get("net_proceeds") or 0) + _ship, 2),
+                            })
+                            _moved += 1
+                    if _neon_delete("sales_records", _s["id"]) is not None:
+                        _undone += 1
+                    _row = next((r for r in _all if r.get("sku") == _s.get("sku")), None)
+                    if _row:
+                        _neon_patch("inventory_cards", _row["id"], {
+                            "status": _back_to,
+                            "status_updated_at": datetime.utcnow()
+                            .strftime("%Y-%m-%dT%H:%M:%SZ")})
+                st.session_state.pop("inv_cards", None)
+                st.session_state.pop("sal_data", None)
+                st.success(
+                    f"↩️ {_undone} sale(s) undone, card(s) back as **{_back_to}**."
+                    + (f" Shipping moved to the rest of the order on {_moved} order(s)."
+                       if _moved else ""))
+                st.rerun()
 
 
 # ─── Help / suggestion dialog ─────────────────────────────────────────────────
