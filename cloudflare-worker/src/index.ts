@@ -87,6 +87,9 @@ const ALLOWED_TABLES = new Set([
  */
 const SHARED_TABLES = new Set(['access_codes', 'pricing_usage', 'tenants',
                                'support_tickets']);
+// Same list for SQL: a shared table lives only in public and must never be
+// copied into a tenant schema by the drift repair.
+const SHARED_LIST = [...SHARED_TABLES, 'support_log'];
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -355,6 +358,119 @@ async function handleDb(request: Request, env: Env, table: string, id: string | 
   }
 }
 
+// ── Tenant schema drift ─────────────────────────────────────────────────────
+/**
+ * Keep every tenant's tables identical to the owner's.
+ *
+ * A new feature ships DDL. It is applied to `public`, where the owner works,
+ * and the tenant schemas are left behind — so a tester hits "column does not
+ * exist" on a feature that is perfect from the owner's account, invisible to
+ * him and impossible for them to describe.
+ *
+ * A command-line script existed for this and relied on someone remembering to
+ * run it, which is not a plan. The app checks on its own and offers the fix.
+ *
+ * This is the only route that runs DDL, so it is narrow on purpose:
+ *   - owner only (schema `public`);
+ *   - it compares against `public`'s own catalog and generates the statements
+ *     itself — nothing in the request body becomes SQL;
+ *   - identifiers are validated even though they come from our own catalog;
+ *   - it only ever ADDs. Nothing is dropped or altered, so the worst outcome
+ *     of a bug here is a column nobody uses.
+ */
+const IDENT_OK = /^[a-z_][a-z0-9_]*$/;
+const TYPE_OK = /^[a-z0-9_ ()\[\],."']+$/i;
+
+async function tenantDrift(request: Request, env: Env, apply: boolean) {
+  const sql = getSql(env);
+  try {
+    if ((await tenantSchema(request, sql)) !== 'public') return err('owner only', 403);
+
+    const tenants = await sql`
+      select slug, schema_name from tenants
+       where schema_name <> 'public' and active order by id`;
+
+    const wanted = await sql`
+      select table_name from information_schema.tables
+       where table_schema = 'public' and table_type = 'BASE TABLE'
+         and table_name <> all(${SHARED_LIST})
+       order by table_name`;
+
+    const report: any[] = [];
+    for (const t of tenants) {
+      if (!IDENT_OK.test(t.schema_name)) continue;
+      const have = new Set((await sql`
+        select table_name from information_schema.tables
+         where table_schema = ${t.schema_name} and table_type = 'BASE TABLE'`)
+        .map((r: any) => r.table_name));
+
+      const missingTables: string[] = [];
+      const missingCols: any[] = [];
+      for (const w of wanted) {
+        const name = w.table_name;
+        if (!IDENT_OK.test(name)) continue;
+        if (!have.has(name)) { missingTables.push(name); continue; }
+        // format_type, not information_schema.data_type: the latter reports
+        // numeric without its precision, calling two different columns equal.
+        const cols = await sql`
+          select a.attname as name,
+                 format_type(a.atttypid, a.atttypmod) as type,
+                 coalesce(pg_get_expr(d.adbin, d.adrelid), '') as dflt,
+                 a.attrelid::regclass::text as src
+            from pg_attribute a
+            left join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
+           where a.attrelid = ${'public."' + name + '"'}::regclass
+             and a.attnum > 0 and not a.attisdropped`;
+        const theirs = new Set((await sql`
+          select attname from pg_attribute
+           where attrelid = ${t.schema_name + '."' + name + '"'}::regclass
+             and attnum > 0 and not attisdropped`).map((r: any) => r.attname));
+        for (const c of cols) {
+          if (!theirs.has(c.name) && IDENT_OK.test(c.name) && TYPE_OK.test(c.type))
+            missingCols.push({ table: name, column: c.name, type: c.type });
+        }
+      }
+
+      let applied = 0;
+      if (apply && (missingTables.length || missingCols.length)) {
+        for (const name of missingTables) {
+          // LIKE copies types, defaults, identity, constraints and indexes
+          // from the live table, so a new table cannot arrive already stale.
+          await sql.unsafe(`CREATE TABLE "${t.schema_name}"."${name}" ` +
+                           `(LIKE public."${name}" INCLUDING ALL)`);
+          applied++;
+        }
+        for (const c of missingCols) {
+          // No NOT NULL: an existing tenant row has no value for a new
+          // column, and the migration would fail on it.
+          await sql.unsafe(`ALTER TABLE "${t.schema_name}"."${c.table}" ` +
+                           `ADD COLUMN IF NOT EXISTS "${c.column}" ${c.type}`);
+          applied++;
+        }
+      }
+
+      report.push({
+        slug: t.slug, schema: t.schema_name,
+        missing_tables: missingTables,
+        missing_columns: missingCols,
+        behind: missingTables.length + missingCols.length,
+        applied,
+      });
+    }
+    return json({
+      tenants: report,
+      behind: report.filter((r) => r.behind > (apply ? r.applied : 0)).length,
+      total_changes: report.reduce((n, r) => n + r.behind, 0),
+      applied: report.reduce((n, r) => n + r.applied, 0),
+    });
+  } catch (e: any) {
+    if (e instanceof TenantError) return err(e.message, e.status);
+    return err(`drift: ${String(e?.message || e).slice(0, 300)}`, 500);
+  } finally {
+    await sql.end({ timeout: 5 }).catch(() => {});
+  }
+}
+
 // ── Card images ────────────────────────────────────────────────────────────
 // Heystack and Card Dealer Pro host card photos on their own S3, and those are
 // the URLs their exports carry. Point a Shopify product or an Instagram post
@@ -452,6 +568,10 @@ export default {
     }
 
     if (path === '/api/inventory/mirror' && request.method === 'POST') return mirror(request, env);
+
+    if (path === '/api/tenants/drift') return tenantDrift(request, env, false);
+    if (path === '/api/tenants/migrate' && request.method === 'POST')
+      return tenantDrift(request, env, true);
 
     const db = path.match(/^\/api\/db\/([a-z_]+)(?:\/(.+))?$/);
     if (db) return handleDb(request, env, db[1], db[2] || null);

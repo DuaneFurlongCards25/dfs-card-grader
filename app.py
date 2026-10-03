@@ -602,6 +602,29 @@ def support_my_tickets():
         return []
 
 
+def tenant_drift(apply: bool = False):
+    """Are the testers' workspaces still identical to yours?
+
+    Each tenant has its own copy of every table. A new feature's DDL is run
+    against the owner's schema, so the copies fall behind and the tester hits
+    "column does not exist" on something that works perfectly from the owner's
+    account — invisible to him, and impossible for them to describe.
+
+    A command-line check existed and depended on somebody remembering it,
+    which is not a plan. The app asks on its own.
+    """
+    if not is_owner_account() or not WORKER_URL:
+        return None
+    try:
+        req = urllib.request.Request(
+            f"{WORKER_URL}/api/tenants/{'migrate' if apply else 'drift'}",
+            headers=_neon_headers(), method="POST" if apply else "GET")
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=30) as r:
+            return json.loads(r.read().decode())
+    except Exception:
+        return None
+
+
 def support_open_count():
     """Unanswered tickets — the number behind Duane's 🔔."""
     if not is_owner_account():
@@ -3871,6 +3894,33 @@ if is_owner_account() and not st.session_state.get("_sup_checked"):
     if st.session_state["_sup_open"]:
         st.toast(f"🔔 {st.session_state['_sup_open']} support message(s) waiting",
                  icon="💬")
+
+# Checked once per session: it is two catalog queries, and a tester blocked by
+# a missing column is blocked until someone notices.
+if is_owner_account() and "_drift" not in st.session_state:
+    _d = tenant_drift()
+    st.session_state["_drift"] = (_d or {}).get("behind", 0)
+    st.session_state["_drift_detail"] = _d
+
+if is_owner_account() and st.session_state.get("_drift"):
+    _d = st.session_state.get("_drift_detail") or {}
+    _names = ", ".join(t["slug"] for t in _d.get("tenants", []) if t["behind"])
+    _c1, _c2 = st.columns([5, 1])
+    _c1.error(f"⚠️ **{st.session_state['_drift']} tester workspace(s) behind** "
+              f"({_names}) — {_d.get('total_changes', 0)} change(s) missing. "
+              f"They will hit errors on features that work fine for you.")
+    if _c2.button("Update now", use_container_width=True, key="drift_fix",
+                  type="primary"):
+        _res = tenant_drift(apply=True)
+        if _res and _res.get("behind", 1) == 0:
+            st.session_state["_drift"] = 0
+            st.session_state["_drift_detail"] = _res
+            st.success(f"✅ Applied {_res.get('applied', 0)} change(s) — every "
+                       f"workspace matches yours again.")
+            st.rerun()
+        else:
+            st.error("Couldn't update automatically. Run this in Terminal:  \n"
+                     "`python3 support_tenant.py --migrate all`")
 
 if is_owner_account() and st.session_state.get("_sup_open"):
     _n = st.session_state["_sup_open"]
