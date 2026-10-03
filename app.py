@@ -956,11 +956,14 @@ def sb_headers():
 
 # ─── Neon / Cloudflare Worker helpers ─────────────────────────────────────────
 # All card-business tables now live in Neon Postgres via the Worker at WORKER_URL.
-# The Worker uses no auth (SHARED_SECRET not set → dev mode bypass).
+# The Worker requires X-DFS-Key on every /api/db call and fails CLOSED without
+# it, so this key has to be present in secrets for the app to see any data.
+WORKER_KEY = get_secret("worker", "key", "")
 
 def _neon_headers():
     return {
         "Content-Type": "application/json",
+        **({"X-DFS-Key": WORKER_KEY} if WORKER_KEY else {}),
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     }
 

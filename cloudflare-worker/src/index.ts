@@ -27,8 +27,36 @@ import postgres from 'postgres';
 
 export interface Env {
   DATABASE_URL: string;
+  API_KEY?: string;
   CARD_IMAGES?: R2Bucket;
   HYPERDRIVE?: { connectionString: string };
+}
+
+/**
+ * Nothing reaches the database without the key.
+ *
+ * This Worker serves purchase costs, sale proceeds, margins and break P&L —
+ * the whole card business — so an unauthenticated `/api/db/*` is the business
+ * readable by anyone who learns the URL. The studio Worker shipped with its
+ * gate defaulting OPEN when the secret was unset, and it has stayed open for
+ * months because a public lead form depends on it. That mistake is not
+ * repeated here: a missing key fails CLOSED, so the failure mode is "my app
+ * stopped working" rather than silent exposure.
+ *
+ * Exceptions are deliberate and narrow: `/api/health` reveals nothing but
+ * connectivity, and image GETs are fetched by the browser from an <img> tag
+ * that cannot carry a header. Those R2 keys are long and unguessable, which
+ * is obscurity, not access control — the fix is signed URLs, and it is only
+ * card photographs, not costs.
+ */
+function authed(request: Request, env: Env): boolean {
+  if (!env.API_KEY) return false;
+  const sent = request.headers.get('X-DFS-Key') || '';
+  // Constant-ish time: compare full length rather than bailing on first byte.
+  if (sent.length !== env.API_KEY.length) return false;
+  let diff = 0;
+  for (let i = 0; i < sent.length; i++) diff |= sent.charCodeAt(i) ^ env.API_KEY.charCodeAt(i);
+  return diff === 0;
 }
 
 // Only the card business. Anything not listed is a 403 — new tables are
@@ -307,9 +335,18 @@ export default {
       }
     }
 
-    if (path === '/api/inventory/mirror' && request.method === 'POST') return mirror(request, env);
+    // Browser-fetched, cannot carry a header — see `authed` above.
     const img = path.match(/^\/api\/inventory\/img\/(.+)$/);
     if (img && request.method === 'GET') return serveImage(env, decodeURIComponent(img[1]));
+
+    if (!authed(request, env)) {
+      return err(env.API_KEY
+        ? 'unauthorized'
+        : 'API_KEY not configured on this Worker — run: npx wrangler secret put API_KEY',
+        env.API_KEY ? 401 : 503);
+    }
+
+    if (path === '/api/inventory/mirror' && request.method === 'POST') return mirror(request, env);
 
     const db = path.match(/^\/api\/db\/([a-z_]+)(?:\/(.+))?$/);
     if (db) return handleDb(request, env, db[1], db[2] || null);
