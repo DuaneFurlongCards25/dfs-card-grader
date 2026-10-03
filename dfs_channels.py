@@ -152,25 +152,168 @@ def _describe(c) -> str:
 
 # ─── Instagram ───────────────────────────────────────────────────────────────
 
-def ig_caption(card, *, price: float | None = None, handle: str = "@dfscards") -> str:
-    """A caption a person can post without editing it first."""
-    p = _money(price if price is not None else card.get("list_price"))
-    head = card.get("title") or card.get("sku")
-    tags = {"#sportscards", "#thehobby", "#cardcollector"}
-    for k in ("sport", "player", "team", "manufacturer"):
-        if card.get(k):
-            tags.add("#" + re.sub(r"[^a-z0-9]", "", str(card[k]).lower()))
+def _tag(*parts) -> str:
+    return "#" + re.sub(r"[^a-z0-9]", "", " ".join(str(p or "") for p in parts).lower())
+
+
+def ig_hashtags(card, limit: int = 22) -> list:
+    """Hashtags worth having, in the order Instagram rewards.
+
+    Specific first, broad last. A post tagged only #sportscards competes with
+    millions; #juniorcaminero competes with hundreds, and that is where a
+    collector actually finds the card. Instagram allows 30 — past roughly 22
+    the extra ones are noise that makes the caption look like spam.
+    """
+    tags: list[str] = []
+
+    def add(t):
+        if t and t != "#" and t not in tags:
+            tags.append(t)
+
+    player = str(card.get("player") or "").strip()
+    add(_tag(player))                                   # #juniorcaminero
+    if card.get("year") and player:
+        add(_tag(player, "rookie") if _is_rookie(card) else _tag(card["year"], player))
+    add(_tag(card.get("set_name")))                     # #bowmanchromemega
+    add(_tag(card.get("manufacturer")))
+    par = str(card.get("parallel") or "")
+    if par and par.lower() not in {"base", "none"}:
+        add(_tag(par))
+    add(_tag(card.get("team")))
     if card.get("grade"):
-        tags.add("#graded")
-    if card.get("parallel"):
-        tags.add("#" + re.sub(r"[^a-z0-9]", "", str(card["parallel"]).lower()))
-    lines = [head]
-    if p:
-        lines.append(f"${p:,.2f} shipped")
+        add(_tag(card.get("grader") or "psa", str(card["grade"]).replace("/", "")))
+        add("#gradedcards")
+        if str(card.get("grade")).startswith("10"):
+            add("#gemmint")
+    if _is_auto(card):
+        add("#autograph")
+        add("#oncard")
+    if _is_rookie(card):
+        add("#rookiecard")
+        add("#rc")
+    sport = str(card.get("sport") or "").lower()
+    for s, extra in (("base", ["#baseballcards", "#mlb"]),
+                     ("foot", ["#footballcards", "#nfl"]),
+                     ("basket", ["#basketballcards", "#nba"]),
+                     ("soccer", ["#soccercards", "#futbol"]),
+                     ("hockey", ["#hockeycards", "#nhl"])):
+        if s in sport:
+            for e in extra:
+                add(e)
+    for broad in ("#thehobby", "#sportscards", "#cardcollector", "#whodoyoucollect",
+                  "#cardsforsale", "#sportscardsforsale", "#hobbyfamily"):
+        add(broad)
+    return tags[:limit]
+
+
+def _is_auto(card) -> bool:
+    hay = " ".join(str(card.get(f) or "") for f in
+                   ("parallel", "title", "set_name", "description")).lower()
+    return (str(card.get("autographed") or "").lower() in {"yes", "true", "1"}
+            or "auto" in hay or "signed" in hay)
+
+
+def _is_rookie(card) -> bool:
+    hay = " ".join(str(card.get(f) or "") for f in
+                   ("parallel", "title", "set_name", "description")).lower()
+    return bool(re.search(r"\b(rookie|rc|1st bowman|first bowman)\b", hay))
+
+
+def market_line(market) -> str:
+    """The part of "why this card matters" the app can actually prove.
+
+    A caption sells on a reason to care, and the honest reasons available here
+    are market facts: what the card has done lately and what copies really
+    sold for. Awards, prospect rankings and "Cy Young favourite" are not in
+    any data CardPulse holds — those come from the seller, who knows them, in
+    the `why` line. Inventing one would put a false claim under a photo with
+    the seller's name on it.
+    """
+    if not market:
+        return ""
+    bits = []
+    pct = market.get("trend_pct")
+    if pct not in (None, ""):
+        try:
+            pct = float(pct)
+            if abs(pct) >= 3:
+                bits.append(f"{'📈 Up' if pct > 0 else '📉 Down'} {abs(pct):.0f}% "
+                            f"over {market.get('trend_days', 30)} days")
+        except (TypeError, ValueError):
+            pass
+    sold = [s for s in (market.get("recent_sold") or []) if s]
+    if sold:
+        shown = ", ".join(f"${float(s):,.0f}" for s in sold[:3])
+        bits.append(f"🧾 Recent sales: {shown}")
+    if market.get("pop"):
+        bits.append(f"🏆 POP {market['pop']}")
+    return "\n".join(bits)
+
+
+def ig_caption(card, *, price: float | None = None, handle: str = "@dfscards",
+               hook: str = "", story: bool = False, tags: bool = True,
+               why: str = "", market=None) -> str:
+    """A caption that can be posted without editing it first.
+
+    Instagram is not a claim sale. The first line is read in a scrolling feed
+    before anyone sees the price, so it leads with what makes the card worth
+    stopping for; the details follow; the ask is explicit, because "DM to
+    claim" is what turns a like into a sale.
+
+    `story` gives the short version — a Story has no room for hashtags and
+    they do nothing there.
+    """
+    p = _money(price if price is not None else card.get("list_price"))
+    player = str(card.get("player") or "").strip()
+    head = " ".join(x for x in [str(card.get("year") or "").strip(),
+                                str(card.get("set_name") or "").strip(),
+                                player] if x) or card.get("title") or card.get("sku")
+
+    marks = []
+    if _is_rookie(card):
+        marks.append("ROOKIE")
+    if _is_auto(card):
+        marks.append("AUTO ✍️")
+    par = str(card.get("parallel") or "").strip()
+    if par and par.lower() not in {"base", "none"}:
+        said = {w for w in re.split(r"\W+", head.lower()) if w}
+        kept = [w for w in par.split() if w.lower() not in said
+                and w.lower() not in {"auto", "autograph", "autographed",
+                                      "rookie", "rc", "prospect"}]
+        if kept:
+            marks.insert(0, " ".join(kept))
+
+    if not hook:
+        if card.get("grade") and str(card["grade"]).startswith("10"):
+            hook = "💎 GEM MINT 💎"
+        elif _is_rookie(card) and _is_auto(card):
+            hook = "✍️ ROOKIE AUTO ✍️"
+        elif _is_auto(card):
+            hook = "✍️ ON-CARD AUTO ✍️"
+        else:
+            hook = "🔥 JUST IN 🔥"
+
+    lines = [hook, "", head]
+    if marks:
+        lines.append(" · ".join(marks))
+    if card.get("grade"):
+        lines.append(_grade_line(card))
+    # Why a collector should care, before the price. The seller's own line
+    # first — they know the player news — then the market facts we can prove.
+    if why.strip():
+        lines += ["", why.strip()]
+    _ml = market_line(market)
+    if _ml:
+        lines += ["", _ml]
     lines.append("")
-    lines.append(f"DM to claim · {handle}")
-    lines.append("")
-    lines.append(" ".join(sorted(tags)[:12]))
+    lines.append(f"💵 ${p:,.0f} shipped" if p and p == int(p)
+                 else (f"💵 ${p:,.2f} shipped" if p else "💵 Make an offer"))
+    lines.append(f"📩 DM to claim — {handle}")
+    if story:
+        return "\n".join(l for l in lines if l is not None)
+    lines += ["", "Shipped same or next day, tracked and sleeved. 🙌", ""]
+    if tags:
+        lines.append(" ".join(ig_hashtags(card)))
     return "\n".join(lines)
 
 

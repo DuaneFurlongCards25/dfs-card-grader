@@ -3282,7 +3282,8 @@ def render_claim_sale(key: str = "cs"):
                 "then come back to build a sale.")
         return
 
-    _t1, _t2, _t3 = st.tabs(["1️⃣ Pick cards", "2️⃣ Captions to post", "3️⃣ Claims & totals"])
+    _t1, _t2, _t4, _t3 = st.tabs(["1️⃣ Pick cards", "2️⃣ Facebook / Discord",
+                                  "📸 Instagram", "3️⃣ Claims & totals"])
 
     _sel_key = f"{key}_picked"
     st.session_state.setdefault(_sel_key, [])
@@ -3405,6 +3406,49 @@ def render_claim_sale(key: str = "cs"):
                     for c in _picked),
                 file_name=f"claim-sale-{date.today():%Y-%m-%d}.txt",
                 use_container_width=True, key=f"{key}_dl")
+
+    with _t4:
+        if not _picked:
+            st.info("Pick some cards first.")
+        else:
+            st.caption("Instagram sells on a reason to care, not just a price. Add the "
+                       "player news yourself — the app will not invent an award — and "
+                       "it adds the market facts it can prove.")
+            _i1, _i2 = st.columns(2)
+            _handle = _i1.text_input("Your Instagram handle", "@dfscards",
+                                     key=f"{key}_ig_handle")
+            _ig_story = _i2.checkbox("Story version (short, no hashtags)",
+                                     key=f"{key}_ig_story",
+                                     help="Hashtags do nothing in a Story.")
+            for _c in _picked:
+                st.markdown(f"**{_c.get('title') or _c['sku']}**")
+                _why = st.text_area(
+                    "Why a collector should care", key=f"{key}_why_{_c['sku']}",
+                    height=68, label_visibility="collapsed",
+                    placeholder="🏆 NL Cy Young favorite — 1.96 ERA\n🔥 #1 prospect in "
+                                "baseball\n(one line each — this is the part that sells)")
+                # Market facts come from what the app already holds about the
+                # card. Nothing here is generated: a false claim under a photo
+                # with the seller's name on it is their reputation, not ours.
+                _mkt = {}
+                _hist = (_c.get("specifics") or {}).get("recent_sold") if isinstance(
+                    _c.get("specifics"), dict) else None
+                if _hist:
+                    _mkt["recent_sold"] = _hist
+                st.code(channels.ig_caption(
+                    _c, price=_price_of(_c), handle=_handle, why=_why,
+                    market=_mkt or None, story=_ig_story), language=None)
+
+            st.download_button(
+                "⬇️ All Instagram captions",
+                "\n\n".join(
+                    f"--- {c.get('title') or c['sku']} ---\n"
+                    + channels.ig_caption(
+                        c, price=_price_of(c), handle=_handle, story=_ig_story,
+                        why=st.session_state.get(f"{key}_why_{c['sku']}", ""))
+                    for c in _picked),
+                file_name=f"instagram-{date.today():%Y-%m-%d}.txt",
+                use_container_width=True, key=f"{key}_igdl")
 
     with _t3:
         if not _picked:
