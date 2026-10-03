@@ -174,6 +174,155 @@ def ig_caption(card, *, price: float | None = None, handle: str = "@dfscards") -
     return "\n".join(lines)
 
 
+# ─── Facebook claim sales ────────────────────────────────────────────────────
+#
+# A different animal from an eBay listing. In a buy/sell/trade group the
+# seller posts one photo per card with a short caption and the first person
+# to comment claims it. The caption is read on a phone, in a fast-scrolling
+# feed, so it is four short lines and no hashtags — hashtags read as spam in
+# these groups and get posts removed.
+#
+# Modelled on James Pjura's own posts (MLB Baseball Cards Buy/Sell/Trade,
+# Oct 2026), which are the format his buyers already recognise:
+#
+#     Franklin Arias 2025 Bowman Chrome 1st ✍️ AUTOGRAPH
+#     PSA 9 - Mint
+#     Red Sox #1 Prospect ⬆️TOP
+#     $275
+#
+# The handwritten name-and-date card in the photo is a group requirement for
+# proof of ownership and cannot be automated. Nothing here tries to.
+
+GRADE_WORD = {
+    "10": "GEM MT", "9.5": "GEM MT", "9": "Mint", "8.5": "NM-MT+",
+    "8": "NM-MT", "7.5": "NM+", "7": "NM", "6": "EX-MT", "5": "EX",
+}
+
+
+def _grade_line(card, tagline: str = "") -> str:
+    """"PSA 9 - Mint", or "PSA 9 - The Best Ever 🐐".
+
+    Sellers routinely swap the grade word for a line of hype, because the
+    number already says the condition and the words are what sell it. Both of
+    James Pjura's posts do one or the other, so this takes either.
+
+    Raw cards say RAW rather than leaving a blank line — in a claim sale
+    "is it graded?" is otherwise the first comment every time.
+    """
+    grade = str(card.get("grade") or "").strip()
+    grader = str(card.get("grader") or "").strip().upper()
+    if not grade:
+        cond = tagline or str(card.get("condition") or "").strip()
+        return f"RAW - {cond}" if cond else "RAW"
+    # SGC and BGS write dual grades as "10/10" (card / autograph). The word
+    # is looked up from the first number; the full "10/10" still prints,
+    # because that second number is the thing buyers ask about.
+    _lookup = grade.split("/")[0].strip()
+    _lookup = _lookup.rstrip("0").rstrip(".") if "." in _lookup else _lookup
+    word = tagline or GRADE_WORD.get(_lookup, "")
+    return " ".join(x for x in [grader or "PSA", grade, f"- {word}" if word else ""] if x)
+
+
+def fb_caption(card, *, price=None, note: str = "", tagline: str = "",
+               show_number: bool = False) -> str:
+    """One card, one post. Three or four short lines, no hashtags.
+
+    `tagline` goes after the grade ("PSA 9 - The Best Ever 🐐"); `note` goes
+    on its own line ("Red Sox #1 Prospect ⬆️TOP"). Sellers use both shapes.
+    """
+    bits = [str(card.get("player") or "").strip(),
+            str(card.get("year") or "").strip(),
+            str(card.get("set_name") or "").strip()]
+    # A scanner writes the parallel as "Chrome Prospect Autograph" while the
+    # set is already "Bowman Chrome 1st", so printing both gives "Bowman
+    # Chrome 1st Chrome Prospect Autograph ✍️ AUTOGRAPH". Drop the words the
+    # set line already said, and the auto wording the ✍️ tag covers.
+    par = str(card.get("parallel") or "").strip()
+    if par and par.lower() not in {"base", "none"}:
+        said = {w for w in re.split(r"\W+", " ".join(bits).lower()) if w}
+        kept = [w for w in par.split()
+                if w.lower() not in said
+                # The marker line already says these, so the parallel must not
+                # repeat them: "Rookie Autograph" + the tag gave
+                # "…Mega Rookie ROOKIE AUTOGRAPH ✍️".
+                and w.lower() not in {"auto", "autograph", "autographed",
+                                      "prospect", "rookie", "rc"}]
+        if kept:
+            bits.append(" ".join(kept))
+    # Card number off by default: the buyer is looking at a photo, and
+    # neither of the real posts this is modelled on carries one. On for
+    # sets where the number is how the card is identified.
+    num = str(card.get("card_number") or "").strip().lstrip("#")
+    if num and show_number:
+        bits.append(f"#{num}")
+    head = " ".join(b for b in bits if b)
+    # "ROOKIE AUTOGRAPH ✍️" — a rookie auto is the single most saleable thing
+    # in a claim sale, and sellers put both words in the first line every time.
+    _hay = " ".join(str(card.get(f) or "") for f in
+                    ("parallel", "title", "set_name", "description")).lower()
+    _rookie = bool(re.search(r"\b(rookie|rc|1st bowman|first bowman)\b", _hay))
+    _auto = (str(card.get("autographed") or "").lower() in {"yes", "true", "1"}
+             or "auto" in _hay or "signed" in _hay)
+    if _auto:
+        head += (" ROOKIE AUTOGRAPH ✍️" if _rookie else " ✍️ AUTOGRAPH")
+    elif _rookie:
+        head += " ROOKIE"
+
+    p = _money(price if price is not None else card.get("list_price"))
+    lines = [head, _grade_line(card, tagline)]
+    if note.strip():
+        lines.append(note.strip())
+    lines.append(f"${p:,.0f}" if p and p == int(p) else (f"${p:,.2f}" if p else "Make offer"))
+    return "\n".join(l for l in lines if l)
+
+
+DEFAULT_SHIP_NOTE = ("Shipping is $6 bubble mailer with tracking for as many cards "
+                     "as you buy! $10 priority mail for orders over $350+")
+
+
+def fb_header(*, title: str = "THE WEEK'S BEST CLAIM SALE", when: str = "",
+              low=None, high=None, ship_note: str = DEFAULT_SHIP_NOTE) -> str:
+    """The post that opens a claim sale, above the individual cards."""
+    lines = [f"🔥{title}🔥", "", "💥" * 10]
+    if when:
+        lines.append(f"🔥🔥🔥 STARTS {when} 🔥🔥🔥")
+    lines += ["🆕 NEW INVENTORY 👀", "", "GOATS 🐐", "HOF ✅", "ROOKIES 📈",
+              "GEM MINT SLABS 💎", "AUTOGRAPHS ✍️", ""]
+    if low is not None and high is not None:
+        lines.append(f"~~~~Cards for ALL Collectors ${low:,.0f}-${high:,.0f}~~~~")
+    lines += ["First to claim gets the card! ✅", "Offers welcome too 😎",
+              '🔥🔥 TAG 🏷 AND DROP A "W" TO WATCH 🔥🔥', "", ship_note]
+    return "\n".join(lines)
+
+
+def claim_totals(claims, *, ship_small: float = 6.0, ship_large: float = 10.0,
+                 large_over: float = 350.0) -> list:
+    """Who owes what, once the comments stop.
+
+    `claims` — [{buyer, sku, price}]. A buyer taking six cards pays one
+    shipping charge, which is the whole appeal of a claim sale and also the
+    arithmetic that goes wrong by hand at 11pm with forty comments to read.
+    """
+    by_buyer: dict[str, list] = {}
+    for c in claims or []:
+        buyer = str(c.get("buyer") or "").strip()
+        if not buyer:
+            continue
+        by_buyer.setdefault(buyer, []).append(c)
+
+    out = []
+    for buyer, items in sorted(by_buyer.items(), key=lambda kv: kv[0].lower()):
+        cards_total = round(sum(_money(i.get("price")) for i in items), 2)
+        ship = ship_large if cards_total > large_over else ship_small
+        out.append({
+            "buyer": buyer, "cards": len(items), "cards_total": cards_total,
+            "shipping": ship, "total": round(cards_total + ship, 2),
+            "skus": [i.get("sku") for i in items],
+            "items": items,
+        })
+    return out
+
+
 def ig_pack(cards) -> list:
     """What to post, per card: the images to download and the caption."""
     return [{"sku": c.get("sku"), "caption": ig_caption(c),

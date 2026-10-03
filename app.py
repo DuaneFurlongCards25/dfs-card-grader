@@ -2996,7 +2996,27 @@ def _show_guide():
              "**Delist Queue** is what to pull down elsewhere when something sells, so you "
              "never sell the same physical card twice.",
          ]),
-        ("📱", "Selling on Facebook, Instagram or at shows",
+        ("📱", "Claim sales — Facebook groups & Discord",
+         [
+             "**🗃️ Inventory → 📱 Claim Sale** (also in 🧰 Operations) runs the whole "
+             "evening: pick the cards, get the captions, track the claims, total up "
+             "each buyer.",
+             "**Captions in the format your group already expects** — player, year, set, "
+             "the autograph and rookie markers, the grade, your price. Add a hype line "
+             "per card (*The Best Ever 🐐*, *Red Sox #1 Prospect ⬆️TOP*) and choose "
+             "whether it sits after the grade or on its own line.",
+             "**Prices are editable right in the pick list** — a claim-sale price is "
+             "usually decided as you post, not when the card was logged.",
+             "**Type who claimed what as the comments come in.** It works out each "
+             "buyer's total with shipping combined — one charge however many cards they "
+             "take — and writes the message you send them. That is the arithmetic that "
+             "goes wrong by hand at eleven at night with forty comments to read.",
+             "**Then mark them sold in one click**, and log the money in 💰 Sales & P&L "
+             "so the channel shows up in your numbers.",
+             "The handwritten name-and-date card in your photo is a group rule and is "
+             "yours to write — nothing here touches it.",
+         ]),
+        ("📱", "Selling on Instagram or at shows",
          [
              "**You keep more, and the app can prove it.** In **🧮 Calculator**, price the "
              "same card as a *Direct sale* and as an *eBay* sale. On a $100 card that is "
@@ -3098,6 +3118,328 @@ def _show_guide():
             + "</div>",
             unsafe_allow_html=True,
         )
+
+# ─── Spreadsheet import ───────────────────────────────────────────────────────
+def render_sheet_import(key: str = "inv"):
+    """Import the spreadsheet someone already keeps.
+
+    Lives in both Inventory → Intake and Operations, because it is the way in
+    for a dealer who has never used a scanner — which is most of them. Defined
+    once so the two places cannot drift apart.
+
+    The mapping is always shown and always editable. A column guessed wrong
+    and imported silently puts the purchase price in the asking price, and
+    nobody finds out until a margin looks wrong months later.
+    """
+    import dfs_sheet as sheet
+
+    st.caption("Upload the sheet you already keep — any column names. "
+               "CardPulse works out which column is which, you confirm, and "
+               "every card gets a tracking ID.")
+    up = st.file_uploader("Your spreadsheet (CSV or Excel)",
+                          type=["csv", "xlsx", "xlsm", "xls"], key=f"{key}_sh_file")
+    if up is None:
+        with st.expander("What should the spreadsheet look like?"):
+            st.markdown(
+                "Whatever you already use. One card per row, and a header row "
+                "naming the columns. Recognised automatically: **player / name**, "
+                "**year**, **set**, **card #**, **parallel**, **team**, **grade**, "
+                "**cost / paid**, **price / asking**, **location / box**, **notes**.\n\n"
+                "Anything it does not recognise you can map by hand below. The only "
+                "hard requirement is something that identifies the card — a player "
+                "name or a description.")
+        return
+
+    _t = sheet.read_table(up.getvalue(), up.name)
+    if _t["error"] or not _t["rows"]:
+        st.error(_t["error"] or "No rows found in that file.")
+        return
+    st.success(f"Read **{len(_t['rows']):,} rows** · {len(_t['headers'])} columns")
+
+    _guess = sheet.guess_mapping(_t["headers"])
+    st.markdown("#### Check the columns")
+    st.caption("CardPulse's best guess. Change anything it got wrong — "
+               "especially **cost** vs **price**.")
+    _FIELDS = [("player", "Player / name *"), ("year", "Year"), ("set_name", "Set"),
+               ("card_number", "Card #"), ("parallel", "Parallel"), ("team", "Team"),
+               ("sport", "Sport"), ("grade", "Grade"), ("grader", "Grader"),
+               ("cost", "Cost (what you paid)"), ("list_price", "Price (asking)"),
+               ("location", "Location"), ("notes", "Notes"), ("sku", "Existing ID / SKU")]
+    _opts = ["— not in my sheet —"] + _t["headers"]
+    _map = {}
+    _cols = st.columns(3)
+    for _i, (_f, _label) in enumerate(_FIELDS):
+        _cur = _guess.get(_f)
+        _sel = _cols[_i % 3].selectbox(
+            _label, _opts, index=_opts.index(_cur) if _cur in _opts else 0,
+            key=f"{key}_sh_map_{_f}")
+        if _sel != "— not in my sheet —":
+            _map[_f] = _sel
+
+    _c1, _c2 = st.columns(2)
+    _prefix = _c1.text_input(
+        "Tracking ID prefix", value=(st.session_state.get("access_name") or "CARD")
+        .split()[0][:8].upper(), key=f"{key}_sh_prefix",
+        help="Every card gets an ID like JP-0001. This is how a card is found "
+             "when it sells, so it has to be unique to you.")
+    _status = _c2.selectbox("Status on arrival", ["intake", "priced", "listed"],
+                            key=f"{key}_sh_status")
+
+    _pv = sheet.preview(_t["rows"], _map, prefix=_prefix,
+                        first_data_row=_t.get("first_data_row", 2))
+    if not _pv["cards"]:
+        st.error("Nothing importable — check that the **Player / name** column is "
+                 "mapped to the right column above.")
+        return
+
+    _m1, _m2, _m3 = st.columns(3)
+    _m1.metric("Cards to import", f"{len(_pv['cards']):,}")
+    _m2.metric("Total cost", f"${_pv['cost']:,.2f}")
+    _m3.metric("Total asking", f"${_pv['value']:,.2f}")
+
+    if _pv["problems"]:
+        with st.expander(f"⚠️ {len(_pv['problems'])} row(s) need a look", expanded=True):
+            st.caption("Row numbers match your spreadsheet. Rows with nothing "
+                       "identifying the card are skipped; the rest import with "
+                       "that one value blank.")
+            for _p in _pv["problems"][:40]:
+                st.markdown(f"- **Row {_p['row']}** — {_p['why']}")
+
+    st.markdown("##### First few, as they will be saved")
+    st.dataframe(pd.DataFrame([{
+        "ID": c["sku"], "Card": c["title"], "Cost": c["cost"],
+        "Asking": c["list_price"], "Location": c["location"]}
+        for c in _pv["sample"]]), use_container_width=True, hide_index=True)
+
+    if st.button(f"📥 Import {len(_pv['cards']):,} cards", type="primary",
+                 use_container_width=True, key=f"{key}_sh_go"):
+        _batch = f"SHEET-{date.today():%Y-%m-%d}-{_prefix}"
+        _rows = sheet.to_rows(_pv["cards"], batch=_batch, status=_status)
+        _done, _failed = 0, 0
+        _bar = st.progress(0.0, "Importing…")
+        for _i in range(0, len(_rows), 100):
+            _chunk = _rows[_i:_i + 100]
+            if _neon_post("inventory_cards", _chunk, on_conflict="sku") is None:
+                _failed += len(_chunk)
+            else:
+                _done += len(_chunk)
+            _bar.progress(min(1.0, (_i + len(_chunk)) / len(_rows)),
+                          f"Importing… {_done:,}/{len(_rows):,}")
+        _bar.empty()
+        if _failed:
+            st.error(f"{_done:,} imported, **{_failed:,} failed**. "
+                     f"{_neon_last_error['msg'] or ''}")
+        else:
+            st.success(f"✅ Imported {_done:,} cards. They are in Inventory → Cards.")
+        st.session_state.pop("inv_cards", None)
+
+
+# ─── Claim sales (Facebook / Discord) ─────────────────────────────────────────
+def render_claim_sale(key: str = "cs"):
+    """Run a claim sale without a notepad.
+
+    A whole segment of this hobby sells in Facebook groups and Discord servers
+    rather than on eBay: post a photo per card, first comment claims it,
+    everything one buyer takes ships together. The seller's evening is spent
+    writing captions, then reading forty comments and adding up who owes what
+    — by hand, at eleven at night, which is where the money goes missing.
+
+    The app can do both halves. The handwritten name-and-date card in the
+    photo is a group rule for proof of ownership and is deliberately left
+    alone.
+    """
+    import dfs_channels as channels
+    import dfs_inventory as inventory
+
+    if "inv_cards" not in st.session_state:
+        st.session_state["inv_cards"] = inventory.fetch_all(_neon_get, "inventory_cards")
+    _all = st.session_state.get("inv_cards") or []
+    if not _all:
+        st.info("No cards in Inventory yet — import a spreadsheet or add a few by hand, "
+                "then come back to build a sale.")
+        return
+
+    _t1, _t2, _t3 = st.tabs(["1️⃣ Pick cards", "2️⃣ Captions to post", "3️⃣ Claims & totals"])
+
+    _sel_key = f"{key}_picked"
+    st.session_state.setdefault(_sel_key, [])
+
+    with _t1:
+        _f1, _f2, _f3 = st.columns(3)
+        _q = _f1.text_input("Search", key=f"{key}_q",
+                            placeholder="player, set, year…").strip().lower()
+        _min = _f2.number_input("Min price", 0.0, value=0.0, step=5.0, key=f"{key}_min")
+        _only_unsold = _f3.checkbox("Hide sold", value=True, key=f"{key}_unsold")
+
+        _cands = []
+        for c in _all:
+            if _only_unsold and str(c.get("status") or "").lower() == "sold":
+                continue
+            if (c.get("list_price") or 0) < _min:
+                continue
+            if _q and _q not in " ".join(str(c.get(f) or "") for f in
+                                         ("player", "set_name", "year", "sku", "title")).lower():
+                continue
+            _cands.append(c)
+        st.caption(f"{len(_cands):,} card(s) available")
+
+        _df = pd.DataFrame([{
+            "Post": c["sku"] in st.session_state[_sel_key],
+            "SKU": c["sku"],
+            "Card": c.get("title") or c.get("player") or c["sku"],
+            "Grade": " ".join(x for x in [c.get("grader"), c.get("grade")] if x) or "raw",
+            "Price": float(c.get("list_price") or 0),
+        } for c in _cands[:400]])
+        if _df.empty:
+            st.info("Nothing matches those filters.")
+        else:
+            _ed = st.data_editor(
+                _df, use_container_width=True, hide_index=True, key=f"{key}_pick_ed",
+                column_config={
+                    "Post": st.column_config.CheckboxColumn("Post", width="small"),
+                    "Price": st.column_config.NumberColumn("Price", format="$%.2f"),
+                },
+                disabled=["SKU", "Card", "Grade"])
+            st.session_state[_sel_key] = _ed[_ed["Post"]]["SKU"].tolist()
+            # Prices are editable here on purpose: a claim sale price is often
+            # decided the moment it is posted, not when the card was logged.
+            st.session_state[f"{key}_prices"] = dict(
+                zip(_ed["SKU"], _ed["Price"]))
+        st.success(f"**{len(st.session_state[_sel_key])} card(s)** in this sale")
+
+    _picked = [c for c in _all if c["sku"] in st.session_state[_sel_key]]
+    _prices = st.session_state.get(f"{key}_prices", {})
+
+    def _price_of(c):
+        return _prices.get(c["sku"]) or c.get("list_price") or 0
+
+    with _t2:
+        if not _picked:
+            st.info("Pick some cards first.")
+        else:
+            _h1, _h2 = st.columns(2)
+            _title = _h1.text_input("Sale title", "THE WEEK'S BEST CLAIM SALE",
+                                    key=f"{key}_title")
+            _when = _h2.text_input("Starts", "TONIGHT 7:15pm EST", key=f"{key}_when")
+            _ship = st.text_input("Shipping terms", channels.DEFAULT_SHIP_NOTE,
+                                  key=f"{key}_ship")
+            _o1, _o2 = st.columns(2)
+            _place = _o1.radio(
+                "Where does your hype line go?",
+                ["After the grade — PSA 9 - The Best Ever 🐐",
+                 "Its own line — Red Sox #1 Prospect ⬆️TOP"],
+                key=f"{key}_place",
+                help="Both are normal in these groups. Pick the one your buyers "
+                     "are used to seeing from you.")
+            _shownum = _o2.checkbox(
+                "Include card #", value=False, key=f"{key}_num",
+                help="Off by default — the buyer is looking at the photo. Turn on "
+                     "for sets where the number is how a card is identified.")
+            _after_grade = _place.startswith("After")
+            _vals = [_price_of(c) for c in _picked if _price_of(c)]
+            st.markdown("##### Post this first")
+            st.code(channels.fb_header(
+                title=_title, when=_when, ship_note=_ship,
+                low=min(_vals) if _vals else None,
+                high=max(_vals) if _vals else None), language=None)
+
+            st.markdown(f"##### Then one post per card ({len(_picked)})")
+            st.caption("Photo of the card with your handwritten name-and-date tag, "
+                       "plus the caption. Copy each with the ⧉ button.")
+            for _i, _c in enumerate(_picked, 1):
+                _note = st.session_state.get(f"{key}_note_{_c['sku']}", "")
+                st.markdown(f"**{_i}. {_c.get('title') or _c['sku']}**")
+                st.code(channels.fb_caption(
+                    _c, price=_price_of(_c), show_number=_shownum,
+                    **({"tagline": _note} if _after_grade else {"note": _note})),
+                    language=None)
+                st.text_input(
+                    "Hype line", key=f"{key}_note_{_c['sku']}",
+                    label_visibility="collapsed",
+                    placeholder="optional — 'The Best Ever 🐐', 'Red Sox #1 Prospect ⬆️TOP', "
+                                "'POP 12'")
+
+            st.download_button(
+                "⬇️ All captions as a text file",
+                "\n\n".join(
+                    f"--- {c.get('title') or c['sku']} ---\n"
+                    + channels.fb_caption(
+                        c, price=_price_of(c), show_number=_shownum,
+                        **({"tagline": st.session_state.get(f"{key}_note_{c['sku']}", "")}
+                           if _after_grade
+                           else {"note": st.session_state.get(f"{key}_note_{c['sku']}", "")}))
+                    for c in _picked),
+                file_name=f"claim-sale-{date.today():%Y-%m-%d}.txt",
+                use_container_width=True, key=f"{key}_dl")
+
+    with _t3:
+        if not _picked:
+            st.info("Pick some cards first.")
+        else:
+            st.caption("As claims come in, type who got each card. Blank = unclaimed.")
+            _s1, _s2, _s3 = st.columns(3)
+            _ship_s = _s1.number_input("Shipping", 0.0, value=6.0, step=1.0,
+                                       key=f"{key}_ss")
+            _ship_l = _s2.number_input("Shipping over threshold", 0.0, value=10.0,
+                                       step=1.0, key=f"{key}_sl")
+            _thresh = _s3.number_input("Threshold", 0.0, value=350.0, step=50.0,
+                                       key=f"{key}_th")
+
+            _claim_df = pd.DataFrame([{
+                "SKU": c["sku"],
+                "Card": c.get("title") or c["sku"],
+                "Price": float(_price_of(c)),
+                "Claimed by": st.session_state.get(f"{key}_buyer_{c['sku']}", ""),
+            } for c in _picked])
+            _ced = st.data_editor(_claim_df, use_container_width=True, hide_index=True,
+                                  key=f"{key}_claim_ed", disabled=["SKU", "Card"],
+                                  column_config={"Price": st.column_config.NumberColumn(
+                                      format="$%.2f")})
+
+            _claims = [{"buyer": r["Claimed by"], "sku": r["SKU"], "price": r["Price"]}
+                       for _, r in _ced.iterrows() if str(r["Claimed by"] or "").strip()]
+            _totals = channels.claim_totals(_claims, ship_small=_ship_s,
+                                            ship_large=_ship_l, large_over=_thresh)
+            if not _totals:
+                st.info("No claims entered yet.")
+            else:
+                _sold = sum(t["cards_total"] for t in _totals)
+                _m1, _m2, _m3 = st.columns(3)
+                _m1.metric("Claimed", f"{len(_claims)} of {len(_picked)}")
+                _m2.metric("Card sales", f"${_sold:,.2f}")
+                _m3.metric("Buyers", len(_totals))
+                st.markdown("##### What each buyer owes")
+                for _t in _totals:
+                    with st.expander(f"**{_t['buyer']}** — {_t['cards']} card(s) · "
+                                     f"${_t['total']:,.2f}", expanded=True):
+                        for _it in _t["items"]:
+                            _card = next((c for c in _picked if c["sku"] == _it["sku"]), {})
+                            st.markdown(f"- {_card.get('title') or _it['sku']} — "
+                                        f"${float(_it['price']):,.2f}")
+                        st.markdown(f"Cards **${_t['cards_total']:,.2f}** + shipping "
+                                    f"**${_t['shipping']:,.2f}** = **${_t['total']:,.2f}**")
+                        st.code(
+                            f"Hi {_t['buyer']} — {_t['cards']} card(s), "
+                            f"${_t['cards_total']:,.2f} + ${_t['shipping']:,.2f} shipping "
+                            f"= ${_t['total']:,.2f} total. Thanks!", language=None)
+
+                if st.button(f"✅ Mark {len(_claims)} claimed card(s) as sold",
+                             type="primary", use_container_width=True, key=f"{key}_sold"):
+                    _ok = 0
+                    for _c in _claims:
+                        _row = next((r for r in _all if r["sku"] == _c["sku"]), None)
+                        if not _row:
+                            continue
+                        if _neon_patch("inventory_cards", _row["id"],
+                                       {"status": "sold",
+                                        "status_updated_at": datetime.utcnow()
+                                        .strftime("%Y-%m-%dT%H:%M:%SZ")}) is not None:
+                            _ok += 1
+                    st.session_state.pop("inv_cards", None)
+                    st.success(f"✅ {_ok} card(s) marked sold. Log the money in "
+                               f"**💰 Sales & P&L → Import → Manual entry** so it "
+                               f"reaches your P&L.")
+
 
 # ─── Help / suggestion dialog ─────────────────────────────────────────────────
 @st.dialog("💬 Help & Suggestions", width="large")
@@ -8893,7 +9235,11 @@ if _active_tab == 4:
     else:
         from datetime import timezone as _optz
 
-        op_tab_inv, op_tab_queue, op_tab_sunday, op_tab_promote, op_tab_tcp = st.tabs(["📦 Inventory & Aging", "🔄 Reprice Queue", "📅 Sunday Reprice", "📣 Promote Listings", "📊 TCP Reprice"])
+        (op_tab_inv, op_tab_queue, op_tab_sunday, op_tab_promote, op_tab_tcp,
+         op_tab_sheet, op_tab_claim) = st.tabs(
+            ["📦 Inventory & Aging", "🔄 Reprice Queue", "📅 Sunday Reprice",
+             "📣 Promote Listings", "📊 TCP Reprice",
+             "📄 Import Spreadsheet", "📱 Claim Sale"])
 
         # ── helpers shared across both sub-tabs ───────────────────────────────
         def _days_since(dt_str):
@@ -10225,6 +10571,24 @@ if _active_tab == 4:
                                     'Why held': r['Reason held'],
                                 } for r in _flag_rows])
                                 st.dataframe(_flag_df, use_container_width=True, hide_index=True)
+
+
+        # Both of these also live under Inventory. They are repeated here
+        # because Operations is where a seller spends the weekend, and a
+        # feature nobody can find is a feature nobody has. Same functions, so
+        # the two copies cannot drift apart.
+        with op_tab_sheet:
+            st.markdown("### 📄 Import your spreadsheet")
+            st.caption("Already tracking cards in Excel or Sheets? Bring the whole "
+                       "sheet in — any column names — instead of retyping it.")
+            render_sheet_import(key="op")
+
+        with op_tab_claim:
+            st.markdown("### 📱 Claim sale — Facebook & Discord")
+            st.caption("Pick the cards, get the captions, track who claimed what, and "
+                       "see what each buyer owes with shipping combined.")
+            render_claim_sale(key="opcs")
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 9 — Consignments (DC Sports)
@@ -13993,11 +14357,14 @@ if _active_tab == 17:
             inv_cards = st.session_state["inv_cards"]
             inv_boxes = st.session_state["inv_boxes"]
 
-            (it_over, it_intake, it_cards, it_chan, it_delist, it_boxes,
+            (it_over, it_intake, it_cards, it_claim, it_chan, it_delist, it_boxes,
              it_sync, it_pull, it_setup) = st.tabs([
-                "📊 Overview", "📥 Intake", "🃏 Cards", "📣 Channels",
-                "🔻 Delist Queue", "📦 Boxes", "🔄 Sync & Reconcile",
-                "🧾 Pull List", "🛠 Setup"])
+                "📊 Overview", "📥 Intake", "🃏 Cards", "📱 Claim Sale",
+                "📣 Channels", "🔻 Delist Queue", "📦 Boxes",
+                "🔄 Sync & Reconcile", "🧾 Pull List", "🛠 Setup"])
+
+            with it_claim:
+                render_claim_sale(key="invcs")
 
             def _inv_listings():
                 if "inv_listings" not in st.session_state:
@@ -14195,10 +14562,25 @@ if _active_tab == 17:
             with it_intake:
                 import dfs_intake as intake
 
-                st.caption("Drop in a stack export from Heystack or Card Dealer Pro. "
-                           "Every card arrives with its photos, specifics, grade and "
-                           "price — enough to list anywhere, not just eBay.")
-                ik_file = st.file_uploader("Scanner export (CSV)", type=["csv"], key="inv_ik_file")
+                # Two ways in, because two kinds of seller. A scanner export is
+                # richer (photos, specifics) but plenty of dealers have never
+                # used one and track 100+ cards a weekend in Excel by hand.
+                # Refusing their file is refusing the customer.
+                _ik_mode = st.radio(
+                    "Where are the cards coming from?",
+                    ["📄 My own spreadsheet (Excel or CSV)",
+                     "📷 Scanner export (Heystack / Card Dealer Pro)"],
+                    key="inv_ik_mode", horizontal=True)
+
+                if _ik_mode.startswith("📄"):
+                    render_sheet_import(key="inv")
+                    ik_file = None
+                else:
+                    st.caption("Drop in a stack export from Heystack or Card Dealer Pro. "
+                               "Every card arrives with its photos, specifics, grade and "
+                               "price — enough to list anywhere, not just eBay.")
+                    ik_file = st.file_uploader("Scanner export (CSV)", type=["csv"],
+                                               key="inv_ik_file")
 
                 if ik_file is not None:
                     _ik = intake.read_export(ik_file.getvalue().decode("utf-8-sig", errors="replace"))
