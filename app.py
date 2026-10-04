@@ -12069,6 +12069,57 @@ if _active_tab == 9:
                                     "Net ($)":   st.column_config.NumberColumn(format="$%.2f"),
                                 })
 
+                        # ── What is left, and what it is worth ──────────────
+                        # The sold table answers "what did this lot return so
+                        # far". The question that decides whether to hold or cut
+                        # the price is the other one: what is still sitting
+                        # there, and does it cover the cost. An eBay active
+                        # report contains only live listings, so those rows ARE
+                        # the unsold cards.
+                        _sold_skus = {str(s.get("sku") or "").upper()
+                                      for s in sold_records if s.get("sku")}
+                        _left = []
+                        if lc_state and lot_cards_df is not None and not lot_cards_df.empty:
+                            _sc, _tc = lc_state["sku_col"], lc_state["title_col"]
+                            _pc = lc_state["price_col"]
+                            for _, _r in lot_cards_df.iterrows():
+                                if str(_r[_sc]).upper() in _sold_skus:
+                                    continue
+                                _left.append({
+                                    "SKU": str(_r[_sc]),
+                                    "Title": str(_r[_tc]) if _tc else "—",
+                                    "Asking ($)": float(buying._money(_r[_pc])) if _pc else 0.0,
+                                })
+                        if _left:
+                            st.divider()
+                            _ask = sum(x["Asking ($)"] for x in _left)
+                            # eBay's published trading-card rate, the same one
+                            # the Calculator uses — not a round number guess.
+                            _net_if = _ask * (1 - 0.1235) - 0.40 * len(_left)
+                            _collected = sum(float(s.get("net_proceeds") or 0)
+                                             for s in sold_records)
+                            _cost = (buying._money(lot.get("total_cost"))
+                                     + buying._money(lot.get("ship_cost")))
+                            st.markdown(f"**🟡 Still to sell ({len(_left)})**")
+                            _q1, _q2, _q3, _q4 = st.columns(4)
+                            _q1.metric("Asking", f"${_ask:,.2f}")
+                            _q2.metric("Net if all sell", f"${_net_if:,.2f}",
+                                       help="After eBay's 12.35% trading-card fee "
+                                            "and the $0.40 per-order fee.")
+                            _q3.metric("Collected so far", f"${_collected:,.2f}")
+                            _q4.metric("Projected final",
+                                       f"${_collected + _net_if - _cost:,.2f}",
+                                       delta=f"cost ${_cost:,.2f}", delta_color="off")
+                            if _collected < _cost:
+                                st.caption(f"Still ${_cost - _collected:,.2f} short of "
+                                           f"covering the lot — these are what gets you "
+                                           f"there.")
+                            st.dataframe(
+                                pd.DataFrame(sorted(_left, key=lambda x: -x["Asking ($)"])),
+                                use_container_width=True, hide_index=True,
+                                column_config={"Asking ($)":
+                                               st.column_config.NumberColumn(format="$%.2f")})
+
                         # Cross-check: Supabase lot_cards inventory vs sales_records
                         _inv_cards = _lot_cards_by_pfx.get(pfx.upper(), [])
                         if _inv_cards:
