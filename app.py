@@ -3264,6 +3264,176 @@ def render_sheet_import(key: str = "inv"):
         st.session_state.pop("inv_cards", None)
 
 
+def render_photo_pack(key: str = "pp"):
+    """Scanner export in, cards and post-ready photos out.
+
+    The whole job in one screen: read the export, put the cards in inventory,
+    copy the photos out of the scanner's S3 into our own bucket, and hand back
+    a zip that can be AirDropped to a phone and posted from.
+
+    Front and back only by default. A stack export carries ten images per
+    card, but slots 1 and 2 are the full-size front and back (around 1MB each)
+    and the rest are small crops — verified 3 Oct 2026 by eye on a Topps
+    Chrome Sapphire. Ten per card makes a 60MB zip to find two photos in.
+    """
+    import dfs_intake as intake
+
+    st.caption("Drop in a Heystack or Card Dealer Pro export. The cards go into "
+               "Inventory, the photos become yours, and you get a zip to post from.")
+    up = st.file_uploader("Scanner export (CSV)", type=["csv"], key=f"{key}_file")
+    if up is None:
+        st.info("The export is the file you'd normally upload to eBay — it carries "
+                "every photo URL, which is what makes this possible.")
+        return
+
+    ik = intake.read_export(up.getvalue().decode("utf-8-sig", errors="replace"))
+    cards, summary = ik["cards"], intake.summarize(ik["cards"])
+    if not cards:
+        st.error("No cards found. Expected an eBay File Exchange export with a "
+                 "Title and a Custom label (SKU) column.")
+        return
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Cards", f"{summary['cards']:,}")
+    c2.metric("Photos available", f"{summary['images_total']:,}")
+    c3.metric("Asking", f"${summary['value']:,.2f}")
+
+    o1, o2, o3 = st.columns(3)
+    _which = o1.selectbox("Photos to keep", ["Front and back", "Front only", "All of them"],
+                          key=f"{key}_which")
+    _tool = o2.selectbox("Scanned with", ["heystack", "cdp", "other"], key=f"{key}_tool",
+                         help="The file cannot say — both tools export the identical "
+                              "39-column eBay template.")
+    _lot = o3.text_input("Lot prefix", value=str(cards[0]["sku"]).rsplit("-", 2)[0],
+                         key=f"{key}_lot",
+                         help="Register this in Purchases spelled exactly like this, "
+                              "or the cards will not roll up to their cost.")
+    _keep = {"Front and back": 2, "Front only": 1, "All of them": 20}[_which]
+
+    st.dataframe(pd.DataFrame([{
+        "SKU": c["sku"], "Card": c["title"], "Price": c["list_price"],
+        "Photos": len(c["images"])} for c in cards]),
+        use_container_width=True, hide_index=True,
+        column_config={"Price": st.column_config.NumberColumn(format="$%.2f")})
+
+    if st.button(f"📦 Import {len(cards)} cards and build the photo pack",
+                 type="primary", use_container_width=True, key=f"{key}_go"):
+        bar = st.progress(0.0, "Importing…")
+        rows = intake.to_rows(cards, batch=intake.batch_code(_tool), tool=_tool,
+                              lot_prefix=_lot, status="listed")
+        if _neon_post("inventory_cards", rows, on_conflict="sku") is None:
+            st.error(f"Import failed: {_neon_last_error['msg'] or 'unknown error'}")
+            bar.empty()
+            return
+
+        live = {c["sku"]: c for c in (_neon_get("inventory_cards", "?limit=5000") or [])}
+        mirrored = failed = 0
+        for n, c in enumerate(cards, 1):
+            bar.progress(n / len(cards) * 0.9,
+                         f"Copying photos… {n}/{len(cards)} · {c.get('player') or c['sku']}")
+            urls = c["images"][:_keep]
+            if not urls:
+                continue
+            try:
+                req = urllib.request.Request(
+                    f"{WORKER_URL}/api/inventory/mirror", method="POST",
+                    headers=_neon_headers(),
+                    data=json.dumps({"sku": c["sku"], "urls": urls}).encode())
+                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=120) as r:
+                    res = json.loads(r.read().decode())
+            except Exception as e:
+                failed += len(urls)
+                st.warning(f"{c['sku']}: {e}")
+                continue
+            mirrored += len(res.get("urls") or [])
+            failed += len(res.get("failed") or [])
+            row = live.get(c["sku"])
+            if row and res.get("urls"):
+                _neon_patch("inventory_cards", row["id"], {"images": res["urls"]})
+                row["images"] = res["urls"]
+
+        bar.progress(0.95, "Building the zip…")
+        fresh = [live[c["sku"]] for c in cards if c["sku"] in live]
+        st.session_state[f"{key}_zip"] = photo_pack_zip(
+            fresh, lambda c: c.get("list_price") or 0, all_photos=(_keep > 2))
+        bar.empty()
+        st.session_state.pop("inv_cards", None)
+        st.success(f"✅ {len(cards)} cards in Inventory · {mirrored} photos copied to "
+                   f"your own storage" + (f" · {failed} failed" if failed else ""))
+
+    if st.session_state.get(f"{key}_zip"):
+        st.download_button(
+            f"⬇️ Download photos + captions "
+            f"({len(st.session_state[f'{key}_zip']) / 1_048_576:.0f} MB)",
+            st.session_state[f"{key}_zip"], type="primary", use_container_width=True,
+            file_name=f"cards-to-post-{date.today():%Y-%m-%d}.zip",
+            mime="application/zip", key=f"{key}_dl")
+        st.caption("Unzip and AirDrop the **POST THESE** folder to your phone. Photos "
+                   "arrive numbered in posting order, priciest first, with the price in "
+                   "the filename. **captions.txt** has the Instagram and Facebook "
+                   "wording for each card.")
+
+
+def photo_pack_zip(cards, price_of, *, handle="@dfscards", notes=None,
+                   all_photos=False, progress=None) -> bytes:
+    """A zip you can post from, not an archive you have to dig through.
+
+    The photos live in R2 and the captions are generated, but posting happens
+    on a phone — so the useful shape is one flat folder of front images,
+    numbered in the order they should go up, with the price in the filename,
+    beside a captions file. AirDrop that folder and it lands in the camera
+    roll in the right order.
+
+    Every card's remaining photos go in a second folder for the buyer who asks
+    for a back shot, rather than being left out or cluttering the first one.
+    """
+    import io as _io, zipfile as _zip
+    import dfs_channels as _ch
+
+    notes = notes or {}
+    buf = _io.BytesIO()
+    # Stored, not deflated: these are JPEGs, so compressing them costs time
+    # and saves nothing.
+    with _zip.ZipFile(buf, "w", _zip.ZIP_STORED) as z:
+        ordered = sorted(cards, key=lambda c: -(float(price_of(c) or 0)))
+        caps = []
+        for n, c in enumerate(ordered, 1):
+            if progress:
+                progress(n, len(ordered), c.get("player") or c.get("sku"))
+            short = re.sub(r"[/\\:]", "-", str(c.get("player") or c.get("sku") or ""))
+            short = re.sub(r"[^A-Za-z0-9 .#-]", "", short)[:40].strip() or c.get("sku")
+            imgs = c.get("images") or []
+            for i, u in enumerate(imgs, 1):
+                try:
+                    data = urllib.request.urlopen(urllib.request.Request(
+                        u, headers={"User-Agent": "Mozilla/5.0"}),
+                        context=ssl_ctx(), timeout=40).read()
+                except Exception:
+                    continue
+                # Front and back both belong in the folder that gets AirDropped:
+                # a back shot filed somewhere else cannot go in the carousel,
+                # which is the one place people actually want it. "a"/"b" keeps
+                # them adjacent and in order once they hit the camera roll.
+                money = f"${float(price_of(c) or 0):.0f}"
+                if i == 1:
+                    z.writestr(f"POST THESE/{n:02d}a {short} {money} front.jpg", data)
+                elif i == 2:
+                    z.writestr(f"POST THESE/{n:02d}b {short} {money} back.jpg", data)
+                elif all_photos:
+                    z.writestr(f"all photos/{n:02d} {short}/{i:02d}.jpg", data)
+                else:
+                    break
+            _note = notes.get(c.get("sku"), "")
+            caps.append(
+                f"=== {n:02d} · {c.get('title') or c.get('sku')} ===\n\n"
+                f"-- INSTAGRAM --\n"
+                f"{_ch.ig_caption(c, price=price_of(c), handle=handle, why=_note)}\n\n"
+                f"-- FACEBOOK / DISCORD --\n"
+                f"{_ch.fb_caption(c, price=price_of(c))}\n")
+        z.writestr("POST THESE/captions.txt", "\n\n".join(caps))
+    return buf.getvalue()
+
+
 # ─── Claim sales (Facebook / Discord) ─────────────────────────────────────────
 def render_claim_sale(key: str = "cs"):
     """Run a claim sale without a notepad.
@@ -3402,6 +3572,38 @@ def render_claim_sale(key: str = "cs"):
                     placeholder="optional — 'The Best Ever 🐐', 'Red Sox #1 Prospect ⬆️TOP', "
                                 "'POP 12'")
 
+            st.markdown("##### 📸 Photos ready to post")
+            _pz1, _pz2 = st.columns([2, 1])
+            _allp = _pz2.checkbox("Include every photo", key=f"{key}_allp",
+                                  help="Off = just the front of each card, which is "
+                                       "what goes in the post. On also includes the "
+                                       "backs and detail shots.")
+            if _pz1.button("📦 Build photo pack", key=f"{key}_buildzip",
+                           use_container_width=True):
+                _bar = st.progress(0.0, "Fetching photos…")
+                def _p(i, n, who):
+                    _bar.progress(i / max(n, 1), f"{i}/{n} · {who}")
+                st.session_state[f"{key}_zip"] = photo_pack_zip(
+                    _picked, _price_of, all_photos=_allp,
+                    notes={c["sku"]: st.session_state.get(f"{key}_note_{c['sku']}", "")
+                           for c in _picked},
+                    progress=_p)
+                _bar.empty()
+            if st.session_state.get(f"{key}_zip"):
+                st.download_button(
+                    f"⬇️ Download photos + captions "
+                    f"({len(st.session_state[f'{key}_zip']) / 1_048_576:.0f} MB)",
+                    st.session_state[f"{key}_zip"],
+                    file_name=f"cards-to-post-{date.today():%Y-%m-%d}.zip",
+                    mime="application/zip", use_container_width=True,
+                    type="primary", key=f"{key}_zipdl")
+                st.caption("Unzip, then AirDrop the **POST THESE** folder to your "
+                           "phone — the photos land in your camera roll numbered in "
+                           "posting order, priciest first, with the price in each "
+                           "filename. **captions.txt** has the Instagram and Facebook "
+                           "wording for each one.")
+
+            st.markdown("---")
             st.download_button(
                 "⬇️ All captions as a text file",
                 "\n\n".join(
@@ -9588,11 +9790,17 @@ if _active_tab == 4:
     else:
         from datetime import timezone as _optz
 
+        # The photo pack is owner-only for now: it copies images into R2 and
+        # Duane asked to try it on his own account before anyone else sees it.
+        _op_labels = ["📦 Inventory & Aging", "🔄 Reprice Queue", "📅 Sunday Reprice",
+                      "📣 Promote Listings", "📊 TCP Reprice",
+                      "📄 Import Spreadsheet", "📱 Claim Sale"]
+        if is_owner_account():
+            _op_labels.append("📸 Photo Pack")
+        _op_tabs = st.tabs(_op_labels)
         (op_tab_inv, op_tab_queue, op_tab_sunday, op_tab_promote, op_tab_tcp,
-         op_tab_sheet, op_tab_claim) = st.tabs(
-            ["📦 Inventory & Aging", "🔄 Reprice Queue", "📅 Sunday Reprice",
-             "📣 Promote Listings", "📊 TCP Reprice",
-             "📄 Import Spreadsheet", "📱 Claim Sale"])
+         op_tab_sheet, op_tab_claim) = _op_tabs[:7]
+        op_tab_photo = _op_tabs[7] if len(_op_tabs) > 7 else None
 
         # ── helpers shared across both sub-tabs ───────────────────────────────
         def _days_since(dt_str):
@@ -10935,6 +11143,11 @@ if _active_tab == 4:
             st.caption("Already tracking cards in Excel or Sheets? Bring the whole "
                        "sheet in — any column names — instead of retyping it.")
             render_sheet_import(key="op")
+
+        if op_tab_photo is not None:
+            with op_tab_photo:
+                st.markdown("### 📸 Photo pack")
+                render_photo_pack(key="oppp")
 
         with op_tab_claim:
             st.markdown("### 📱 Claim sale — Facebook & Discord")

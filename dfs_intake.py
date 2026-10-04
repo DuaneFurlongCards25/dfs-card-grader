@@ -112,12 +112,17 @@ def read_export(text: str) -> dict:
     m = _header_map(hdr)
     body = [dict(zip(hdr, r)) for r in rows[hdr_i + 1:] if any((c or "").strip() for c in r)]
 
+    # Which tool made this file cannot be read from the file.
+    #
+    # Checked 3 Oct 2026 across three real exports (CHATTWHAT, GIRKSWHATNOT,
+    # CANCWHT): the headers are byte-identical, 39 columns, same names, same
+    # order. Both products emit the same eBay File Exchange template.
+    #
+    # The old guess keyed on "CD:Card Condition" / "Custom label (SKU)", which
+    # every one of them carries, so it answered "cdp" for every file including
+    # Heystack's — stamping the wrong source_tool onto the cards. An honest
+    # "unknown" lets the caller say, and the Intake screen asks.
     tool = "unknown"
-    joined = " ".join(hdr).lower()
-    if "cd:card condition" in joined and "schedule" in joined:
-        tool = "cdp"
-    elif "custom label (sku)" in joined:
-        tool = "cdp"
 
     cards, skipped = [], []
     for d in body:
@@ -157,8 +162,6 @@ def read_export(text: str) -> dict:
             "specifics": specifics,
         })
 
-    if tool == "unknown" and cards:
-        tool = "haystack" if any(c["grade"] for c in cards) else "cdp"
     return {"cards": cards, "skipped": skipped, "columns": len(hdr), "tool": tool}
 
 

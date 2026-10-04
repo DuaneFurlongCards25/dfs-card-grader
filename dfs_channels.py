@@ -152,6 +152,32 @@ def _describe(c) -> str:
 
 # ─── Instagram ───────────────────────────────────────────────────────────────
 
+def humanise(s: str) -> str:
+    """"BaseWhiteMiniDiamondRefractor" -> "White Mini-Diamond Refractor".
+
+    The scanner writes item specifics as squashed CamelCase, which is fine for
+    eBay's dropdowns and unreadable in a caption. "Base" is dropped: it is the
+    scanner saying "no parallel", not a word a collector wants to read above a
+    price. Known two-word terms are re-hyphenated so they read as the hobby
+    writes them.
+    """
+    s = str(s or "").strip()
+    if not s or s.lower() in {"base", "none", "n/a"}:
+        return ""
+    if " " not in s:                       # only split when it IS squashed
+        s = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", s)   # BaseWhite -> Base White
+        s = re.sub(r"(?<=[a-zA-Z])(?=\d)", " ", s)      # Bestof2025 -> Bestof 2025
+        s = re.sub(r"(?<=\d)(?=[A-Za-z])", " ", s)
+    words = [w for w in s.split() if w.lower() != "base"]
+    out = " ".join(words)
+    for a, b in (("Mini Diamond", "Mini-Diamond"), ("XFractor", "X-Fractor"),
+                 ("X Fractor", "X-Fractor"), ("Die Cut", "Die-Cut"),
+                 ("On Card", "On-Card"), ("Bestof", "Best of"),
+                 ("Refractors", "Refractor")):
+        out = re.sub(re.escape(a), b, out, flags=re.I)
+    return out.strip()
+
+
 def _tag(*parts) -> str:
     return "#" + re.sub(r"[^a-z0-9]", "", " ".join(str(p or "") for p in parts).lower())
 
@@ -274,8 +300,8 @@ def ig_caption(card, *, price: float | None = None, handle: str = "@dfscards",
         marks.append("ROOKIE")
     if _is_auto(card):
         marks.append("AUTO ✍️")
-    par = str(card.get("parallel") or "").strip()
-    if par and par.lower() not in {"base", "none"}:
+    par = humanise(card.get("parallel"))
+    if par:
         said = {w for w in re.split(r"\W+", head.lower()) if w}
         kept = [w for w in par.split() if w.lower() not in said
                 and w.lower() not in {"auto", "autograph", "autographed",
@@ -380,8 +406,8 @@ def fb_caption(card, *, price=None, note: str = "", tagline: str = "",
     # set is already "Bowman Chrome 1st", so printing both gives "Bowman
     # Chrome 1st Chrome Prospect Autograph ✍️ AUTOGRAPH". Drop the words the
     # set line already said, and the auto wording the ✍️ tag covers.
-    par = str(card.get("parallel") or "").strip()
-    if par and par.lower() not in {"base", "none"}:
+    par = humanise(card.get("parallel"))
+    if par:
         said = {w for w in re.split(r"\W+", " ".join(bits).lower()) if w}
         kept = [w for w in par.split()
                 if w.lower() not in said
