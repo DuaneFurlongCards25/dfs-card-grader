@@ -1249,6 +1249,61 @@ def is_owner_account() -> bool:
     return st.session_state.get("access_code", "") == "DFS-MASTER"
 
 
+# ─── Supervised price changes ─────────────────────────────────────────────────
+# Someone learning the business should be able to work in the real app without
+# a wrong number reaching eBay. Their price change is held as a request until
+# the owner says yes. It is a per-code setting, not a rule about one person —
+# the point is to switch it off once they have the hang of it.
+MONEY_FIELDS = {"current_price": "eBay price", "list_price": "asking price",
+                "cost": "cost", "est_value": "value", "suggested_price": "suggested price"}
+
+
+def supervised() -> bool:
+    """Does this person's code require the owner's sign-off on prices?"""
+    if is_owner_account():
+        return False
+    v = st.session_state.get("_supervised")
+    if v is None:
+        code = (st.session_state.get("access_code") or "").strip()
+        try:
+            rows = _neon_get("access_codes", f"?code=eq.{urllib.parse.quote(code)}")
+            v = bool(rows and rows[0].get("needs_approval"))
+        except Exception:
+            # Fail closed: if we cannot tell, hold the change rather than
+            # letting an unreviewed price reach a live listing.
+            v = not is_owner_account()
+        st.session_state["_supervised"] = v
+    return v
+
+
+def request_price_change(table, row_key, updates, label="", note=""):
+    """Queue the money fields for approval. Returns what is left to save."""
+    rest, asked = {}, []
+    for k, v in (updates or {}).items():
+        if k in MONEY_FIELDS and v is not None:
+            asked.append({
+                "requested_by": st.session_state.get("access_name") or "unknown",
+                "table_name": table, "row_key": str(row_key),
+                "label": (label or str(row_key))[:160], "field": k,
+                "old_value": None, "new_value": float(v), "note": note or None,
+            })
+        else:
+            rest[k] = v
+    if asked:
+        _neon_post("price_approvals", asked)
+    return rest, len(asked)
+
+
+def pending_price_approvals():
+    if not is_owner_workspace():
+        return []
+    try:
+        return _neon_get("price_approvals",
+                         "?status=eq.pending&order=requested_at.desc&limit=200") or []
+    except Exception:
+        return []
+
+
 def is_owner_workspace() -> bool:
     """Is this person working inside the owner's data?
 
@@ -3027,6 +3082,10 @@ with st.sidebar:
     _my_open = len([t for t in support_my_tickets() if t.get("status") != "closed"])
     if _my_open:
         st.caption(f"📬 {_my_open} open with Duane")
+    if supervised():
+        _mine_pa = len(pending_price_approvals())
+        st.caption(f"⏳ {_mine_pa} price change(s) awaiting Duane's OK"
+                   if _mine_pa else "✅ No price changes pending")
 
     # ── Admin (Duane only) ────────────────────────────────────────────────────
     if is_owner_account():
@@ -4132,6 +4191,16 @@ def _show_admin():
                         admin_toggle_code(_c["id"], True)
                         _admin_rerun()
                 if _c["code"] != "DFS-MASTER":
+                    _sup_now = bool(_c.get("needs_approval"))
+                    if st.checkbox(
+                            "Price changes need my approval",
+                            value=_sup_now, key=f"ppl_sup_{_c['id']}",
+                            help="On while they are learning. Off once you trust "
+                                 "their pricing — their edits then save straight "
+                                 "away.") != _sup_now:
+                        _neon_patch("access_codes", _c["id"],
+                                    {"needs_approval": not _sup_now})
+                        _admin_rerun()
                     if _k3.button("🗑 Delete code", key=f"ppl_del_{_c['id']}",
                                   use_container_width=True,
                                   help="Removes the code. Their data stays."):
@@ -4185,6 +4254,54 @@ def _show_admin():
                     _admin_rerun()
 
     st.markdown("---")
+
+    # ── Price changes waiting on you ──────────────────────────────────────────
+    _pend = pending_price_approvals()
+    if _pend:
+        st.markdown(f"### 💲 Price changes waiting ({len(_pend)})")
+        st.caption("Proposed by someone whose code requires your sign-off. "
+                   "Approving writes the value; rejecting leaves the card alone.")
+        for _a in _pend:
+            _lbl = MONEY_FIELDS.get(_a["field"], _a["field"])
+            _old = _a.get("old_value")
+            _ac1, _ac2, _ac3 = st.columns([4, 1, 1])
+            _ac1.markdown(
+                f"**{_a.get('label') or _a['row_key']}**  \n"
+                f"<span style='color:#94a3b8;font-size:0.82rem;'>"
+                f"{_a.get('requested_by')} · {_lbl} → "
+                f"<b style='color:#e2e8f0;'>${float(_a['new_value']):,.2f}</b>"
+                + (f" (was ${float(_old):,.2f})" if _old is not None else "")
+                + f" · {(_a.get('requested_at') or '')[:16]}</span>",
+                unsafe_allow_html=True)
+            if _ac2.button("✅ Approve", key=f"pa_ok_{_a['id']}",
+                           use_container_width=True, type="primary"):
+                # Apply it now — an approval that still needs someone to go
+                # and type the number is not an approval.
+                _ok = (update_listing(_a["row_key"], {_a["field"]: _a["new_value"]})
+                       if _a["table_name"] == "listings" else
+                       _neon_patch("inventory_cards", int(_a["row_key"]),
+                                   {_a["field"]: _a["new_value"],
+                                    "updated_at": _dt_adm.datetime.utcnow()
+                                    .strftime("%Y-%m-%dT%H:%M:%SZ")}))
+                if _ok:
+                    _neon_patch("price_approvals", _a["id"], {
+                        "status": "approved",
+                        "decided_by": st.session_state.get("access_name"),
+                        "decided_at": _dt_adm.datetime.utcnow()
+                        .strftime("%Y-%m-%dT%H:%M:%SZ")})
+                    st.session_state.pop("inv_cards", None)
+                    _admin_rerun()
+                else:
+                    st.error("Could not write the price — left pending.")
+            if _ac3.button("✕ Reject", key=f"pa_no_{_a['id']}",
+                           use_container_width=True):
+                _neon_patch("price_approvals", _a["id"], {
+                    "status": "rejected",
+                    "decided_by": st.session_state.get("access_name"),
+                    "decided_at": _dt_adm.datetime.utcnow()
+                    .strftime("%Y-%m-%dT%H:%M:%SZ")})
+                _admin_rerun()
+        st.markdown("---")
 
     # ── Support queue ─────────────────────────────────────────────────────────
     _tickets = _neon_get("support_tickets", "?order=created_at.desc&limit=100") or []
@@ -4417,6 +4534,19 @@ if is_owner_account() and st.session_state.get("_drift"):
         else:
             st.error("Couldn't update automatically. Run this in Terminal:  \n"
                      "`python3 support_tenant.py --migrate all`")
+
+if is_owner_account() and "_pa_open" not in st.session_state:
+    st.session_state["_pa_open"] = len(pending_price_approvals())
+
+if is_owner_account() and st.session_state.get("_pa_open"):
+    _n = st.session_state["_pa_open"]
+    _p1, _p2 = st.columns([5, 1])
+    _p1.info(f"💲 **{_n} price change{'s' if _n != 1 else ''}** waiting for your "
+             f"approval. Nothing has been written to the card until you say yes.")
+    if _p2.button("Review", use_container_width=True, key="pa_banner"):
+        st.session_state["show_admin"] = True
+        st.session_state.pop("_pa_open", None)
+        st.rerun()
 
 if is_owner_account() and st.session_state.get("_sup_open"):
     _n = st.session_state["_sup_open"]
@@ -5722,6 +5852,17 @@ def update_listing(item_number, updates):
     """
     if not WORKER_URL:
         return False
+    # A supervised helper's price goes to the owner's queue instead of to the
+    # listing. Everything else about the row still saves, so notes and
+    # statuses are not held hostage to a price review.
+    if supervised():
+        updates, held = request_price_change(
+            "listings", item_number, updates,
+            label=(updates.get("title") or str(item_number)))
+        if held:
+            st.toast(f"Sent {held} price change(s) to Duane for approval", icon="⏳")
+        if not updates:
+            return True
     row = {"item_number": str(item_number), **updates}
     row.setdefault("updated_at", datetime.utcnow().isoformat() + "Z")
     return _neon_post("listings", row, on_conflict="item_number") is not None
@@ -15666,7 +15807,7 @@ if _active_tab == 17:
                         })
                     if st.button("💾 Save changes", type="primary", key="inv_save"):
                         by_id = {int(r["id"]): r for r in base.to_dict("records")}
-                        bad, saved, failed = [], 0, 0
+                        bad, saved, failed, queued = [], 0, 0, 0
                         for r in ed.to_dict("records"):
                             o = by_id.get(int(r["id"]))
                             upd = {}
@@ -15690,11 +15831,24 @@ if _active_tab == 17:
                             if "status" in upd:
                                 upd["status_updated_at"] = datetime.utcnow().isoformat() + "Z"
                             upd["updated_at"] = datetime.utcnow().isoformat() + "Z"
+                            # Money fields from a supervised helper become a
+                            # request; location, status and notes still save.
+                            if supervised():
+                                upd, _held = request_price_change(
+                                    "inventory_cards", int(r["id"]), upd,
+                                    label=(o.get("title") or r.get("sku") or ""))
+                                queued += _held
+                                if not {k: v for k, v in upd.items()
+                                        if k not in ("updated_at", "status_updated_at")}:
+                                    continue
                             # _neon_patch swallows its error and returns a bool
                             if _neon_patch("inventory_cards", int(r["id"]), upd):
                                 saved += 1
                             else:
                                 failed += 1
+                        if queued:
+                            st.info(f"⏳ {queued} price change(s) sent to Duane for "
+                                    f"approval — they apply once he says yes.")
                         if bad:
                             st.error("Not saved — location must look like B14-R2-P7: " + "; ".join(bad[:10]))
                         if failed:

@@ -72,7 +72,7 @@ const ALLOWED_TABLES = new Set([
   // consignment
   'consignment_items', 'consignment_lots', 'consignment_shipments',
   // app plumbing
-  'access_codes', 'pricing_usage', 'support_tickets',
+  'access_codes', 'pricing_usage', 'support_tickets', 'price_approvals',
   // Owner-only; see the guard in handleDb.
   'tenants',
 ]);
@@ -86,7 +86,7 @@ const ALLOWED_TABLES = new Set([
  * reset by writing to their own copy is not a budget.
  */
 const SHARED_TABLES = new Set(['access_codes', 'pricing_usage', 'tenants',
-                               'support_tickets']);
+                               'support_tickets', 'price_approvals']);
 // Same list for SQL: a shared table lives only in public and must never be
 // copied into a tenant schema by the drift repair.
 const SHARED_LIST = [...SHARED_TABLES, 'support_log'];
@@ -269,7 +269,7 @@ async function handleDb(request: Request, env: Env, table: string, id: string | 
      * code rather than taken from the request, so it cannot be forged or
      * mistyped into someone else's queue.
      */
-    if (table === 'support_tickets') {
+    if (table === 'support_tickets' || table === 'price_approvals') {
       const t = await resolveTenant(request, sql);
       if (t.schema !== 'public') {
         if (request.method === 'DELETE') return err('owner only', 403);
