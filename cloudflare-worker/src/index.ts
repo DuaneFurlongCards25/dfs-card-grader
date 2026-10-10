@@ -381,6 +381,51 @@ async function handleDb(request: Request, env: Env, table: string, id: string | 
 const IDENT_OK = /^[a-z_][a-z0-9_]*$/;
 const TYPE_OK = /^[a-z0-9_ ()\[\],."']+$/i;
 
+/**
+ * Delete a tenant: their codes, their registry row, and their data.
+ *
+ * This is the only route that drops anything, and it cannot be undone, so it
+ * asks the caller to prove intent rather than trusting a single click:
+ * `confirm` must equal the slug being deleted. A mis-aimed request fails
+ * instead of taking the wrong dealer's inventory with it.
+ *
+ * `public` can never be the target — that is the owner's own data and there
+ * is no reason this route should ever be the thing that removes it.
+ */
+async function tenantDelete(request: Request, env: Env) {
+  const sql = getSql(env);
+  try {
+    if ((await tenantSchema(request, sql)) !== 'public') return err('owner only', 403);
+    const body = await request.json().catch(() => null) as
+      { slug?: string; confirm?: string } | null;
+    const slug = (body?.slug || '').trim();
+    if (!slug) return err('slug required');
+    if (body?.confirm !== slug)
+      return err('confirm must match the slug exactly', 400);
+
+    const [t] = await sql`select id, schema_name from tenants where slug = ${slug}`;
+    if (!t) return err(`no tenant '${slug}'`, 404);
+    if (t.schema_name === 'public') return err('refusing to delete the owner', 403);
+    if (!IDENT_OK.test(t.schema_name)) return err('bad schema name', 500);
+
+    const [{ rows }] = await sql`
+      select coalesce(sum(n_live_tup), 0)::bigint as rows
+        from pg_stat_user_tables where schemaname = ${t.schema_name}`;
+
+    await sql.unsafe(`DROP SCHEMA IF EXISTS "${t.schema_name}" CASCADE`);
+    await sql`delete from access_codes where tenant_id = ${t.id}`;
+    await sql`delete from support_tickets where tenant_slug = ${slug}`;
+    await sql`delete from tenants where id = ${t.id}`;
+
+    return json({ deleted: slug, schema: t.schema_name, rows_removed: Number(rows) });
+  } catch (e: any) {
+    if (e instanceof TenantError) return err(e.message, e.status);
+    return err(`delete: ${String(e?.message || e).slice(0, 300)}`, 500);
+  } finally {
+    await sql.end({ timeout: 5 }).catch(() => {});
+  }
+}
+
 async function tenantDrift(request: Request, env: Env, apply: boolean) {
   const sql = getSql(env);
   try {
@@ -568,6 +613,9 @@ export default {
     }
 
     if (path === '/api/inventory/mirror' && request.method === 'POST') return mirror(request, env);
+
+    if (path === '/api/tenants/delete' && request.method === 'POST')
+      return tenantDelete(request, env);
 
     if (path === '/api/tenants/drift') return tenantDrift(request, env, false);
     if (path === '/api/tenants/migrate' && request.method === 'POST')

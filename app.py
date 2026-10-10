@@ -602,6 +602,31 @@ def support_my_tickets():
         return []
 
 
+def tenant_delete(slug: str):
+    """Delete a workspace and everything in it. Not reversible.
+
+    The Worker requires the slug twice — once as the target and once as a
+    confirmation — so a mis-aimed call fails rather than taking the wrong
+    person's inventory with it.
+    """
+    if not is_owner_account() or not WORKER_URL:
+        return None
+    try:
+        req = urllib.request.Request(
+            f"{WORKER_URL}/api/tenants/delete", method="POST",
+            headers=_neon_headers(),
+            data=json.dumps({"slug": slug, "confirm": slug}).encode())
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=60) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        try:
+            return {"error": json.loads(e.read().decode()).get("error")}
+        except Exception:
+            return {"error": f"HTTP {e.code}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def tenant_drift(apply: bool = False):
     """Are the testers' workspaces still identical to yours?
 
@@ -4029,6 +4054,94 @@ def _show_admin():
 
     with st.expander("🛠 First-time setup SQL (run once in Neon if daily limits aren't saving)", expanded=False):
         st.code("alter table access_codes add column if not exists daily_limit integer;", language="sql")
+
+    # ── People ────────────────────────────────────────────────────────────────
+    # Deleting someone used to mean a terminal script, so in practice nobody
+    # was removed and dead accounts accumulated. Two levels, because they are
+    # genuinely different acts: taking away a code leaves the data, deleting
+    # the workspace destroys it.
+    _tenants = _neon_get("tenants", "?order=id.asc") or []
+    _all_codes = admin_get_codes()
+    st.markdown(f"### 👥 People ({len(_tenants)} workspace(s))")
+    for _t in _tenants:
+        _is_owner_row = _t.get("schema_name") == "public"
+        _codes = [c for c in _all_codes if c.get("tenant_id") == _t["id"]]
+        _live = [c for c in _codes if c.get("active")]
+        with st.expander(
+                f"{'👑' if _is_owner_row else '👤'} **{_t['name']}** · "
+                f"{len(_codes)} code(s), {len(_live)} active"
+                + ("  — you" if _is_owner_row else ""),
+                expanded=False):
+            st.caption(f"slug `{_t['slug']}` · schema `{_t['schema_name']}`"
+                       + (" · this is your own data" if _is_owner_row else ""))
+            for _c in _codes:
+                _k1, _k2, _k3 = st.columns([3, 1, 1])
+                _k1.markdown(f"`{_c['code']}` — {'🟢 active' if _c.get('active') else '🔴 revoked'}"
+                             f" · {_c.get('usage_count') or 0} use(s)")
+                if _c.get("active"):
+                    if _k2.button("Revoke", key=f"ppl_rev_{_c['id']}",
+                                  use_container_width=True):
+                        admin_toggle_code(_c["id"], False)
+                        st.rerun()
+                else:
+                    if _k2.button("Reinstate", key=f"ppl_rei_{_c['id']}",
+                                  use_container_width=True):
+                        admin_toggle_code(_c["id"], True)
+                        st.rerun()
+                if _c["code"] != "DFS-MASTER":
+                    if _k3.button("🗑 Delete code", key=f"ppl_del_{_c['id']}",
+                                  use_container_width=True,
+                                  help="Removes the code. Their data stays."):
+                        _neon_delete("access_codes", _c["id"])
+                        st.rerun()
+
+            if not _is_owner_row:
+                st.markdown("---")
+                st.markdown("**Delete this workspace and all of their data**")
+                st.caption("Cannot be undone. Their cards, costs and sales are "
+                           "removed along with their codes.")
+                _typed = st.text_input(
+                    f"Type `{_t['slug']}` to confirm", key=f"ppl_confirm_{_t['id']}",
+                    label_visibility="visible", placeholder=_t["slug"])
+                if st.button(f"🗑 Permanently delete {_t['name']}",
+                             key=f"ppl_nuke_{_t['id']}", use_container_width=True,
+                             disabled=(_typed.strip() != _t["slug"])):
+                    _res = tenant_delete(_t["slug"])
+                    if _res and not _res.get("error"):
+                        st.success(f"Deleted **{_t['name']}** — "
+                                   f"{_res.get('rows_removed', 0)} row(s) removed.")
+                        st.rerun()
+                    else:
+                        st.error(f"Failed: {(_res or {}).get('error', 'unknown')}")
+    # Codes left over from before workspaces existed. They cannot sign in —
+    # the Worker refuses a code with no tenant — so they are pure clutter, and
+    # each one renders a yellow warning further down the panel.
+    _orphans = [c for c in _all_codes if not c.get("tenant_id")]
+    if _orphans:
+        with st.expander(f"🧹 {len(_orphans)} old code(s) with no workspace — "
+                         f"cannot sign in", expanded=False):
+            st.caption("Left from before each person got their own data. Deleting "
+                       "one removes nothing but the code itself.")
+            for _c in _orphans:
+                _o1, _o2 = st.columns([4, 1])
+                _o1.markdown(f"`{_c['code']}` — **{_c.get('name') or '—'}** · "
+                             f"{_c.get('usage_count') or 0} use(s) · "
+                             f"last {(_c.get('last_used') or 'never')[:10]}")
+                if _o2.button("🗑", key=f"orph_{_c['id']}", use_container_width=True):
+                    _neon_delete("access_codes", _c["id"])
+                    st.rerun()
+            st.markdown("")
+            if st.checkbox("I want to delete all of these", key="orph_all_ok"):
+                if st.button(f"🗑 Delete all {len(_orphans)} old codes",
+                             type="primary", use_container_width=True, key="orph_all"):
+                    _n = 0
+                    for _c in _orphans:
+                        if _neon_delete("access_codes", _c["id"]) is not None:
+                            _n += 1
+                    st.success(f"Removed {_n} old code(s).")
+                    st.rerun()
+
+    st.markdown("---")
 
     # ── Support queue ─────────────────────────────────────────────────────────
     _tickets = _neon_get("support_tickets", "?order=created_at.desc&limit=100") or []
