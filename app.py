@@ -4023,7 +4023,9 @@ def _show_support():
                     "❓ Question": "question"}[_kind]
             if support_submit(kind, _subject, _body,
                               "" if _where == "(not sure)" else _where) is not None:
-                st.success("Sent. Duane will come back to you.")
+                # The dialog closes on the rerun, taking st.success with it —
+                # a toast survives, so the sender actually sees it landed.
+                st.toast("✅ Sent to Duane — he'll come back to you.", icon="💬")
                 st.session_state["show_support"] = False
                 st.rerun()
             else:
@@ -4047,6 +4049,19 @@ def _show_support():
 
 
 # ─── Admin dialog (Duane only) ────────────────────────────────────────────────
+def _admin_rerun():
+    """Rerun without closing the Admin dialog.
+
+    `show_admin` is consumed when the dialog opens, so a bare st.rerun()
+    inside it lands the user back on the main screen — which meant every
+    delete, revoke or reply kicked you out and you had to navigate back in.
+    Re-arming the flag reopens it; it is consumed again on open, so the
+    dialog's own X still closes it for good.
+    """
+    st.session_state["show_admin"] = True
+    st.rerun()
+
+
 @st.dialog(f"🔐 {APP_NAME} — Admin", width="large")
 def _show_admin():
     import datetime as _dt_adm
@@ -4082,18 +4097,18 @@ def _show_admin():
                     if _k2.button("Revoke", key=f"ppl_rev_{_c['id']}",
                                   use_container_width=True):
                         admin_toggle_code(_c["id"], False)
-                        st.rerun()
+                        _admin_rerun()
                 else:
                     if _k2.button("Reinstate", key=f"ppl_rei_{_c['id']}",
                                   use_container_width=True):
                         admin_toggle_code(_c["id"], True)
-                        st.rerun()
+                        _admin_rerun()
                 if _c["code"] != "DFS-MASTER":
                     if _k3.button("🗑 Delete code", key=f"ppl_del_{_c['id']}",
                                   use_container_width=True,
                                   help="Removes the code. Their data stays."):
                         _neon_delete("access_codes", _c["id"])
-                        st.rerun()
+                        _admin_rerun()
 
             if not _is_owner_row:
                 st.markdown("---")
@@ -4110,7 +4125,7 @@ def _show_admin():
                     if _res and not _res.get("error"):
                         st.success(f"Deleted **{_t['name']}** — "
                                    f"{_res.get('rows_removed', 0)} row(s) removed.")
-                        st.rerun()
+                        _admin_rerun()
                     else:
                         st.error(f"Failed: {(_res or {}).get('error', 'unknown')}")
     # Codes left over from before workspaces existed. They cannot sign in —
@@ -4129,7 +4144,7 @@ def _show_admin():
                              f"last {(_c.get('last_used') or 'never')[:10]}")
                 if _o2.button("🗑", key=f"orph_{_c['id']}", use_container_width=True):
                     _neon_delete("access_codes", _c["id"])
-                    st.rerun()
+                    _admin_rerun()
             st.markdown("")
             if st.checkbox("I want to delete all of these", key="orph_all_ok"):
                 if st.button(f"🗑 Delete all {len(_orphans)} old codes",
@@ -4139,7 +4154,7 @@ def _show_admin():
                         if _neon_delete("access_codes", _c["id"]) is not None:
                             _n += 1
                     st.success(f"Removed {_n} old code(s).")
-                    st.rerun()
+                    _admin_rerun()
 
     st.markdown("---")
 
@@ -4174,13 +4189,13 @@ def _show_admin():
                                  .strftime("%Y-%m-%dT%H:%M:%SZ")})
                     st.session_state.pop("_sup_checked", None)
                     st.session_state["_sup_open"] = 0
-                    st.rerun()
+                    _admin_rerun()
                 if _rc2.button("Close without reply", key=f"sup_close_{_t['id']}",
                                use_container_width=True):
                     _neon_patch("support_tickets", _t["id"], {"status": "closed"})
                     st.session_state.pop("_sup_checked", None)
                     st.session_state["_sup_open"] = 0
-                    st.rerun()
+                    _admin_rerun()
     st.markdown("---")
 
     codes = admin_get_codes()
@@ -4245,7 +4260,7 @@ def _show_admin():
             admin_set_expiry(row["id"], int(_exp_days))
             _exp_label = f"{_exp_days} days" if _exp_days else "removed"
             st.success(f"Expiry {_exp_label} for {row['name']}")
-            st.rerun()
+            _admin_rerun()
 
         # Daily limit row
         _dl_cur = row.get("daily_limit") or 0
@@ -4259,16 +4274,16 @@ def _show_admin():
         if _dl_c3.button("💾 Save", key=f"adm_lim_save_{row['id']}"):
             admin_set_daily_limit(row["id"], int(_new_limit))
             st.success(f"Limit set to {_new_limit}/day for {row['name']}")
-            st.rerun()
+            _admin_rerun()
 
         if row["active"]:
             if st.button("Revoke", key=f"adm_rev_{row['id']}"):
                 admin_toggle_code(row["id"], False)
-                st.rerun()
+                _admin_rerun()
         else:
             if st.button("Reinstate", key=f"adm_rei_{row['id']}"):
                 admin_toggle_code(row["id"], True)
-                st.rerun()
+                _admin_rerun()
         st.markdown("---")
 
     st.markdown("### ➕ Create New Code")
@@ -4282,7 +4297,7 @@ def _show_admin():
             if admin_insert_code(new_code.strip().upper(), new_name.strip(), trial_days=days):
                 exp_note = f" · expires in {days} days" if days else " · no expiry"
                 st.success(f"✅ Created `{new_code.upper()}` for **{new_name}**{exp_note}")
-                st.rerun()
+                _admin_rerun()
             else:
                 st.error("Failed — code may already exist.")
         else:
