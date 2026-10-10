@@ -1249,8 +1249,32 @@ def is_owner_account() -> bool:
     return st.session_state.get("access_code", "") == "DFS-MASTER"
 
 
+def is_owner_workspace() -> bool:
+    """Is this person working inside the owner's data?
+
+    True for Duane, and for a helper he has given a code to — someone pricing
+    and organising his cards. They are not the owner (no Admin panel, no
+    account management), but every feature that acts on his inventory is
+    theirs to use, because that is the job.
+
+    Detected rather than listed: the Worker serves the `tenants` table only to
+    the owner's workspace, so being able to read it IS the proof. A tenant
+    with their own data gets 403 and an empty list back.
+    """
+    if is_owner_account():
+        return True
+    v = st.session_state.get("_own_ws")
+    if v is None:
+        try:
+            v = bool(_neon_get("tenants", "?limit=1"))
+        except Exception:
+            v = False
+        st.session_state["_own_ws"] = v
+    return v
+
+
 def pricing_unlimited():
-    """Only the owner's account is uncapped.
+    """Only the owner's workspace is uncapped.
 
     Everyone else spends Duane's CardHedger key, so the per-code daily_limit
     is the only thing standing between a curious tester and his rate limit.
@@ -1258,8 +1282,12 @@ def pricing_unlimited():
     the only other person with a code; as a tenant that silently reinstated
     unlimited look-ups on someone else's bill. Raise his daily_limit instead
     — it is one UPDATE and it is visible.
+
+    A helper inside the owner's workspace is uncapped too: a Sunday reprice
+    runs through hundreds of look-ups, and stopping it at 50 would just mean
+    Duane finishing the job himself.
     """
-    return is_owner_account()
+    return is_owner_workspace()
 
 def pricing_used_today():
     """Live look-ups already used today (max of Neon + this session)."""
@@ -4222,10 +4250,12 @@ def _show_admin():
                 f"`python3 provision_tenant.py --attach {row['code']} "
                 f"{re.sub(r'[^a-z0-9]', '', (row['name'] or 'tester').lower())[:20] or 'tester'}`")
         elif _ten.get("schema_name") == "public" and row["code"] != "DFS-MASTER":
-            st.error(
-                f"⚠️ **{row['name']}** reads YOUR data (schema `public`). "
-                f"Revoke it, or move them to their own workspace with "
-                f"`provision_tenant.py --attach`.")
+            # Sharing the owner's workspace used to be only ever a mistake, so
+            # this shouted. It is now also how a helper is given access, and a
+            # red error on a deliberate arrangement trains you to ignore it.
+            st.info(f"👥 **{row['name']}** works in YOUR workspace — sees and "
+                    f"edits your cards, costs and sales. Everything except the "
+                    f"Admin panel. Revoke below if that is not intended.")
         c1, c2, c3, c4, c5, c6 = st.columns([2, 2, 1, 1, 1, 2])
         c1.markdown(f"**{row['name']}**")
         c2.code(row["code"])
@@ -8634,7 +8664,7 @@ alter table scan_cards disable row level security;"""
                         ]
     
                         # Block export if Duane has graded cards without Grade filled
-                        _is_duane_export = is_owner_account()
+                        _is_duane_export = is_owner_workspace()
                         _grade_warnings = [r.get("Player","Card") for r in edited_records
                                            if r.get("✓") and r.get("Graded") and not (r.get("Grade") or "").strip()] if _is_duane_export else []
                         if _grade_warnings:
@@ -8709,7 +8739,7 @@ alter table scan_cards disable row level security;"""
                                 _cert_num   = (row.get("Cert #") or "").strip()
                                 # CD: graded-card fields (27501/27502) only active for Duane
                                 # until the eBay option ID mapping is fully verified.
-                                _graded_export_enabled = is_owner_account()
+                                _graded_export_enabled = is_owner_workspace()
                                 _has_grade  = bool(_is_graded and _grade_val and _graded_export_enabled)
                                 _cd_grader  = EBAY_GRADER_VALUES.get(_grader_key, _grader_key) if _has_grade else ""
                                 _cd_grade   = EBAY_GRADE_VALUES.get(str(_grade_val), f"{_grade_val} - (ID: 275020)") if _has_grade else ""
@@ -9156,7 +9186,7 @@ alter table scan_cards disable row level security;"""
 if _active_tab == 3:
     st.markdown("## 📦 Inventory Check")
 
-    _is_owner = is_owner_account()
+    _is_owner = is_owner_workspace()
     _wb_label = "DFS Operations Workbook" if _is_owner else "your Operations Workbook"
 
     st.markdown(
@@ -9923,7 +9953,7 @@ if _active_tab == 4:
         _op_labels = ["📦 Inventory & Aging", "🔄 Reprice Queue", "📅 Sunday Reprice",
                       "📣 Promote Listings", "📊 TCP Reprice",
                       "📄 Import Spreadsheet", "📱 Claim Sale"]
-        if is_owner_account():
+        if is_owner_workspace():
             _op_labels.append("📸 Photo Pack")
         _op_tabs = st.tabs(_op_labels)
         (op_tab_inv, op_tab_queue, op_tab_sunday, op_tab_promote, op_tab_tcp,
