@@ -109,7 +109,21 @@ SHOPIFY_MAX_IMAGES = 2
 
 
 def shopify_csv(cards, *, published: bool = True, grams: int = 28,
-                max_images: int = SHOPIFY_MAX_IMAGES) -> str:
+                max_images: int = SHOPIFY_MAX_IMAGES, exclude_skus=None,
+                skipped_out=None) -> str:
+    """`exclude_skus` keeps cards you no longer own off the website.
+
+    A scanner export is a snapshot of the day it was scanned; it has no idea
+    what has sold since. Of 70 cards in one real September batch, 12 were
+    already gone by October — pushing that file to Shopify would have listed
+    twelve cards that do not exist, and every sale of one is a cancelled
+    order and a defect.
+
+    Pass the SKUs known sold (sales records, and anything missing from the
+    current eBay active report). Skipped cards are reported through
+    `skipped_out` rather than silently dropped: a card wrongly on that list
+    is one that never reaches the website, which is its own kind of loss.
+    """
     """Shopify product import, one product per card.
 
     Shopify takes extra images as extra rows carrying only the Handle and the
@@ -121,9 +135,14 @@ def shopify_csv(cards, *, published: bool = True, grams: int = 28,
     w = csv.DictWriter(buf, fieldnames=SHOPIFY_COLS, extrasaction="ignore",
                        lineterminator="\n")
     w.writeheader()
+    gone = {str(s).strip().upper() for s in (exclude_skus or set())}
     for c in cards or []:
         sku = str(c.get("sku") or "").strip()
         if not sku:
+            continue
+        if sku.upper() in gone:
+            if skipped_out is not None:
+                skipped_out.append(c)
             continue
         # Card Luma exports front | back | combined. The combined shot is a
         # composite of the two we already have — on a product page it is a
