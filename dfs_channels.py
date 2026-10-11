@@ -97,7 +97,19 @@ def _handle(sku: str) -> str:
     return h or "card"
 
 
-def shopify_csv(cards, *, published: bool = True, grams: int = 28) -> str:
+# Two photos per product: the front and the back.
+#
+# A scanner export carries more, but not more that a shopper wants. Heystack
+# writes ten — slots 1 and 2 are the full-size front and back at ~300KB, and
+# 3-10 are ~100KB crops of the same two. Card Luma writes three, the last a
+# composite of the first two. Importing all of them means Shopify downloading
+# 700 images for 70 cards and a product page with eight thumbnails of nothing
+# new.
+SHOPIFY_MAX_IMAGES = 2
+
+
+def shopify_csv(cards, *, published: bool = True, grams: int = 28,
+                max_images: int = SHOPIFY_MAX_IMAGES) -> str:
     """Shopify product import, one product per card.
 
     Shopify takes extra images as extra rows carrying only the Handle and the
@@ -117,7 +129,7 @@ def shopify_csv(cards, *, published: bool = True, grams: int = 28) -> str:
         # composite of the two we already have — on a product page it is a
         # third thumbnail of nothing new.
         imgs = [u for u in (c.get("images") or [])
-                if "_combined." not in str(u).lower()]
+                if "_combined." not in str(u).lower()][:max_images]
         price = _money(c.get("list_price") or c.get("est_value"))
         tags = [t for t in [c.get("sport"), c.get("year"), c.get("set_name"),
                             c.get("player"), c.get("parallel"), c.get("team"),
