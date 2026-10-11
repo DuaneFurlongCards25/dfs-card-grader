@@ -3376,6 +3376,89 @@ def render_sheet_import(key: str = "inv"):
         st.session_state.pop("inv_cards", None)
 
 
+def render_website_sync(key: str = "ws"):
+    """Keep the website honest about what is still for sale.
+
+    Shopify's API costs more than it is worth here, so the loop runs on the
+    two exports both platforms give away free: Shopify's product export and
+    eBay's active-listings report. A card on the website that is no longer
+    live on eBay has sold, and every hour it stays up is an order that has
+    to be cancelled and a buyer who was told yes and then no.
+
+    Output is a Shopify import file that sets those products to quantity 0,
+    deny, draft — gone from the storefront, kept in the admin, because a
+    card sometimes comes back.
+    """
+    import dfs_channels as channels
+
+    st.caption("Two free exports in, one import file out. No Shopify API, "
+               "nothing to pay for.")
+    c1, c2 = st.columns(2)
+    shop_f = c1.file_uploader("1 · Shopify product export (CSV)",
+                              type=["csv"], key=f"{key}_shop",
+                              help="Shopify admin → Products → Export → "
+                                   "All products → CSV for Excel")
+    ebay_f = c2.file_uploader("2 · eBay active listings report (CSV)",
+                              type=["csv"], key=f"{key}_ebay",
+                              help="eBay Seller Hub → Listings → Active → Download")
+    if not shop_f or not ebay_f:
+        st.info("Upload both to see what has sold out from under the website.")
+        return
+
+    shop_rows = list(csv.DictReader(io.StringIO(
+        shop_f.getvalue().decode("utf-8-sig", errors="replace"))))
+    erows = list(csv.reader(io.StringIO(
+        ebay_f.getvalue().decode("utf-8-sig", errors="replace"))))
+    ehdr = next((r for r in erows[:5] if any("custom label" in (c or "").lower()
+                                             for c in r)), None)
+    if not ehdr:
+        st.error("That does not look like an eBay active-listings report — "
+                 "no 'Custom label (SKU)' column.")
+        return
+    si = next(i for i, c in enumerate(ehdr) if "custom label" in (c or "").lower())
+    live = {r[si].strip().upper() for r in erows[erows.index(ehdr) + 1:]
+            if len(r) > si and r[si].strip()}
+
+    # Anything already recorded as sold, wherever it sold.
+    sold = set()
+    try:
+        for s in (_neon_get("sales_records", "?limit=3000") or []):
+            if s.get("sku"):
+                sold.add(str(s["sku"]).strip().upper())
+    except Exception:
+        pass
+
+    res = channels.website_sync(shop_rows, live, sold_skus=sold)
+    gone = res["delist"] + [{**x, "why": "not live on eBay"} for x in res["not_on_ebay"]]
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Products on the site", f"{res['on_site']:,}")
+    m2.metric("Still for sale", f"{res['still_live']:,}")
+    m3.metric("Should come down", f"{len(gone):,}",
+              delta="sold or ended" if gone else "nothing to do",
+              delta_color="inverse" if gone else "off")
+    st.caption(f"Cross-checked against {len(live):,} live eBay listings and "
+               f"{len(sold):,} recorded sales.")
+
+    if not gone:
+        st.success("✅ Everything on the website is still live on eBay. Nothing to pull.")
+        return
+
+    st.dataframe(pd.DataFrame([{"SKU": g["sku"], "Card": g["title"][:70],
+                                "Why": g["why"]} for g in gone]),
+                 use_container_width=True, hide_index=True)
+    st.download_button(
+        f"⬇️ Shopify file to remove these {len(gone)} from the site",
+        channels.shopify_delist_csv(
+            [{"sku": g["sku"], "title": g["title"]} for g in gone]),
+        file_name=f"shopify-remove-sold-{date.today():%Y-%m-%d}.csv",
+        mime="text/csv", type="primary", use_container_width=True,
+        key=f"{key}_dl")
+    st.caption("Shopify admin → Products → **Import** → this file → tick "
+               "**Overwrite existing products**. They go to draft at quantity 0: "
+               "off the storefront, still in your admin if a card comes back.")
+
+
 def render_photo_pack(key: str = "pp"):
     """Scanner export in, cards and post-ready photos out.
 
@@ -10095,11 +10178,12 @@ if _active_tab == 4:
                       "📣 Promote Listings", "📊 TCP Reprice",
                       "📄 Import Spreadsheet", "📱 Claim Sale"]
         if is_owner_workspace():
-            _op_labels.append("📸 Photo Pack")
+            _op_labels += ["📸 Photo Pack", "🛒 Website Sync"]
         _op_tabs = st.tabs(_op_labels)
         (op_tab_inv, op_tab_queue, op_tab_sunday, op_tab_promote, op_tab_tcp,
          op_tab_sheet, op_tab_claim) = _op_tabs[:7]
         op_tab_photo = _op_tabs[7] if len(_op_tabs) > 7 else None
+        op_tab_web = _op_tabs[8] if len(_op_tabs) > 8 else None
 
         # ── helpers shared across both sub-tabs ───────────────────────────────
         def _days_since(dt_str):
@@ -11447,6 +11531,11 @@ if _active_tab == 4:
             with op_tab_photo:
                 st.markdown("### 📸 Photo pack")
                 render_photo_pack(key="oppp")
+
+        if op_tab_web is not None:
+            with op_tab_web:
+                st.markdown("### 🛒 Website sync — pull sold cards off Shopify")
+                render_website_sync(key="opws")
 
         with op_tab_claim:
             st.markdown("### 📱 Claim sale — Facebook & Discord")

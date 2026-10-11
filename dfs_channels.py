@@ -189,6 +189,95 @@ def shopify_csv(cards, *, published: bool = True, grams: int = 28,
     return buf.getvalue()
 
 
+def website_sync(shopify_rows, ebay_live_skus, *, sold_skus=None) -> dict:
+    """What is on the website that is no longer yours to sell.
+
+    Shopify's API is priced out of reach, so the loop is closed with the two
+    files both platforms give away: a Shopify product export and an eBay
+    active-listings report. Compare them and the answer falls out — a card
+    live on the website but absent from eBay has sold or been ended, and
+    every hour it stays up is an order that has to be cancelled.
+
+    `sold_skus` adds anything known sold from sales records, which catches a
+    card that sold somewhere other than eBay.
+
+    A card on the website that was never on eBay is reported separately
+    rather than delisted: a direct-only listing is not evidence of a sale,
+    and pulling it down would be the tool destroying good inventory.
+    """
+    live = {str(s).strip().upper() for s in (ebay_live_skus or set())}
+    sold = {str(s).strip().upper() for s in (sold_skus or set())}
+
+    on_site, delist, never_ebay = [], [], []
+    for r in shopify_rows or []:
+        sku = str(r.get("Variant SKU") or r.get("sku") or "").strip()
+        if not sku:
+            continue
+        # A Shopify export repeats the handle for extra image rows; only the
+        # row carrying the SKU is the product.
+        on_site.append(sku)
+        u = sku.upper()
+        if u in sold:
+            delist.append({"sku": sku, "title": r.get("Title") or "",
+                           "why": "sold (sales record)"})
+        elif u in live:
+            continue                      # still live on eBay — leave it
+        elif live:
+            # Only trust this when an eBay report was actually supplied.
+            never_ebay.append({"sku": sku, "title": r.get("Title") or ""})
+
+    return {"on_site": len(on_site), "delist": delist,
+            "not_on_ebay": never_ebay,
+            "still_live": len(on_site) - len(delist) - len(never_ebay)}
+
+
+SHOPIFY_DELIST_COLS = ["Handle", "Title", "Variant SKU", "Variant Inventory Qty",
+                       "Variant Inventory Policy", "Status", "Published"]
+
+
+def shopify_delist_csv(cards, *, archive: bool = True) -> str:
+    """Take sold cards off the website.
+
+    Shopify's product import matches on Handle and updates what it is given,
+    so the same mechanism that created a product can retire it. Two things
+    are set together on purpose:
+
+      * quantity 0 with policy `deny` — the card cannot be ordered even if
+        someone is sitting on the page with it in their basket;
+      * status draft and Published FALSE — it leaves the storefront and
+        stops appearing in search and collections.
+
+    Draft rather than deleted. A deleted product loses its URL, its photos
+    and any sales history attached to it, and a card sometimes comes back —
+    a buyer falls through, or a duplicate turns up in the next box.
+
+    `cards` may be card dicts or plain SKU strings, because what is known
+    about a sold card is often only its SKU.
+    """
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=SHOPIFY_DELIST_COLS, extrasaction="ignore",
+                       lineterminator="\n")
+    w.writeheader()
+    for c in cards or []:
+        if isinstance(c, str):
+            sku, title = c.strip(), ""
+        else:
+            sku = str(c.get("sku") or "").strip()
+            title = c.get("title") or ""
+        if not sku:
+            continue
+        w.writerow({
+            "Handle": _handle(sku),
+            "Title": title,
+            "Variant SKU": sku,
+            "Variant Inventory Qty": 0,
+            "Variant Inventory Policy": "deny",
+            "Status": "draft" if archive else "active",
+            "Published": "FALSE" if archive else "TRUE",
+        })
+    return buf.getvalue()
+
+
 def _describe(c) -> str:
     bits = []
     for label, key in (("Player", "player"), ("Year", "year"), ("Set", "set_name"),
