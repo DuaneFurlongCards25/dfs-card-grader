@@ -67,8 +67,22 @@ def _money(v):
 
 # ─── Shopify ─────────────────────────────────────────────────────────────────
 
+# $5 and below is what the storefront calls a Value Bin (Duane, 11 Oct 2026).
+# One line, not the Singles/Doubles/Triples pile tiers — those are how a lot
+# gets priced in CardPulse, an ops idea a shopper never sees. The tag is
+# "Value Bin" and not "Singles" because the site nav already has a Singles
+# menu meaning an individual card, and a collection keyed on that tag would
+# quietly mix the two.
+VALUE_BIN_MAX = 5.00
+
+# Shopify's taxonomy node for sports cards. Without it the storefront cannot
+# use category filters or category-based tax rules.
+SHOPIFY_CATEGORY = ("Arts & Entertainment > Hobbies & Creative Arts > "
+                    "Collectibles > Collectible Trading Cards")
+
 SHOPIFY_COLS = [
-    "Handle", "Title", "Body (HTML)", "Vendor", "Type", "Tags", "Published",
+    "Handle", "Title", "Body (HTML)", "Vendor", "Product Category", "Type",
+    "Tags", "Published",
     "Option1 Name", "Option1 Value", "Variant SKU", "Variant Grams",
     "Variant Inventory Tracker", "Variant Inventory Qty",
     "Variant Inventory Policy", "Variant Fulfillment Service", "Variant Price",
@@ -99,15 +113,23 @@ def shopify_csv(cards, *, published: bool = True, grams: int = 28) -> str:
         sku = str(c.get("sku") or "").strip()
         if not sku:
             continue
-        imgs = c.get("images") or []
+        # Card Luma exports front | back | combined. The combined shot is a
+        # composite of the two we already have — on a product page it is a
+        # third thumbnail of nothing new.
+        imgs = [u for u in (c.get("images") or [])
+                if "_combined." not in str(u).lower()]
+        price = _money(c.get("list_price") or c.get("est_value"))
         tags = [t for t in [c.get("sport"), c.get("year"), c.get("set_name"),
                             c.get("player"), c.get("parallel"), c.get("team"),
                             "Graded" if c.get("grade") else "Raw"] if t]
+        if price and price <= VALUE_BIN_MAX:
+            tags.append("Value Bin")
         w.writerow({
             "Handle": _handle(sku),
             "Title": c.get("title") or sku,
             "Body (HTML)": c.get("description") or _describe(c),
             "Vendor": c.get("manufacturer") or "DFS Cards",
+            "Product Category": SHOPIFY_CATEGORY,
             "Type": "Trading Card",
             "Tags": ", ".join(str(t) for t in tags),
             "Published": "TRUE" if published else "FALSE",
@@ -141,6 +163,9 @@ def _describe(c) -> str:
     for label, key in (("Player", "player"), ("Year", "year"), ("Set", "set_name"),
                        ("Card #", "card_number"), ("Parallel", "parallel"),
                        ("Team", "team"), ("Condition", "condition")):
+        if key == "condition" and c.get(key):
+            c = dict(c)
+            c[key] = re.sub(r"\s*-?\s*\(ID:.*?\)", "", str(c[key])).strip()
         if c.get(key):
             bits.append(f"<li><b>{label}:</b> {c[key]}</li>")
     if c.get("grade"):
