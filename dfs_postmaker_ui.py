@@ -89,19 +89,35 @@ def goal_panel(neon_get, key: str):
 
 
 def _controls(key: str, default_handle: str):
-    c1, c2, c3 = st.columns([1, 1, 1.4])
+    c0, c1, c2, c3 = st.columns([1.1, 1, 1, 1.4])
+    style = c0.radio("Style", ["hype", "luxury"], horizontal=True,
+                     key=f"{key}_style",
+                     format_func=lambda v: "🔥 Hype" if v == "hype" else "💎 Luxury",
+                     help="Hype is the loud format the hobby's eye is trained on — "
+                          "price headline, team colours, claim bar. Luxury is the "
+                          "quiet platinum look that stands out by being unlike "
+                          "everything else in the feed. Post both for a week and "
+                          "let the DMs decide.")
     fmt = c1.radio("Format", ["post", "story"], horizontal=True, key=f"{key}_fmt",
                    format_func=lambda v: "Post 4:5" if v == "post" else "Story 9:16")
     status = c2.selectbox("Status", pg.STATUSES, key=f"{key}_status")
     terms = c3.text_input("Fine print", "Ships in a box with UPS, insured",
                           key=f"{key}_terms")
-    return fmt, status, terms
+    return fmt, status, terms, style
 
 
-def _show(png: bytes, name: str, fmt: str, key: str):
+def _make(style, *, team="", terms="", **kw):
+    """Call whichever renderer is selected; they take slightly different extras."""
+    if style == "hype":
+        return pg.render_hype(team=team, footnote=terms, **kw)
+    return pg.render_post(terms=terms, **kw)
+
+
+def _show(png: bytes, name: str, fmt: str, key: str, style: str = ""):
     st.image(png, width=360)
     slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in name).strip("-")[:40] or "card"
-    st.download_button("⬇️ Download PNG", png, file_name=f"dfs-{slug}-{fmt}.png",
+    st.download_button("⬇️ Download PNG", png,
+                       file_name=f"dfs-{slug}-{style or 'post'}-{fmt}.png",
                        mime="image/png", key=key, use_container_width=True)
 
 
@@ -110,7 +126,7 @@ def card_graphics(picked, price_of, handle: str, key: str):
     st.markdown("#### 🖼️ Branded graphics")
     st.caption("Same look as the store and YouTube. Uses the card's front photo from "
                "Inventory; upload a different shot if you want to override it.")
-    fmt, status, terms = _controls(f"{key}_pm", handle)
+    fmt, status, terms, style = _controls(f"{key}_pm", handle)
     for c in picked:
         sku = c["sku"]
         title = c.get("title") or sku
@@ -130,19 +146,20 @@ def card_graphics(picked, price_of, handle: str, key: str):
                     photo = _fetch_image(imgs[0]) if imgs else None
                 if photo is None:
                     st.warning("No photo found for this card. Upload one above.")
-                st.session_state[f"{key}_pm_png_{sku}"] = pg.render_post(
-                    name=nm, setline=sl, price=price_of(c),
+                st.session_state[f"{key}_pm_png_{sku}"] = _make(
+                    style, name=nm, setline=sl, price=price_of(c),
                     chips=[t for t in tg.split(",")], status=status,
-                    handle=handle, terms=terms, photo=photo, fmt=fmt)
+                    handle=handle, terms=terms, photo=photo, fmt=fmt,
+                    team=str(c.get("team") or ""))
             png = st.session_state.get(f"{key}_pm_png_{sku}")
             if png:
-                _show(png, nm, fmt, f"{key}_pm_d_{sku}")
+                _show(png, nm, fmt, f"{key}_pm_d_{sku}", style)
 
 
 def manual_builder(handle: str, key: str):
     """For a card that is not in Inventory yet."""
     with st.expander("➕ Card not in Inventory? Make a graphic from a photo"):
-        fmt, status, terms = _controls(f"{key}_mb", handle)
+        fmt, status, terms, style = _controls(f"{key}_mb", handle)
         up = st.file_uploader("Card photo", type=["jpg", "jpeg", "png", "webp"],
                               key=f"{key}_mb_up")
         e1, e2 = st.columns(2)
@@ -156,13 +173,14 @@ def manual_builder(handle: str, key: str):
             if not nm or not pr:
                 st.warning("Add a player name and a price.")
             else:
-                st.session_state[f"{key}_mb_png"] = pg.render_post(
-                    name=nm, setline=sl, price=pr, chips=tg.split(","), status=status,
-                    handle=handle, terms=terms,
-                    photo=up.getvalue() if up else None, fmt=fmt)
+                st.session_state[f"{key}_mb_png"] = _make(
+                    style, name=nm, setline=sl, price=pr, chips=tg.split(","),
+                    status=status, handle=handle, terms=terms,
+                    photo=up.getvalue() if up else None, fmt=fmt,
+                    team=st.session_state.get(f"{key}_mb_team", ""))
         png = st.session_state.get(f"{key}_mb_png")
         if png:
-            _show(png, nm or "card", fmt, f"{key}_mb_d")
+            _show(png, nm or "card", fmt, f"{key}_mb_d", style)
 
 
 def render(picked, price_of, neon_get, key: str):

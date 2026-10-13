@@ -319,3 +319,183 @@ def setline_for(card: dict) -> str:
             par]
     s = " ".join(str(b).strip() for b in bits if b and str(b).strip())
     return s or str(card.get("title") or "")
+
+
+# ─── Hype style ──────────────────────────────────────────────────────────────
+#
+# The second look, built to Duane's reference: the format the hobby's eye is
+# already trained on. Price as the headline, the card floating on a glow,
+# spec chips in a row, a bright call-to-action bar across the bottom.
+#
+# Loud is the point. The luxury style above says expensive quietly and stands
+# out precisely because it is unlike everything else in the feed; this one
+# stops a thumb because it looks like what a buyer already associates with a
+# card for sale. Which actually sells is a question for a week of posting,
+# not for either of us to guess — hence both.
+#
+# The accent follows the card's team when one is known, so a Hornets card
+# comes out teal and a Lakers card purple. A graphic in the team's own colours
+# reads as made for that card rather than stamped out.
+
+TEAM_ACCENT = {
+    # NBA
+    "hornets": ((0, 120, 140), (29, 17, 96)), "lakers": ((253, 185, 39), (85, 37, 130)),
+    "warriors": ((253, 185, 39), (29, 66, 138)), "celtics": ((0, 122, 51), (139, 111, 78)),
+    "bulls": ((206, 17, 65), (6, 25, 34)), "knicks": ((245, 132, 38), (0, 107, 182)),
+    "heat": ((152, 0, 46), (249, 160, 27)), "spurs": ((196, 206, 211), (6, 25, 34)),
+    "nuggets": ((255, 198, 39), (13, 34, 64)), "timberwolves": ((35, 97, 146), (120, 190, 32)),
+    "rockets": ((206, 17, 65), (6, 25, 34)), "nets": ((255, 255, 255), (6, 25, 34)),
+    "magic": ((0, 125, 197), (196, 206, 211)), "pistons": ((200, 16, 46), (29, 66, 138)),
+    "76ers": ((0, 107, 182), (237, 23, 76)), "grizzlies": ((93, 118, 169), (18, 23, 60)),
+    "pacers": ((253, 187, 48), (0, 45, 98)), "trail blazers": ((224, 58, 62), (6, 25, 34)),
+    "jazz": ((0, 43, 92), (249, 160, 27)), "hawks": ((225, 68, 52), (38, 40, 42)),
+    "wizards": ((0, 43, 92), (227, 24, 55)), "mavericks": ((0, 83, 188), (0, 43, 92)),
+    # MLB
+    "dodgers": ((0, 90, 156), (239, 62, 66)), "yankees": ((12, 35, 64), (196, 206, 211)),
+    "blue jays": ((19, 74, 142), (232, 41, 28)), "red sox": ((189, 48, 57), (12, 35, 64)),
+    "cubs": ((14, 51, 134), (204, 52, 51)), "braves": ((206, 17, 65), (19, 39, 79)),
+    "guardians": ((228, 0, 43), (12, 35, 64)), "pirates": ((253, 184, 39), (27, 27, 27)),
+    "royals": ((0, 70, 135), (189, 155, 96)), "reds": ((198, 1, 31), (27, 27, 27)),
+    "rays": ((9, 44, 92), (139, 211, 230)), "brewers": ((255, 197, 47), (18, 40, 75)),
+    "white sox": ((39, 37, 31), (196, 206, 211)), "angels": ((186, 0, 33), (0, 50, 99)),
+}
+HYPE_DEFAULT = ((0, 183, 206), (247, 110, 36))     # teal + orange, the reference
+HYPE_INK = (10, 12, 16)
+
+
+def _accent_for(team: str):
+    t = (team or "").lower()
+    for k, v in TEAM_ACCENT.items():
+        if k in t:
+            return v
+    return HYPE_DEFAULT
+
+
+def _hype_ground(h, accent, second):
+    """Near-black with diagonal light streaks in the accent colours."""
+    hh, ww = h * SS, W * SS
+    img = Image.new("RGB", (ww, hh), HYPE_INK)
+    d = ImageDraw.Draw(img, "RGBA")
+    # Corner washes, so the middle stays dark enough for the card to read.
+    for (cx, cy, col, rad, al) in (
+            (0.08, 0.10, accent, 0.72, 52), (0.95, 0.06, second, 0.55, 46),
+            (0.04, 0.95, second, 0.52, 34), (0.97, 0.92, accent, 0.60, 40)):
+        g = Image.new("RGBA", (ww, hh), (0, 0, 0, 0))
+        ImageDraw.Draw(g).ellipse([cx * ww - rad * ww, cy * hh - rad * ww,
+                                   cx * ww + rad * ww, cy * hh + rad * ww],
+                                  fill=(*col, al))
+        img.paste(Image.alpha_composite(img.convert("RGBA"),
+                                        g.filter(ImageFilter.GaussianBlur(120 * SS))).convert("RGB"))
+    # Speed lines top-left and bottom-right.
+    for i in range(7):
+        o = i * 46 * SS
+        d.line([(-60 * SS + o, 0), (260 * SS + o, hh * 0.42)],
+               fill=(*accent, 44 if i % 2 else 26), width=(5 if i % 2 else 3) * SS)
+        d.line([(ww - 240 * SS + o, hh), (ww + 60 * SS + o, hh * 0.62)],
+               fill=(*second, 40 if i % 2 else 22), width=(5 if i % 2 else 3) * SS)
+    # Dot grids, the small texture the reference uses in its corners.
+    for (x0, y0) in ((ww * 0.80, hh * 0.17), (ww * 0.08, hh * 0.74)):
+        for r in range(5):
+            for c in range(7):
+                d.ellipse([x0 + c * 15 * SS, y0 + r * 15 * SS,
+                           x0 + c * 15 * SS + 4 * SS, y0 + r * 15 * SS + 4 * SS],
+                          fill=(*accent, 70))
+    return img
+
+
+def render_hype(*, name: str, setline: str = "", price="", chips=None,
+                status: str = "FOR SALE", handle: str = "@duanefurlongcards",
+                team: str = "", photo=None, fmt: str = "post",
+                cta: str = "DM TO CLAIM / BUY NOW", footnote: str = "") -> bytes:
+    """The loud style: price headline, card on a glow, chips, CTA bar."""
+    story = fmt == "story"
+    H = 1920 if story else 1350
+    accent, second = _accent_for(team)
+    sold = status == "SOLD"
+    name = (name or "").upper().strip()
+    chips = [c.strip() for c in (chips or []) if c and c.strip()][:4]
+    M = 72
+    pad_t, pad_b = (210, 230) if story else (54, 54)
+
+    img = _hype_ground(H, accent, second).convert("RGBA")
+    d = ImageDraw.Draw(img, "RGBA")
+
+    # ── headline: the price, because that is what the reference leads with
+    head = f"{'SOLD' if sold else status}:"
+    f_head = label(78 if story else 72, 700)
+    f_price = label(104 if story else 96, 700)
+    base = pad_t + (96 if story else 88)          # baseline, not the top
+    hw = _tw(f_head, head, 2) + 22 + _tw(f_price, money(price), 0)
+    x = max(M, (W - hw) // 2)
+    _text(d, (x, base), head, f_head, (255, 255, 255), spacing=2)
+    _text(d, (x + _tw(f_head, head, 2) + 22, base), money(price), f_price, accent)
+    y = base
+
+    # ── the card, floating on an accent glow
+    info_h = 300 if story else 286
+    cta_h = 104
+    py0 = y + (150 if story else 138)
+    py1 = H - pad_b - cta_h - info_h - 26
+    bw, bh = W - 2 * M, py1 - py0
+    ph = _load_photo(photo)
+    if ph is not None and bh > 80:
+        s = min((bw - 40) / ph.width, (bh - 20) / ph.height)
+        iw, ih = int(ph.width * s * SS), int(ph.height * s * SS)
+        ph = ph.resize((iw, ih), Image.LANCZOS)
+        ix = int(M * SS + (bw * SS - iw) / 2)
+        iy = int(py0 * SS + (bh * SS - ih) / 2)
+        glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        ImageDraw.Draw(glow).ellipse(
+            [ix - 90 * SS, iy - 60 * SS, ix + iw + 90 * SS, iy + ih + 60 * SS],
+            fill=(*accent, 78))
+        img.alpha_composite(glow.filter(ImageFilter.GaussianBlur(85 * SS)))
+        sh = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        ImageDraw.Draw(sh).rectangle([ix, iy + 26 * SS, ix + iw, iy + ih + 26 * SS],
+                                     fill=(0, 0, 0, 205))
+        img.alpha_composite(sh.filter(ImageFilter.GaussianBlur(30 * SS)))
+        img.paste(ph, (ix, iy))
+
+    # ── name, set line, chips
+    iy = H - pad_b - cta_h - info_h + 64          # first baseline
+    f_name = label(72 if story else 66, 700)
+    for ln in _wrap(f_name, name, W - 2 * M, 1)[:2]:
+        _text(d, (W // 2, iy), ln, f_name, (255, 255, 255), spacing=1, anchor="m")
+        iy += 74
+    if setline:
+        f_set = label(36, 600)
+        for ln in _wrap(f_set, setline.upper(), W - 2 * M, 2)[:2]:
+            _text(d, (W // 2, iy), ln, f_set, accent, spacing=2, anchor="m")
+            iy += 46
+    if chips:
+        f_chip = label(30, 600)
+        line = "   |   ".join(c.upper() for c in chips)
+        while _tw(f_chip, line, 1) > W - 2 * M and len(chips) > 1:
+            chips = chips[:-1]                     # drop the least important
+            line = "   |   ".join(c.upper() for c in chips)
+        iy += 34
+        _text(d, (W // 2, iy), line, f_chip, (255, 255, 255), spacing=1, anchor="m")
+        iy += 18
+    if footnote:
+        iy += 30
+        _text(d, (W // 2, iy), footnote.upper(), label(24, 500), (*PLAT, 190),
+              spacing=4, anchor="m")
+
+    # ── call to action
+    by = H - pad_b - cta_h
+    bar = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(bar).rounded_rectangle(
+        [M * SS, by * SS, (W - M) * SS, (by + 74) * SS], radius=12 * SS,
+        fill=(*second, 255))
+    img.alpha_composite(bar)
+    _text(d, (W // 2, by + 50), cta.upper(), label(36, 700), (255, 255, 255),
+          spacing=3, anchor="m")
+    _text(d, (W // 2, by + 98), handle.upper(), label(24, 500), (*PLAT, 210),
+          spacing=5, anchor="m")
+
+    out = img.convert("RGB").resize((W, H), Image.LANCZOS)
+    buf = io.BytesIO()
+    out.save(buf, "PNG", optimize=True)
+    return buf.getvalue()
+
+
+STYLES = {"luxury": render_post, "hype": render_hype}
