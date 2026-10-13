@@ -426,6 +426,63 @@ async function tenantDelete(request: Request, env: Env) {
   }
 }
 
+/**
+ * Everything the app needs to draw its first screen, in one trip.
+ *
+ * Sign-in was making six separate calls — who am I, am I in the owner's
+ * workspace, do my prices need approval, how many tickets, how many price
+ * approvals, and a schema drift check — each a round trip to Neon at roughly
+ * a second. Nearly twelve seconds of staring at nothing before the first
+ * paint. They are all small questions against the same connection, so they
+ * are answered together.
+ *
+ * Drift is deliberately NOT here. It is the slowest of them and it only
+ * changes when someone ships DDL, so it belongs behind the Admin panel
+ * rather than in front of every sign-in.
+ */
+async function whoAmI(request: Request, env: Env) {
+  const sql = getSql(env);
+  try {
+    const code = (request.headers.get('X-DFS-Tenant') || '').trim();
+    if (!code) return err('X-DFS-Tenant header required', 400);
+
+    const [who] = await sql`
+      select t.slug, t.schema_name, t.active as t_active,
+             c.active as c_active, c.expires_at, c.name,
+             coalesce(c.needs_approval, false) as needs_approval,
+             c.daily_limit
+        from access_codes c
+        join tenants t on t.id = c.tenant_id
+       where c.code = ${code} limit 1`;
+    if (!who) return err('unknown tenant', 403);
+    if (!who.c_active) return err('access suspended', 403);
+    if (!who.t_active) return err('tenant suspended', 403);
+    if (who.expires_at && new Date(who.expires_at) < new Date())
+      return err('access expired', 403);
+
+    const owner = who.schema_name === 'public';
+    const [tickets] = await sql`
+      select count(*)::int as n from support_tickets
+       where status = 'open' ${owner ? sql`` : sql`and tenant_slug = ${who.slug}`}`;
+    const [approvals] = await sql`
+      select count(*)::int as n from price_approvals
+       where status = 'pending' ${owner ? sql`` : sql`and tenant_slug = ${who.slug}`}`;
+
+    return json({
+      slug: who.slug, schema: who.schema_name, name: who.name,
+      is_owner_workspace: owner,
+      needs_approval: who.needs_approval,
+      daily_limit: who.daily_limit,
+      open_tickets: tickets.n, pending_approvals: approvals.n,
+    });
+  } catch (e: any) {
+    return err(`me: ${String(e?.message || e).slice(0, 200)}`, 500);
+  } finally {
+    await sql.end({ timeout: 5 }).catch(() => {});
+  }
+}
+
+
 async function tenantDrift(request: Request, env: Env, apply: boolean) {
   const sql = getSql(env);
   try {
@@ -434,60 +491,59 @@ async function tenantDrift(request: Request, env: Env, apply: boolean) {
     const tenants = await sql`
       select slug, schema_name from tenants
        where schema_name <> 'public' and active order by id`;
+    const schemas = ['public', ...tenants.map((t: any) => t.schema_name)
+      .filter((s: string) => IDENT_OK.test(s))];
 
-    const wanted = await sql`
-      select table_name from information_schema.tables
-       where table_schema = 'public' and table_type = 'BASE TABLE'
-         and table_name <> all(${SHARED_LIST})
-       order by table_name`;
+    /**
+     * One query for every column in every schema, diffed here.
+     *
+     * This used to ask the catalog per tenant per table — around 90 round
+     * trips on a small account — and took 6.9 seconds, every one of them in
+     * front of the owner at login. The catalog is small; fetching all of it
+     * once and comparing in memory is the same answer in a single trip.
+     */
+    const cols = await sql`
+      select n.nspname as schema, c.relname as tbl, a.attname as col,
+             format_type(a.atttypid, a.atttypmod) as typ
+        from pg_attribute a
+        join pg_class c on c.oid = a.attrelid
+        join pg_namespace n on n.oid = c.relnamespace
+       where n.nspname = any(${schemas})
+         and c.relkind = 'r' and a.attnum > 0 and not a.attisdropped
+         and c.relname <> all(${SHARED_LIST})`;
+
+    const bySchema: Record<string, Map<string, Map<string, string>>> = {};
+    for (const r of cols as any[]) {
+      const s = (bySchema[r.schema] ||= new Map());
+      (s.get(r.tbl) || s.set(r.tbl, new Map()).get(r.tbl))!.set(r.col, r.typ);
+    }
+    const want = bySchema['public'] || new Map();
 
     const report: any[] = [];
     for (const t of tenants) {
       if (!IDENT_OK.test(t.schema_name)) continue;
-      const have = new Set((await sql`
-        select table_name from information_schema.tables
-         where table_schema = ${t.schema_name} and table_type = 'BASE TABLE'`)
-        .map((r: any) => r.table_name));
-
+      const have = bySchema[t.schema_name] || new Map();
       const missingTables: string[] = [];
       const missingCols: any[] = [];
-      for (const w of wanted) {
-        const name = w.table_name;
+      for (const [name, wcols] of want) {
         if (!IDENT_OK.test(name)) continue;
-        if (!have.has(name)) { missingTables.push(name); continue; }
-        // format_type, not information_schema.data_type: the latter reports
-        // numeric without its precision, calling two different columns equal.
-        const cols = await sql`
-          select a.attname as name,
-                 format_type(a.atttypid, a.atttypmod) as type,
-                 coalesce(pg_get_expr(d.adbin, d.adrelid), '') as dflt,
-                 a.attrelid::regclass::text as src
-            from pg_attribute a
-            left join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
-           where a.attrelid = ${'public."' + name + '"'}::regclass
-             and a.attnum > 0 and not a.attisdropped`;
-        const theirs = new Set((await sql`
-          select attname from pg_attribute
-           where attrelid = ${t.schema_name + '."' + name + '"'}::regclass
-             and attnum > 0 and not attisdropped`).map((r: any) => r.attname));
-        for (const c of cols) {
-          if (!theirs.has(c.name) && IDENT_OK.test(c.name) && TYPE_OK.test(c.type))
-            missingCols.push({ table: name, column: c.name, type: c.type });
+        const hcols = have.get(name);
+        if (!hcols) { missingTables.push(name); continue; }
+        for (const [col, typ] of wcols) {
+          if (!hcols.has(col) && IDENT_OK.test(col) && TYPE_OK.test(typ))
+            missingCols.push({ table: name, column: col, type: typ });
         }
       }
 
       let applied = 0;
       if (apply && (missingTables.length || missingCols.length)) {
         for (const name of missingTables) {
-          // LIKE copies types, defaults, identity, constraints and indexes
-          // from the live table, so a new table cannot arrive already stale.
           await sql.unsafe(`CREATE TABLE "${t.schema_name}"."${name}" ` +
                            `(LIKE public."${name}" INCLUDING ALL)`);
           applied++;
         }
         for (const c of missingCols) {
-          // No NOT NULL: an existing tenant row has no value for a new
-          // column, and the migration would fail on it.
+          // No NOT NULL: an existing row has no value for a new column.
           await sql.unsafe(`ALTER TABLE "${t.schema_name}"."${c.table}" ` +
                            `ADD COLUMN IF NOT EXISTS "${c.column}" ${c.type}`);
           applied++;
@@ -496,10 +552,8 @@ async function tenantDrift(request: Request, env: Env, apply: boolean) {
 
       report.push({
         slug: t.slug, schema: t.schema_name,
-        missing_tables: missingTables,
-        missing_columns: missingCols,
-        behind: missingTables.length + missingCols.length,
-        applied,
+        missing_tables: missingTables, missing_columns: missingCols,
+        behind: missingTables.length + missingCols.length, applied,
       });
     }
     return json({
@@ -616,6 +670,8 @@ export default {
 
     if (path === '/api/tenants/delete' && request.method === 'POST')
       return tenantDelete(request, env);
+
+    if (path === '/api/me') return whoAmI(request, env);
 
     if (path === '/api/tenants/drift') return tenantDrift(request, env, false);
     if (path === '/api/tenants/migrate' && request.method === 'POST')

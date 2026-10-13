@@ -592,6 +592,30 @@ def support_submit(kind, subject, body, where_in_app=""):
     }])
 
 
+def me() -> dict:
+    """Who is signed in, and the handful of counts the first screen needs.
+
+    One call, cached for the session. Sign-in used to make six — identity,
+    workspace, supervision, two badge counts and a schema drift check — each
+    a round trip to Neon at about a second, so the app sat blank for twelve
+    seconds before it drew anything.
+    """
+    v = st.session_state.get("_me")
+    if v is None:
+        v = {}
+        code = (st.session_state.get("access_code") or "").strip()
+        if code and WORKER_URL:
+            try:
+                req = urllib.request.Request(f"{WORKER_URL}/api/me",
+                                             headers=_neon_headers())
+                with urllib.request.urlopen(req, context=ssl_ctx(), timeout=30) as r:
+                    v = json.loads(r.read().decode())
+            except Exception:
+                v = {}
+        st.session_state["_me"] = v
+    return v
+
+
 def _badge(name: str, fn, ttl: int = 120):
     """A sidebar count, fetched at most once every `ttl` seconds.
 
@@ -1282,18 +1306,12 @@ def supervised() -> bool:
     """Does this person's code require the owner's sign-off on prices?"""
     if is_owner_account():
         return False
-    v = st.session_state.get("_supervised")
-    if v is None:
-        code = (st.session_state.get("access_code") or "").strip()
-        try:
-            rows = _neon_get("access_codes", f"?code=eq.{urllib.parse.quote(code)}")
-            v = bool(rows and rows[0].get("needs_approval"))
-        except Exception:
-            # Fail closed: if we cannot tell, hold the change rather than
-            # letting an unreviewed price reach a live listing.
-            v = not is_owner_account()
-        st.session_state["_supervised"] = v
-    return v
+    info = me()
+    if not info:
+        # Fail closed: if we cannot tell, hold the change rather than letting
+        # an unreviewed price reach a live listing.
+        return not is_owner_account()
+    return bool(info.get("needs_approval"))
 
 
 def request_price_change(table, row_key, updates, label="", note=""):
@@ -1338,14 +1356,7 @@ def is_owner_workspace() -> bool:
     """
     if is_owner_account():
         return True
-    v = st.session_state.get("_own_ws")
-    if v is None:
-        try:
-            v = bool(_neon_get("tenants", "?limit=1"))
-        except Exception:
-            v = False
-        st.session_state["_own_ws"] = v
-    return v
+    return bool(me().get("is_owner_workspace"))
 
 
 def pricing_unlimited():
@@ -3099,23 +3110,22 @@ with st.sidebar:
     # which point nobody knows which screen they were on or what the app said.
     if st.button("💬 Help / Suggestion", use_container_width=True, key="open_support_btn"):
         st.session_state["show_support"] = True
-    _my_open = _badge("mytickets",
-                      lambda: len([x for x in support_my_tickets()
-                                   if x.get("status") != "closed"]))
+    _my_open = me().get("open_tickets", 0)
     if _my_open:
         st.caption(f"📬 {_my_open} open with Duane")
     if supervised():
-        _mine_pa = _badge("mypa", lambda: len(pending_price_approvals()))
+        _mine_pa = me().get("pending_approvals", 0)
         st.caption(f"⏳ {_mine_pa} price change(s) awaiting Duane's OK"
                    if _mine_pa else "✅ No price changes pending")
 
     # ── Admin (Duane only) ────────────────────────────────────────────────────
     if is_owner_account():
         st.markdown("---")
-        _open_n = _badge("supopen", support_open_count)
+        _open_n = me().get("open_tickets", 0)
         if st.button(f"🔐 Admin Panel{f'  ·  🔔 {_open_n}' if _open_n else ''}",
                      use_container_width=True, key="open_admin_btn"):
             st.session_state["show_admin"] = True
+            st.session_state["_drift_check"] = True
 
     st.markdown("---")
     st.caption(f"v{APP_VERSION} · Settings ⚙️ in main area below")
@@ -4636,14 +4646,14 @@ if st.session_state.get("show_admin") and is_owner_account():
 # ticket is then never seen.
 if is_owner_account() and not st.session_state.get("_sup_checked"):
     st.session_state["_sup_checked"] = True
-    st.session_state["_sup_open"] = support_open_count()
+    st.session_state["_sup_open"] = me().get("open_tickets", 0)
     if st.session_state["_sup_open"]:
         st.toast(f"🔔 {st.session_state['_sup_open']} support message(s) waiting",
                  icon="💬")
 
-# Checked once per session: it is two catalog queries, and a tester blocked by
-# a missing column is blocked until someone notices.
-if is_owner_account() and "_drift" not in st.session_state:
+# NOT at sign-in: this was 6.9 seconds of the twelve the app took to paint.
+# It only changes when someone ships DDL, so it runs when Admin is opened.
+if is_owner_account() and st.session_state.pop("_drift_check", False):
     _d = tenant_drift()
     st.session_state["_drift"] = (_d or {}).get("behind", 0)
     st.session_state["_drift_detail"] = _d
@@ -4669,7 +4679,7 @@ if is_owner_account() and st.session_state.get("_drift"):
                      "`python3 support_tenant.py --migrate all`")
 
 if is_owner_account() and "_pa_open" not in st.session_state:
-    st.session_state["_pa_open"] = len(pending_price_approvals())
+    st.session_state["_pa_open"] = me().get("pending_approvals", 0)
 
 if is_owner_account() and st.session_state.get("_pa_open"):
     _n = st.session_state["_pa_open"]
