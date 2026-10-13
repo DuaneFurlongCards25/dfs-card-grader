@@ -592,6 +592,26 @@ def support_submit(kind, subject, body, where_in_app=""):
     }])
 
 
+def _badge(name: str, fn, ttl: int = 120):
+    """A sidebar count, fetched at most once every `ttl` seconds.
+
+    The sidebar re-renders on EVERY interaction — every keystroke in a search
+    box, every checkbox. Calling the API from it put three network round
+    trips in front of every click and made the whole app feel broken. These
+    numbers are a nicety; they do not need to be true to the second.
+    """
+    import time as _t
+    k, kt = f"_badge_{name}", f"_badge_{name}_at"
+    now = _t.time()
+    if st.session_state.get(kt, 0) + ttl < now:
+        try:
+            st.session_state[k] = fn()
+        except Exception:
+            st.session_state.setdefault(k, 0)
+        st.session_state[kt] = now
+    return st.session_state.get(k, 0)
+
+
 def support_my_tickets():
     """This signed-in person's tickets. Empty for anyone not signed in yet."""
     if not st.session_state.get("access_granted"):
@@ -3079,18 +3099,20 @@ with st.sidebar:
     # which point nobody knows which screen they were on or what the app said.
     if st.button("💬 Help / Suggestion", use_container_width=True, key="open_support_btn"):
         st.session_state["show_support"] = True
-    _my_open = len([t for t in support_my_tickets() if t.get("status") != "closed"])
+    _my_open = _badge("mytickets",
+                      lambda: len([x for x in support_my_tickets()
+                                   if x.get("status") != "closed"]))
     if _my_open:
         st.caption(f"📬 {_my_open} open with Duane")
     if supervised():
-        _mine_pa = len(pending_price_approvals())
+        _mine_pa = _badge("mypa", lambda: len(pending_price_approvals()))
         st.caption(f"⏳ {_mine_pa} price change(s) awaiting Duane's OK"
                    if _mine_pa else "✅ No price changes pending")
 
     # ── Admin (Duane only) ────────────────────────────────────────────────────
     if is_owner_account():
         st.markdown("---")
-        _open_n = support_open_count()
+        _open_n = _badge("supopen", support_open_count)
         if st.button(f"🔐 Admin Panel{f'  ·  🔔 {_open_n}' if _open_n else ''}",
                      use_container_width=True, key="open_admin_btn"):
             st.session_state["show_admin"] = True
@@ -3550,7 +3572,7 @@ def render_photo_pack(key: str = "pp"):
         bar.progress(0.95, "Building the zip…")
         fresh = [live[c["sku"]] for c in cards if c["sku"] in live]
         st.session_state[f"{key}_zip"] = photo_pack_zip(
-            fresh, lambda c: c.get("list_price") or 0, all_photos=(_keep > 2))
+            fresh, lambda c: _money_num(c.get("list_price")), all_photos=(_keep > 2))
         bar.empty()
         st.session_state.pop("inv_cards", None)
         st.success(f"✅ {len(cards)} cards in Inventory · {mirrored} photos copied to "
@@ -3630,6 +3652,20 @@ def photo_pack_zip(cards, price_of, *, handle="@dfscards", notes=None,
 
 
 # ─── Claim sales (Facebook / Discord) ─────────────────────────────────────────
+def _money_num(v) -> float:
+    """A price from the Worker as a number.
+
+    Postgres numeric comes back as a string over the API, so any comparison
+    or sum against it raises TypeError. coerce_listings handles the listings
+    table; this is the same job for one value, used everywhere a card price
+    is read.
+    """
+    try:
+        return float(str(v).replace("$", "").replace(",", "").strip() or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def render_claim_sale(key: str = "cs"):
     """Run a claim sale without a notepad.
 
@@ -3649,6 +3685,17 @@ def render_claim_sale(key: str = "cs"):
     if "inv_cards" not in st.session_state:
         st.session_state["inv_cards"] = inventory.fetch_all(_neon_get, "inventory_cards")
     _all = st.session_state.get("inv_cards") or []
+    # The Worker can hand Postgres numerics back as strings ("350.00"). Comparing
+    # one to a number is a TypeError that takes the whole tab down, so coerce
+    # the money fields once here.
+    for _c0 in _all:
+        for _f0 in ("list_price", "cost"):
+            _v0 = _c0.get(_f0)
+            if isinstance(_v0, str):
+                try:
+                    _c0[_f0] = float(_v0.replace("$", "").replace(",", "") or 0)
+                except ValueError:
+                    _c0[_f0] = 0.0
     if not _all:
         st.info("No cards in Inventory yet — import a spreadsheet or add a few by hand, "
                 "then come back to build a sale.")
@@ -3672,7 +3719,7 @@ def render_claim_sale(key: str = "cs"):
         for c in _all:
             if _only_unsold and str(c.get("status") or "").lower() == "sold":
                 continue
-            if (c.get("list_price") or 0) < _min:
+            if _money_num(c.get("list_price")) < _min:
                 continue
             if _q and _q not in " ".join(str(c.get(f) or "") for f in
                                          ("player", "set_name", "year", "sku", "title")).lower():
@@ -3686,7 +3733,7 @@ def render_claim_sale(key: str = "cs"):
             "Card": c.get("title") or c.get("player") or c["sku"],
             "Grade": " ".join(x for x in [c.get("grader"), c.get("grade")] if x) or "raw",
             "Cost": float(c.get("cost") or 0),
-            "Price": float(c.get("list_price") or 0),
+            "Price": _money_num(c.get("list_price")),
         } for c in _cands[:400]])
         if _df.empty:
             st.info("Nothing matches those filters.")
@@ -3719,7 +3766,7 @@ def render_claim_sale(key: str = "cs"):
     _prices = st.session_state.get(f"{key}_prices", {})
 
     def _price_of(c):
-        return _prices.get(c["sku"]) or c.get("list_price") or 0
+        return _money_num(_prices.get(c["sku"]) or c.get("list_price"))
 
     with _t2:
         if not _picked:
@@ -3813,6 +3860,9 @@ def render_claim_sale(key: str = "cs"):
                 use_container_width=True, key=f"{key}_dl")
 
     with _t4:
+        import dfs_postmaker_ui as _pmui
+        _pmui.render(_picked, _price_of, _neon_get, key)
+        st.markdown("---")
         if not _picked:
             st.info("Pick some cards first.")
         else:
@@ -3896,7 +3946,7 @@ def render_claim_sale(key: str = "cs"):
             _claim_df = pd.DataFrame([{
                 "SKU": c["sku"],
                 "Card": c.get("title") or c["sku"],
-                "Price": float(_price_of(c)),
+                "Price": _price_of(c),
                 "Claimed by": st.session_state.get(f"{key}_buyer_{c['sku']}", ""),
             } for c in _picked])
             _ced = st.data_editor(_claim_df, use_container_width=True, hide_index=True,
