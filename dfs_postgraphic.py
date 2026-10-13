@@ -308,8 +308,14 @@ def chips_for(card: dict) -> list:
 
 
 def setline_for(card: dict) -> str:
+    # "Base" is the scanner saying there is NO parallel. Printed under a
+    # player's name on a sale graphic it reads as a feature of the card, and
+    # it pushed the Okamoto render onto two lines to say nothing.
+    par = str(card.get("parallel") or "").strip()
+    if par.lower() in {"base", "none", "n/a"}:
+        par = ""
     bits = [card.get("year"), card.get("set_name"),
             f"#{card['card_number']}" if card.get("card_number") else None,
-            card.get("parallel")]
+            par]
     s = " ".join(str(b).strip() for b in bits if b and str(b).strip())
     return s or str(card.get("title") or "")
