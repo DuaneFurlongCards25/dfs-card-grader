@@ -656,6 +656,237 @@ async function serveImage(env: Env, key: string) {
 
 
 
+
+
+
+/* ------------------------------------------------------------------ *
+ * Lots — what a box of cards cost, and what it has made back.
+ *
+ * This is the piece that turns revenue into profit. Everything else can
+ * say what came in; only a lot cost can say whether it was worth buying.
+ *
+ * Cards join a lot by SKU prefix, which is how he already names them,
+ * so no card has to be assigned by hand. Sales join through the item
+ * number — old rows carry a trailing '.0' from a pandas import, hence
+ * the strip.
+ * ------------------------------------------------------------------ */
+async function lots(request: Request, env: Env) {
+  const sql = getSql(env);
+  try {
+    const schema = await tenantSchema(request, sql);
+    const L = `"${schema}"."listings"`;
+    const S = `"${schema}"."sales_records"`;
+    const P = `"${schema}"."purchase_lots"`;
+
+    const rows = await sql.unsafe(`
+      WITH lot AS (
+        SELECT id, lot_prefix, source, purchase_date, is_break, breaker, product,
+               coalesce(total_cost,0) + coalesce(ship_cost,0) AS cost,
+               card_count
+          FROM ${P}
+      ),
+      held AS (
+        SELECT l.lot_prefix,
+               count(*) FILTER (WHERE c.ended_at IS NULL)::int AS still_listed,
+               coalesce(sum(c.current_price) FILTER (WHERE c.ended_at IS NULL),0) AS listed_value,
+               count(*) FILTER (WHERE c.ended_at IS NOT NULL)::int AS gone
+          FROM lot l JOIN ${L} c ON c.sku ILIKE l.lot_prefix || '%'
+         GROUP BY 1
+      ),
+      sold AS (
+        SELECT l.lot_prefix,
+               count(*)::int AS sales,
+               coalesce(sum(s.gross_revenue),0) AS revenue,
+               coalesce(sum(s.platform_fee),0)  AS fees
+          FROM lot l JOIN ${S} s ON s.sku ILIKE l.lot_prefix || '%'
+         GROUP BY 1
+      )
+      SELECT lot.*,
+             coalesce(held.still_listed,0)  AS still_listed,
+             coalesce(held.listed_value,0)  AS listed_value,
+             coalesce(held.gone,0)          AS gone,
+             coalesce(sold.sales,0)         AS sales,
+             coalesce(sold.revenue,0)       AS revenue,
+             coalesce(sold.fees,0)          AS fees
+        FROM lot
+        LEFT JOIN held ON held.lot_prefix = lot.lot_prefix
+        LEFT JOIN sold ON sold.lot_prefix = lot.lot_prefix
+       ORDER BY lot.purchase_date DESC NULLS LAST, lot.id DESC`);
+
+    return json({ lots: rows });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
+}
+
+/** Create or update a lot — what it cost is the only number that matters. */
+async function lotSave(request: Request, env: Env) {
+  const sql = getSql(env);
+  try {
+    const schema = await tenantSchema(request, sql);
+    const b = (await request.json()) as any;
+    const prefix = String(b?.lot_prefix ?? '').trim().slice(0, 80);
+    if (!prefix) return err('a lot needs a SKU prefix', 400);
+    const cost = Number(b?.total_cost);
+    if (!Number.isFinite(cost) || cost < 0) return err('cost must be a number', 400);
+
+    await sql.unsafe(
+      `INSERT INTO "${schema}"."purchase_lots"
+         (lot_prefix, source, purchase_date, total_cost, ship_cost, notes, card_count)
+       VALUES ($1,$2,nullif($3,'')::date,$4,$5,$6,$7)
+       ON CONFLICT (lot_prefix) DO UPDATE SET
+         source = excluded.source,
+         purchase_date = coalesce(excluded.purchase_date, "purchase_lots".purchase_date),
+         total_cost = excluded.total_cost,
+         ship_cost = excluded.ship_cost,
+         notes = excluded.notes`,
+      [prefix, String(b?.source ?? '').slice(0, 80), String(b?.purchase_date ?? ''),
+       cost, Number(b?.ship_cost) || 0, String(b?.notes ?? '').slice(0, 500),
+       Number(b?.card_count) || 0]);
+    return json({ ok: true, lot_prefix: prefix });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
+}
+
+/* ------------------------------------------------------------------ *
+ * Pages eBay's app registration insists on.
+ *
+ * The redirect form will not save without a privacy policy URL and a
+ * declined URL, so both are served here rather than leaving him to find
+ * somewhere to host them.
+ * ------------------------------------------------------------------ */
+const PAGE = (title: string, inner: string) => new Response(
+  `<!doctype html><html lang=en><meta charset=utf-8>
+   <meta name=viewport content="width=device-width,initial-scale=1">
+   <title>${title} — DFS Cards</title>
+   <style>
+     body{background:#0f1117;color:#fafafa;margin:0;padding:40px 22px;
+          font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+     main{max-width:680px;margin:0 auto}
+     h1{font-weight:600;letter-spacing:-.3px;margin:0 0 6px}
+     h2{font-size:17px;font-weight:650;margin:28px 0 6px}
+     p,li{color:#c8cfdd} li{margin-bottom:6px}
+     .m{color:#9aa3bd;font-size:14px}
+     a{color:#5a8cff}
+   </style><main>${inner}</main>`,
+  { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=3600' } });
+
+function privacyPage() {
+  return PAGE('Privacy', `
+    <h1>Privacy Policy</h1>
+    <p class=m>CardPulse — DFS Cards LLC, Scottsdale, Arizona. Updated 17 October 2026.</p>
+    <p>CardPulse is private inventory software used by DFS Cards LLC to run its own
+       trading-card business. It is not offered to the public and has no other users.</p>
+    <h2>What it stores</h2>
+    <ul>
+      <li>Our own card listings, prices, storage locations and photographs.</li>
+      <li>Our own sales records: order number, date, item, quantity and amount.</li>
+      <li>An access token for our own eBay seller account, used only to manage our own listings and read our own orders.</li>
+    </ul>
+    <h2>What it does not store</h2>
+    <ul>
+      <li><b>No buyer personal data.</b> Buyer names, email addresses, postal addresses and
+          phone numbers appear in eBay's reports and are deliberately discarded on import.</li>
+      <li>No payment details. We never see or hold card numbers.</li>
+      <li>No data about any other eBay user.</li>
+    </ul>
+    <h2>eBay account deletion notifications</h2>
+    <p>Because CardPulse holds no eBay user data, there is nothing for us to delete on
+       request, and we are opted out of marketplace account-deletion notifications.</p>
+    <h2>Sharing and keeping</h2>
+    <p>Nothing is sold, shared or sent to advertisers or analytics services. Data sits in a
+       private database and a private file store, reachable only with our own credentials, and
+       is kept while we are trading so the books and the inventory history stay intact.</p>
+    <h2>Contact</h2>
+    <p>dfscards25@gmail.com</p>`);
+}
+
+function declinedPage() {
+  return PAGE('Not connected', `
+    <h1>eBay was not connected</h1>
+    <p>You chose not to give CardPulse access, or eBay stopped partway. Nothing changed, and
+       no permission was granted.</p>
+    <p class=m>To try again, open CardPulse → Settings → Connect eBay. You can close this tab.</p>`);
+}
+
+/* ------------------------------------------------------------------ *
+ * Dashboard — the one screen that answers "how is it going".
+ *
+ * Computed in the database because it is five aggregates over 7,000
+ * listings and 2,500 sales; shipping that to the browser to add up would
+ * be slower and no more honest.
+ *
+ * Every figure here comes back with what it is made of, so the screen
+ * can print the sentence underneath instead of asking him to trust it.
+ * ------------------------------------------------------------------ */
+async function dashboard(request: Request, env: Env, url: URL) {
+  const sql = getSql(env);
+  try {
+    const schema = await tenantSchema(request, sql);
+    const year = parseInt(url.searchParams.get('year') || String(new Date().getFullYear()), 10);
+    const L = `"${schema}"."listings"`;
+    const S = `"${schema}"."sales_records"`;
+
+    const [inv] = await sql.unsafe(`
+      SELECT count(*) FILTER (WHERE ended_at IS NULL)::int              AS live,
+             count(*) FILTER (WHERE ended_at IS NOT NULL)::int          AS ended,
+             coalesce(sum(current_price) FILTER (WHERE ended_at IS NULL),0) AS listed_value,
+             count(*) FILTER (WHERE ended_at IS NULL AND comp_avg IS NOT NULL)::int AS with_comp,
+             count(*) FILTER (WHERE ended_at IS NULL AND cost_basis IS NOT NULL)::int AS with_cost,
+             count(*) FILTER (WHERE ended_at IS NULL AND sport = 'Unknown')::int AS no_sport,
+             coalesce(sum(current_price) FILTER (
+               WHERE ended_at IS NULL AND start_date < now() - interval '90 days'),0) AS stale_value,
+             count(*) FILTER (
+               WHERE ended_at IS NULL AND start_date < now() - interval '90 days')::int AS stale_n,
+             coalesce(sum(watchers) FILTER (WHERE ended_at IS NULL),0)::int AS watchers
+        FROM ${L}`);
+
+    const [sale] = await sql.unsafe(`
+      SELECT count(*)::int AS lines,
+             count(DISTINCT order_id)::int AS orders,
+             coalesce(sum(gross_revenue),0) AS gross,
+             coalesce(sum(platform_fee),0)  AS fees,
+             count(*) FILTER (WHERE platform_fee > 0)::int AS with_fee
+        FROM ${S} WHERE extract(year from sale_date) = $1`, [year]);
+
+    const byMonth = await sql.unsafe(`
+      SELECT to_char(sale_date,'MM') AS m,
+             coalesce(sum(gross_revenue),0) AS gross,
+             coalesce(sum(platform_fee),0)  AS fees,
+             count(*)::int AS n
+        FROM ${S} WHERE extract(year from sale_date) = $1
+       GROUP BY 1 ORDER BY 1`, [year]);
+
+    const byChannel = await sql.unsafe(`
+      SELECT source, count(*)::int AS n, coalesce(sum(gross_revenue),0) AS gross
+        FROM ${S} WHERE extract(year from sale_date) = $1
+       GROUP BY 1 ORDER BY 3 DESC`, [year]);
+
+    // How long a card actually sits before it sells. Joined on the item
+    // number (old rows carry a trailing '.0' from a pandas import), and
+    // only where the sale came after the listing started — anything else
+    // is a relist and would read as a negative.
+    const [speed] = await sql.unsafe(`
+      SELECT count(*)::int AS n,
+             percentile_disc(0.5) WITHIN GROUP (ORDER BY (s.sale_date - l.start_date::date)) AS median_days
+        FROM ${S} s JOIN ${L} l
+          ON regexp_replace(s.item_number,'\\.0$','') = l.item_number
+       WHERE l.start_date IS NOT NULL AND s.sale_date >= l.start_date::date`);
+
+    const topBoxes = await sql.unsafe(`
+      SELECT split_part(split_part(sku,'_',1),'-',1) AS box,
+             count(*)::int AS n, coalesce(sum(current_price),0) AS value
+        FROM ${L} WHERE ended_at IS NULL AND sku <> '' AND sku IS NOT NULL
+       GROUP BY 1 ORDER BY 3 DESC LIMIT 6`);
+
+    return json({ year, inventory: inv, sales: sale, by_month: byMonth,
+                  by_channel: byChannel, speed, top_boxes: topBoxes });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
+}
+
 /* ------------------------------------------------------------------ *
  * eBay routes.
  *
@@ -1307,6 +1538,10 @@ export default {
     // ---- phone scanner ----
     // The page itself carries no secret; the key is typed in on the phone
     // once and kept there, so serving the HTML openly costs nothing.
+    // Public, and must be: eBay's own forms fetch these.
+    if (path === '/privacy') return privacyPage();
+    if (path === '/api/ebay/declined') return declinedPage();
+
     if (path === '/scan' || path === '/scan/index.html') {
       return new Response(SCANNER_HTML, {
         headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' },
@@ -1368,6 +1603,9 @@ export default {
       return listingsRetire(request, env);
     if (path === '/api/comps/fetch' && request.method === 'POST')
       return compsFetch(request, env);
+    if (path === '/api/dashboard') return dashboard(request, env, url);
+    if (path === '/api/lots' && request.method === 'GET') return lots(request, env);
+    if (path === '/api/lots' && request.method === 'POST') return lotSave(request, env);
     if (path === '/api/ebay/status') return ebayStatus(request, env);
     if (path === '/api/ebay/connect') return ebayConnect(request, env, url);
     if (path === '/api/ebay/push' && request.method === 'POST') return ebayPush(request, env);

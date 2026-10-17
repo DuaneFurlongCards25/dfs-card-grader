@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Expired, fetchListings, getWho, signIn, signOut, type Listing, type Who } from './api';
+import { API, Expired, fetchListings, getWho, signIn, signOut, type Listing, type Who } from './api';
 import Inventory from './Inventory';
 import Refresh from './Refresh';
 import Reprice from './Reprice';
@@ -7,19 +7,51 @@ import Money from './Money';
 import Boxes from './Boxes';
 import Intake from './Intake';
 import Settings from './Settings';
+import Dashboard from './Dashboard';
+import Lots from './Lots';
 
-const TABS = ['Inventory', 'Boxes', 'Reprice', 'Money', 'Refresh', 'Intake', 'Settings'] as const;
-type Tab = (typeof TABS)[number];
+/* ------------------------------------------------------------------ *
+ * The shell.
+ *
+ * A sidebar, not a top strip: eight screens do not fit across the top
+ * without scrolling, and a scrolling tab strip hides whichever one you
+ * are reaching for. Sections stay put, the open one shows its screens,
+ * and the phone gets a bottom bar instead.
+ * ------------------------------------------------------------------ */
+
+type Tab =
+  | 'Home' | 'Inventory' | 'Boxes' | 'Intake' | 'Refresh'
+  | 'Reprice' | 'Money' | 'Lots' | 'Settings';
+
+const NAV: { section: string; items: { tab: Tab; label: string }[] }[] = [
+  { section: 'Dashboard', items: [{ tab: 'Home', label: 'Overview' }] },
+  { section: 'Inventory', items: [
+      { tab: 'Inventory', label: 'Listings' },
+      { tab: 'Boxes', label: 'Boxes' },
+      { tab: 'Intake', label: 'Intake' },
+      { tab: 'Refresh', label: 'Refresh from eBay' },
+  ] },
+  { section: 'Pricing', items: [{ tab: 'Reprice', label: 'Reprice' }] },
+  { section: 'Money', items: [
+      { tab: 'Money', label: 'Sales' },
+      { tab: 'Lots', label: 'Lots' },
+  ] },
+  { section: 'Settings', items: [{ tab: 'Settings', label: 'Connections' }] },
+];
+
+const sectionOf = (t: Tab) =>
+  NAV.find((s) => s.items.some((i) => i.tab === t))?.section ?? 'Dashboard';
 
 export default function App() {
   const [who, setWho] = useState<Who | null>(getWho());
-  const [tab, setTab] = useState<Tab>('Inventory');
+  const [tab, setTab] = useState<Tab>('Home');
   const [rows, setRows] = useState<Listing[] | null>(null);
   const [loaded, setLoaded] = useState(0);
   const [error, setError] = useState('');
   const [theme, setTheme] = useState(localStorage.getItem('cp_theme') || 'dark');
   const [nonce, setNonce] = useState(0);
-  // Selection lives here so a pick survives moving between tabs —
+  const [shut, setShut] = useState(localStorage.getItem('cp_nav') === 'shut');
+  // Selection lives here so a pick survives moving between screens —
   // tick cards on Listings, price them on Reprice.
   const [sel, setSel] = useState<Set<string>>(new Set());
   const reload = () => { setRows(null); setLoaded(0); setNonce((n) => n + 1); };
@@ -28,6 +60,7 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('cp_theme', theme);
   }, [theme]);
+  useEffect(() => { localStorage.setItem('cp_nav', shut ? 'shut' : 'open'); }, [shut]);
 
   useEffect(() => {
     if (!who) return;
@@ -37,7 +70,6 @@ export default function App() {
       .then((r) => live && setRows(r))
       .catch((e) => {
         if (!live) return;
-        // A dead session should say so and offer the way back, not hang.
         if (e instanceof Expired) { setWho(null); signOut(); return; }
         setError(e.message || String(e));
       });
@@ -46,24 +78,65 @@ export default function App() {
 
   if (!who) return <SignIn onIn={setWho} />;
 
+  const open = sectionOf(tab);
+
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="wordmark">CARD<b>PULSE</b></div>
-        <nav className="tabs">
-          {TABS.map((t) => (
-            <button key={t} className={`tab${t === tab ? ' on' : ''}`} onClick={() => setTab(t)}>
-              {t}
-            </button>
-          ))}
+    <div className={`app${shut ? ' shut' : ''}`}>
+      <aside className="side">
+        <div className="brand">
+          <div>
+            <div className="wordmark">CARD<b>PULSE</b></div>
+            <div className="brandsub">Inventory management</div>
+          </div>
+          <button className="collapse" onClick={() => setShut(!shut)}
+                  title={shut ? 'Show the menu' : 'Hide the menu'}>
+            {shut ? '»' : '«'}
+          </button>
+        </div>
+
+        <nav className="sections">
+          {NAV.map((s) => {
+            const on = s.section === open;
+            return (
+              <div key={s.section}>
+                <button className={`section${on ? ' on' : ''}`}
+                        onClick={() => setTab(s.items[0].tab)}>
+                  {s.section}
+                </button>
+                {on && s.items.length > 1 && (
+                  <div className="subs">
+                    {s.items.map((i) => (
+                      <button key={i.tab}
+                              className={`sub${i.tab === tab ? ' on' : ''}`}
+                              onClick={() => setTab(i.tab)}>
+                        {i.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </nav>
-        <button className="btn sm" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                title="Switch light / dark">
-          {theme === 'dark' ? '☀' : '☾'}
-        </button>
-        <span className="muted hide-sm">{who.name || who.slug}</span>
-        <button className="btn sm" onClick={signOut}>Sign out</button>
-      </header>
+
+        <div className="sidefoot">
+          <div className="sf-label">Quick</div>
+          <div className="sf-grid">
+            <button className="btn sm" onClick={() => setTab('Refresh')}>⟳ eBay file</button>
+            <button className="btn sm" onClick={() => setTab('Intake')}>📸 Scans</button>
+            <a className="btn sm" href={`${API}/scan`} target="_blank" rel="noreferrer">📱 Phone</a>
+            <button className="btn sm" onClick={reload}>↻ Reload</button>
+          </div>
+          <div className="sf-who">
+            <span className="muted">{who.name || who.slug}</span>
+            <span className="spacer" />
+            <button className="btn sm" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+              {theme === 'dark' ? '☀' : '☾'}
+            </button>
+            <button className="btn sm" onClick={signOut}>Out</button>
+          </div>
+        </div>
+      </aside>
 
       <main className="page">
         {error && (
@@ -74,44 +147,24 @@ export default function App() {
           </div>
         )}
 
-        {tab === 'Inventory' && (
-          rows
-            ? <Inventory rows={rows} sel={sel} setSel={setSel} />
-            : <Loading n={loaded} />
-        )}
-
-        {tab === 'Refresh' && (
-          rows
-            ? <Refresh rows={rows} onDone={reload} />
-            : <Loading n={loaded} />
-        )}
-
-        {tab === 'Reprice' && (
-          rows ? <Reprice rows={rows} selected={sel} onClear={() => setSel(new Set())} />
-               : <Loading n={loaded} />
-        )}
-
+        {tab === 'Home' && <Dashboard onGo={(t) => setTab(t as Tab)} />}
+        {tab === 'Inventory' && (rows ? <Inventory rows={rows} sel={sel} setSel={setSel} /> : <Loading n={loaded} />)}
         {tab === 'Boxes' && (rows ? <Boxes rows={rows} /> : <Loading n={loaded} />)}
-
+        {tab === 'Reprice' && (rows ? <Reprice rows={rows} selected={sel} onClear={() => setSel(new Set())} /> : <Loading n={loaded} />)}
+        {tab === 'Refresh' && (rows ? <Refresh rows={rows} onDone={reload} /> : <Loading n={loaded} />)}
         {tab === 'Money' && <Money />}
-
+        {tab === 'Lots' && <Lots />}
         {tab === 'Intake' && <Intake />}
-
         {tab === 'Settings' && <Settings />}
-
-        {tab !== 'Inventory' && tab !== 'Refresh' && tab !== 'Reprice' && tab !== 'Money' && tab !== 'Boxes' && tab !== 'Intake' && tab !== 'Settings'
-          && <Soon tab={tab} />}
       </main>
 
-      {/* Phone: four shortcuts at the bottom, where a thumb reaches.
-          The top strip scrolls on a phone, which is findable but not fast. */}
       <nav className="bottombar">
-        {(['Inventory', 'Boxes', 'Reprice', 'Money'] as Tab[]).map((t) => (
+        {(['Home', 'Inventory', 'Boxes', 'Reprice'] as Tab[]).map((t) => (
           <button key={t} className={`bb${t === tab ? ' on' : ''}`} onClick={() => setTab(t)}>
             <span className="bbi">{
-              t === 'Inventory' ? '🗂' : t === 'Boxes' ? '📦' : t === 'Reprice' ? '$' : '📊'
+              t === 'Home' ? '📊' : t === 'Inventory' ? '🗂' : t === 'Boxes' ? '📦' : '$'
             }</span>
-            {t}
+            {t === 'Inventory' ? 'Cards' : t}
           </button>
         ))}
       </nav>
@@ -123,32 +176,11 @@ function Loading({ n }: { n: number }) {
   return (
     <>
       <div className="eyebrow">Inventory</div>
-      <h1 className="title">Listings</h1>
-      <p className="sub">
-        {n ? `${n.toLocaleString()} listings loaded…` : 'Reading your listings…'}
-      </p>
+      <h1 className="title">Loading</h1>
+      <p className="sub">{n ? `${n.toLocaleString()} listings read…` : 'Reading your listings…'}</p>
       <p className="note" style={{ maxWidth: 540 }}>
-        This is the only wait. Everything loads once, then searching, filtering
-        and sorting happen here in the browser with nothing to wait for.
-      </p>
-    </>
-  );
-}
-
-function Soon({ tab }: { tab: string }) {
-  const what: Record<string, string> = {
-    Intake:  'The phone scanner feeding straight into a draft listing.',
-    Posts:   'Instagram and Facebook graphics from a picked card.',
-  };
-  return (
-    <>
-      <div className="eyebrow">{tab}</div>
-      <h1 className="title">Not moved over yet</h1>
-      <p className="sub">{what[tab]}</p>
-      <p className="note" style={{ maxWidth: 560 }}>
-        Still in CardPulse on Streamlit, and still working — nothing was switched
-        off to build this. Tabs arrive here one at a time, and this one becomes
-        real when its slice lands.
+        This is the only wait. Everything loads once, then searching, filtering and sorting
+        happen here in the browser with nothing to wait for.
       </p>
     </>
   );
@@ -174,15 +206,9 @@ function SignIn({ onIn }: { onIn: (w: Who) => void }) {
         <div className="wordmark" style={{ fontSize: 18 }}>CARD<b>PULSE</b></div>
         <h1>Sign in</h1>
         <p className="muted" style={{ margin: 0 }}>Your access code.</p>
-        <input
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          placeholder="DFS-XXXX-XXXX"
-          autoComplete="off"
-          autoCapitalize="characters"
-          spellCheck={false}
-          autoFocus
-        />
+        <input value={code} onChange={(e) => setCode(e.target.value)}
+               placeholder="DFS-XXXX-XXXX" autoComplete="off"
+               autoCapitalize="characters" spellCheck={false} autoFocus />
         <button className="btn read" disabled={busy || !code.trim()}>
           {busy ? 'Checking…' : 'Sign in'}
         </button>
