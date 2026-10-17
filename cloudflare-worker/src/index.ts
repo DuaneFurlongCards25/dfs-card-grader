@@ -24,10 +24,12 @@
  */
 
 import postgres from 'postgres';
+import { SCANNER_HTML } from './scanner.gen';
 
 export interface Env {
   DATABASE_URL: string;
   API_KEY?: string;
+  SCAN_KEY?: string;
   CARD_IMAGES?: R2Bucket;
   HYPERDRIVE?: { connectionString: string };
 }
@@ -635,6 +637,109 @@ async function serveImage(env: Env, key: string) {
   });
 }
 
+/* ------------------------------------------------------------------ *
+ * The phone scanner.
+ *
+ * One phone, one Mac, one person — so this is a single shared key rather
+ * than sign-ins and tenants. What it protects is narrow by design: a
+ * SCAN_KEY holder can add and read photographs under `scan/`, and can do
+ * nothing else. It never touches the database, so the worst case is a
+ * stranger filling an R2 bucket with pictures, not reading what a card
+ * cost. Like everything else here it fails CLOSED when unset.
+ * ------------------------------------------------------------------ */
+function scanAuthed(request: Request, env: Env): boolean {
+  if (!env.SCAN_KEY) return false;
+  const sent = request.headers.get('X-DFS-Scan') || '';
+  if (sent.length !== env.SCAN_KEY.length) return false;
+  let diff = 0;
+  for (let i = 0; i < sent.length; i++) diff |= sent.charCodeAt(i) ^ env.SCAN_KEY.charCodeAt(i);
+  // The Mac-side puller already holds the full API key; let it use that too
+  // rather than making him keep a second secret in a second place.
+  return diff === 0;
+}
+
+/** A stack or file name becomes part of an R2 key, so nothing else is allowed. */
+function safeName(s: string, max = 120): string {
+  return (s || '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[.-]+/, '').slice(0, max);
+}
+
+const SCAN_MAX = 12 * 1024 * 1024;
+
+async function scanUpload(request: Request, env: Env, url: URL) {
+  if (!env.CARD_IMAGES) return err('image bucket not bound', 500);
+  const stack = safeName(url.searchParams.get('stack') || '', 60);
+  const name = safeName(url.searchParams.get('name') || '', 120);
+  if (!stack || !name) return err('stack and name are required', 400);
+  if (!/\.(jpe?g|png|heic)$/i.test(name)) return err('only jpg, png or heic', 400);
+
+  const buf = await request.arrayBuffer();
+  if (buf.byteLength < 1024) return err('too small to be a card photo', 400);
+  if (buf.byteLength > SCAN_MAX) return err('photo over 12MB', 413);
+
+  const key = `scan/${stack}/${name}`;
+  await env.CARD_IMAGES.put(key, buf, {
+    httpMetadata: {
+      contentType: request.headers.get('content-type') || 'image/jpeg',
+      cacheControl: 'public, max-age=31536000, immutable',
+    },
+    customMetadata: { stack, uploaded_at: new Date().toISOString() },
+  });
+  return json({ ok: true, key, bytes: buf.byteLength });
+}
+
+/** Lists what the phone has sent, so the Mac can pull only what is new. */
+async function scanList(env: Env, url: URL) {
+  if (!env.CARD_IMAGES) return err('image bucket not bound', 500);
+  const stack = safeName(url.searchParams.get('stack') || '', 60);
+  const prefix = stack ? `scan/${stack}/` : 'scan/';
+  const out: any[] = [];
+  const stacks = new Map<string, { photos: number; bytes: number; newest: string }>();
+  let cursor: string | undefined;
+  do {
+    const r: R2Objects = await env.CARD_IMAGES.list({ prefix, cursor, limit: 1000 });
+    for (const o of r.objects) {
+      const rel = o.key.slice('scan/'.length);
+      const slash = rel.indexOf('/');
+      const st = slash < 0 ? '(loose)' : rel.slice(0, slash);
+      const at = o.uploaded.toISOString();
+      const agg = stacks.get(st) || { photos: 0, bytes: 0, newest: at };
+      agg.photos++; agg.bytes += o.size;
+      if (at > agg.newest) agg.newest = at;
+      stacks.set(st, agg);
+      out.push({ key: o.key, stack: st, name: rel.slice(slash + 1), bytes: o.size, uploaded: at });
+    }
+    cursor = r.truncated ? r.cursor : undefined;
+  } while (cursor);
+  out.sort((a, b) => (a.key < b.key ? -1 : 1));
+  return json({
+    stacks: [...stacks.entries()]
+      .map(([name, v]) => ({ name, ...v }))
+      .sort((a, b) => (a.newest < b.newest ? 1 : -1)),
+    photos: out,
+  });
+}
+
+async function scanGet(env: Env, key: string) {
+  if (!env.CARD_IMAGES) return err('image bucket not bound', 500);
+  if (!key.startsWith('scan/')) return err('not found', 404);
+  const obj = await env.CARD_IMAGES.get(key);
+  if (!obj) return err('photo not found', 404);
+  return new Response(obj.body, {
+    headers: {
+      'Content-Type': obj.httpMetadata?.contentType || 'image/jpeg',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      ...CORS,
+    },
+  });
+}
+
+async function scanDelete(env: Env, key: string) {
+  if (!env.CARD_IMAGES) return err('image bucket not bound', 500);
+  if (!key.startsWith('scan/')) return err('not found', 404);
+  await env.CARD_IMAGES.delete(key);
+  return json({ ok: true, deleted: key });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -658,6 +763,29 @@ export default {
     // Browser-fetched, cannot carry a header — see `authed` above.
     const img = path.match(/^\/api\/inventory\/img\/(.+)$/);
     if (img && request.method === 'GET') return serveImage(env, decodeURIComponent(img[1]));
+
+    // ---- phone scanner ----
+    // The page itself carries no secret; the key is typed in on the phone
+    // once and kept there, so serving the HTML openly costs nothing.
+    if (path === '/scan' || path === '/scan/index.html') {
+      return new Response(SCANNER_HTML, {
+        headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' },
+      });
+    }
+    if (path.startsWith('/api/scan')) {
+      if (!scanAuthed(request, env) && !authed(request, env)) {
+        return err(env.SCAN_KEY
+          ? 'unauthorized'
+          : 'SCAN_KEY not configured — run: npx wrangler secret put SCAN_KEY',
+          env.SCAN_KEY ? 401 : 503);
+      }
+      if (path === '/api/scan/upload' && request.method === 'POST') return scanUpload(request, env, url);
+      if (path === '/api/scan/list' && request.method === 'GET') return scanList(env, url);
+      const sg = path.match(/^\/api\/scan\/img\/(.+)$/);
+      if (sg && request.method === 'GET') return scanGet(env, decodeURIComponent(sg[1]));
+      if (sg && request.method === 'DELETE') return scanDelete(env, decodeURIComponent(sg[1]));
+      return err(`no route: ${request.method} ${path}`, 404);
+    }
 
     if (!authed(request, env)) {
       return err(env.API_KEY

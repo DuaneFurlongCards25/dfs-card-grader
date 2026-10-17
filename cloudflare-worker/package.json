@@ -2,9 +2,10 @@
   "name": "dfs-cards-api",
   "private": true,
   "scripts": {
-    "deploy": "wrangler deploy",
-    "dev": "wrangler dev",
-    "typecheck": "tsc --noEmit"
+    "scanner": "node build-scanner.mjs",
+    "deploy": "node build-scanner.mjs && wrangler deploy",
+    "dev": "node build-scanner.mjs && wrangler dev",
+    "typecheck": "node build-scanner.mjs && tsc --noEmit"
   },
   "dependencies": {
     "postgres": "^3.4.4"
