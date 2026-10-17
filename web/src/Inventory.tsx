@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState, useEffect } from 'react';
 import { type Listing, num, text } from './api';
+import CardDetail from './CardDetail';
 
 /* ------------------------------------------------------------------ *
  * Inventory — the one screen that is the app.
@@ -55,6 +56,7 @@ export default function Inventory({ rows, sel, setSel }: {
   const [sport, setSport] = useState('');
   const [sort, setSort] = useState<SortKey>('days');
   const [showEnded, setShowEnded] = useState(false);
+  const [open, setOpen] = useState<Listing | null>(null);
   const [desc, setDesc] = useState(true);
 
   /* ---- derived once per row, not per render of a cell ---- */
@@ -277,7 +279,11 @@ export default function Inventory({ rows, sel, setSel }: {
                 return (
                   <div
                     key={e.l.item_number}
-                    className={`trow${sel.has(e.l.item_number) ? ' sel' : ''}`}
+                    className={`trow click${sel.has(e.l.item_number) ? ' sel' : ''}`}
+                    onClick={(ev) => {
+                      // The checkbox is for picking, the row is for looking.
+                      if ((ev.target as HTMLElement).tagName !== 'INPUT') setOpen(e.l);
+                    }}
                   >
                     <input
                       type="checkbox"
@@ -302,6 +308,8 @@ export default function Inventory({ rows, sel, setSel }: {
           </div>
         </div>
       </div>
+
+      {open && <CardDetail card={open} onClose={() => setOpen(null)} />}
 
       <p className="note">
         {showEnded

@@ -719,6 +719,51 @@ async function lots(request: Request, env: Env) {
   } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
 }
 
+
+/**
+ * Spread each lot's cost over the cards that carry its prefix.
+ *
+ * Deliberately divided by the cards actually found, not the card_count
+ * typed into the lot — that field is 0 on most rows, and dividing by it
+ * would either fail or invent a cost. Recomputed on demand rather than
+ * stored once, so correcting a lot's price corrects every card under it.
+ *
+ * This is an even split. A $1,200 box does not really hold twelve $100
+ * cards, but for "did this lot pay for itself" and "never list under
+ * cost" an even split is the honest approximation, and it is the one a
+ * spreadsheet would make too.
+ */
+async function costSpread(request: Request, env: Env) {
+  const sql = getSql(env);
+  try {
+    const schema = await tenantSchema(request, sql);
+    const done = await sql.unsafe(`
+      WITH spread AS (
+        SELECT p.lot_prefix,
+               (coalesce(p.total_cost,0) + coalesce(p.ship_cost,0))
+                 / nullif(count(l.item_number),0) AS per_card
+          FROM "${schema}"."purchase_lots" p
+          JOIN "${schema}"."listings" l ON l.sku ILIKE p.lot_prefix || '%'
+         WHERE coalesce(p.total_cost,0) + coalesce(p.ship_cost,0) > 0
+         GROUP BY 1, p.total_cost, p.ship_cost
+      )
+      UPDATE "${schema}"."listings" c
+         SET cost_basis = round(s.per_card, 2)
+        FROM spread s
+       WHERE c.sku ILIKE s.lot_prefix || '%'
+         AND s.per_card IS NOT NULL
+      RETURNING c.item_number`);
+    const [tot] = await sql.unsafe(
+      `SELECT count(*) FILTER (WHERE cost_basis IS NOT NULL)::int AS with_cost,
+              count(*)::int AS all_cards
+         FROM "${schema}"."listings" WHERE ended_at IS NULL`);
+    return json({ ok: true, priced: done.length,
+                  live_with_cost: tot.with_cost, live_total: tot.all_cards });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
+}
+
 /** Create or update a lot — what it cost is the only number that matters. */
 async function lotSave(request: Request, env: Env) {
   const sql = getSql(env);
@@ -1606,6 +1651,7 @@ export default {
     if (path === '/api/dashboard') return dashboard(request, env, url);
     if (path === '/api/lots' && request.method === 'GET') return lots(request, env);
     if (path === '/api/lots' && request.method === 'POST') return lotSave(request, env);
+    if (path === '/api/lots/spread-cost' && request.method === 'POST') return costSpread(request, env);
     if (path === '/api/ebay/status') return ebayStatus(request, env);
     if (path === '/api/ebay/connect') return ebayConnect(request, env, url);
     if (path === '/api/ebay/push' && request.method === 'POST') return ebayPush(request, env);

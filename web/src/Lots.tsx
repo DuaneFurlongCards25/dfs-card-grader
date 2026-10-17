@@ -118,6 +118,15 @@ export default function Lots() {
         <button className="btn read" onClick={() => setAdding(!adding)}>
           {adding ? 'Cancel' : '+ Record a lot'}
         </button>
+        <button className="btn write" onClick={async () => {
+          try {
+            const r = await post('/api/lots/spread-cost', {});
+            setError('');
+            alert(`${r.priced.toLocaleString()} cards now carry a cost — ` +
+                  `${r.live_with_cost.toLocaleString()} of ${r.live_total.toLocaleString()} live cards.\n\n` +
+                  `Each lot's cost is split evenly over the cards carrying its prefix.`);
+          } catch (e: any) { setError(e.message || String(e)); }
+        }}>↺ Spread lot costs onto cards</button>
         <span className="spacer" />
         <button className="btn sm" onClick={() => download(`lots-${stamp()}.csv`,
           toCsv(['Lot', 'Bought', 'Source', 'Cost', 'Taken back', 'Profit', 'Still listed', 'Cards left'],

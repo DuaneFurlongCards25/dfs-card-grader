@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { type Listing, num, text } from './api';
 import { usd } from './pricing';
 import { download, stamp, toCsv } from './exports';
+import CardDetail from './CardDetail';
 
 /* ------------------------------------------------------------------ *
  * Boxes — where the cards actually are.
@@ -33,6 +34,7 @@ export function boxOf(sku: string): string {
 export default function Boxes({ rows }: { rows: Listing[] }) {
   const [open, setOpen] = useState<string | null>(null);
   const [q, setQ] = useState('');
+  const [card, setCard] = useState<Listing | null>(null);
 
   const boxes = useMemo(() => {
     const m = new Map<string, { cards: Listing[]; value: number }>();
@@ -127,7 +129,8 @@ export default function Boxes({ rows }: { rows: Listing[] }) {
                 .sort((a, z) => text(a.sku).localeCompare(text(z.sku), undefined, { numeric: true }))
                 .slice(0, 600)
                 .map((c) => (
-                  <div key={c.item_number} className="trow simple">
+                  <div key={c.item_number} className="trow simple click"
+                       onClick={() => setCard(c)}>
                     <div className="sku">{text(c.sku)}</div>
                     <div className="cell-title">{text(c.title)}</div>
                     <div className="right">{usd(num(c.current_price) ?? 0)}</div>
@@ -139,6 +142,8 @@ export default function Boxes({ rows }: { rows: Listing[] }) {
             <p className="note">Showing 600 of {openBox.n.toLocaleString()} — the file has them all.</p>}
         </>
       )}
+
+      {card && <CardDetail card={card} onClose={() => setCard(null)} />}
 
       <p className="note">
         <b>Where these come from.</b> The box is the part of a SKU before its date — so
