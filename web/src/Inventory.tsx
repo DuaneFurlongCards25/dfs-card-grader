@@ -45,17 +45,27 @@ const BUCKETS: { key: Bucket; label: string; tone: string; lo: number; hi: numbe
 
 type SortKey = 'days' | 'price' | 'title' | 'watchers' | 'added';
 
-export default function Inventory({ rows }: { rows: Listing[] }) {
+export default function Inventory({ rows, sel, setSel }: {
+  rows: Listing[];
+  sel: Set<string>;
+  setSel: React.Dispatch<React.SetStateAction<Set<string>>>;
+}) {
   const [q, setQ] = useState('');
   const [bucket, setBucket] = useState<Bucket>('all');
   const [sport, setSport] = useState('');
   const [sort, setSort] = useState<SortKey>('days');
+  const [showEnded, setShowEnded] = useState(false);
   const [desc, setDesc] = useState(true);
-  const [sel, setSel] = useState<Set<string>>(new Set());
 
   /* ---- derived once per row, not per render of a cell ---- */
+  // A card that has sold is not inventory. It stays in the table as
+  // history, and stays off this screen unless he asks for it.
+  const scoped = useMemo(
+    () => rows.filter((l) => (showEnded ? !!l.ended_at : !l.ended_at)),
+    [rows, showEnded]);
+
   const enriched = useMemo(
-    () => rows.map((l) => ({
+    () => scoped.map((l) => ({
       l,
       days: daysListed(l),
       price: num(l.current_price) ?? 0,
@@ -64,7 +74,7 @@ export default function Inventory({ rows }: { rows: Listing[] }) {
       sport: text(l.sport),
       grade: [text(l.grader), text(l.grade)].filter(Boolean).join(' '),
     })),
-    [rows],
+    [scoped],
   );
 
   const sports = useMemo(
@@ -158,11 +168,13 @@ export default function Inventory({ rows }: { rows: Listing[] }) {
       <div className="eyebrow">Inventory</div>
       <h1 className="title">Listings</h1>
       <p className="sub">
-        {rows.length.toLocaleString()} active listings · {money0(enriched.reduce((a, e) => a + e.price, 0))} listed value
+        {showEnded
+          ? `${scoped.length.toLocaleString()} sold or ended · history only`
+          : `${scoped.length.toLocaleString()} live on eBay · ${money0(enriched.reduce((a, e) => a + e.price, 0))} listed value`}
       </p>
 
       <div className="legend">
-        <span><b className="r">Teal</b> reads your data.</span>
+        <span><b className="r">Blue</b> reads your data.</span>
         <span><b className="w">Gold</b> changes a live listing — you always confirm first.</span>
         <span><b className="d">Red</b> removes.</span>
       </div>
@@ -183,6 +195,15 @@ export default function Inventory({ rows }: { rows: Listing[] }) {
             <div className="n">{buckets[b.key].n.toLocaleString()} listings</div>
           </button>
         ))}
+      </div>
+
+      <div className="chips">
+        <button className={`chip${!showEnded ? ' on' : ''}`} onClick={() => setShowEnded(false)}>
+          Live on eBay<span className="ct">{rows.filter((l) => !l.ended_at).length.toLocaleString()}</span>
+        </button>
+        <button className={`chip${showEnded ? ' on' : ''}`} onClick={() => setShowEnded(true)}>
+          Sold or ended<span className="ct">{rows.filter((l) => !!l.ended_at).length.toLocaleString()}</span>
+        </button>
       </div>
 
       <div className="toolbar">
@@ -222,9 +243,7 @@ export default function Inventory({ rows }: { rows: Listing[] }) {
           {/* Slice 2 wires these up. They are visible now, and disabled,
               so the shape of the screen is settled before the actions
               behind it can touch a live listing. */}
-          <button className="btn sm" disabled>⬆ Export for Card Luma</button>
-          <button className="btn sm" disabled>$ Reprice</button>
-          <button className="btn sm write" disabled>⟳ End &amp; relist</button>
+          <span className="muted">Open the Reprice tab to price or export them.</span>
           <button className="btn sm" onClick={() => setSel(new Set())}>Clear</button>
         </div>
       )}
@@ -285,6 +304,9 @@ export default function Inventory({ rows }: { rows: Listing[] }) {
       </div>
 
       <p className="note">
+        {showEnded
+          ? 'These are no longer on eBay. They are kept so the sale has a price to be measured against, and they can never be exported or relisted from here. '
+          : ''}
         <b>Days</b> counts from the date a listing first went up, not from its last eBay renewal —
         so a card that has quietly renewed six times still reads 180 days, which is the number
         that matters. <b>Comp</b> is the CardHedger average where we have one

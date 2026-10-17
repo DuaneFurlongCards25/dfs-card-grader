@@ -84,6 +84,8 @@ export type Listing = {
   trend_pct: string | number | null;
   suggested_price: string | number | null;
   last_priced_at: string | null;
+  ended_at: string | null;
+  last_seen_at: string | null;
   created_at: string | null;
 };
 
@@ -121,6 +123,36 @@ export async function fetchListings(onProgress?: (n: number) => void): Promise<L
     onProgress?.(out.length);
     if (rows.length < page) break;
     if (offset > 100_000) break;                       // never loop forever
+  }
+  return out;
+}
+
+/* ---------------- sales ---------------- */
+
+export type Sale = {
+  id: number | string;
+  source: string | null;
+  order_id: string | null;
+  sale_date: string | null;
+  title: string | null;
+  item_number: string | null;
+  quantity: number | string | null;
+  sale_price: string | number | null;
+  shipping_collected: string | number | null;
+  gross_revenue: string | number | null;
+  platform_fee: string | number | null;
+  net_proceeds: string | number | null;
+  status: string | null;
+};
+
+export async function fetchSales(): Promise<Sale[]> {
+  const out: Sale[] = [];
+  const page = 2000;
+  for (let offset = 0; ; offset += page) {
+    const d = await call(`/api/db/sales_records?limit=${page}&offset=${offset}&order=sale_date.desc`);
+    const rows: Sale[] = d?.data || [];
+    out.push(...rows);
+    if (rows.length < page || offset > 200_000) break;
   }
   return out;
 }

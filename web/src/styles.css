@@ -6,28 +6,30 @@
  * than a rewrite. Nothing below sets a colour literally outside :root.
  * ------------------------------------------------------------------ */
 :root {
-  --bg:        #0c0e13;
-  --surface:   #14171f;
-  --surface-2: #1b1f2a;
-  --line:      #262b38;
-  --line-soft: #1e222d;
+  --bg:        #0f1117;
+  --surface:   #171a23;
+  --surface-2: #1e2130;
+  --line:      #2b3044;
+  --line-soft: #232736;
 
-  --text:      #f2f4f8;
-  --text-dim:  #98a1b6;
+  --text:      #fafafa;
+  --text-dim:  #9aa3bd;
   --text-faint:#6b7489;
 
-  /* DFS blue is the brand; teal reads actions. Both live here so the
-     button contract below is the only place that assigns meaning. */
-  --brand:     #2f6bf0;
-  --brand-lift:#5a8cff;
-  --read:      #2dd4a8;   /* reads data — safe */
-  --write:     #e0a33d;   /* changes a live listing — confirm first */
-  --danger:    #ef5c6b;   /* removes */
+  /* DFS blue is the brand and it is also the safe action. Three roles,
+     three colours, and the legend in the app is the only place that says
+     what they mean — see .legend below. */
+  --brand:     #1a56db;
+  --brand-lift:#4d85f5;
+  --read:      #1a56db;   /* reads your data — safe */
+  --read-ink:  #ffffff;
+  --write:     #d98f2b;   /* changes a live listing — confirm first */
+  --danger:    #e0505f;   /* removes */
 
-  --fresh:     #2dd4a8;
-  --watch:     #e0a33d;
-  --stale:     #ef5c6b;
-  --cool:      #5a8cff;
+  --fresh:     #2e9e63;
+  --watch:     #d98f2b;
+  --stale:     #e0505f;
+  --cool:      #4d85f5;
 
   --r:   10px;
   --r-lg:14px;
@@ -39,10 +41,11 @@
 }
 
 :root[data-theme="light"] {
-  --bg:#f6f7fa; --surface:#fff; --surface-2:#eef1f6;
-  --line:#dde2ea; --line-soft:#e8ecf3;
-  --text:#121620; --text-dim:#5a6478; --text-faint:#8b94a6;
-  --read:#0f9b7a; --write:#a86f12; --danger:#c8313f;
+  --bg:#f5f7fb; --surface:#fff; --surface-2:#edf1f8;
+  --line:#d9dfea; --line-soft:#e6eaf2;
+  --text:#101422; --text-dim:#56607a; --text-faint:#8089a0;
+  --read:#1a56db; --read-ink:#ffffff;
+  --write:#a3690f; --danger:#c42a3a; --fresh:#1d8550;
 }
 
 * { box-sizing: border-box; }
@@ -99,7 +102,7 @@ h1.title { font: 400 34px/1.1 var(--serif); margin: 0 0 4px; letter-spacing: -.2
 }
 .btn:hover { border-color: var(--text-faint); }
 .btn:disabled { opacity: .45; cursor: default; }
-.btn.read  { background: var(--read); border-color: var(--read); color: #05221b; }
+.btn.read  { background: var(--read); border-color: var(--read); color: var(--read-ink); }
 .btn.write { background: transparent; border-color: var(--write); color: var(--write); }
 .btn.danger{ background: transparent; border-color: var(--danger); color: var(--danger); }
 .btn.sm { padding: 5px 10px; font-size: 13px; }
@@ -154,7 +157,7 @@ select.pick {
   padding: 6px 13px; border-radius: 999px; font-weight: 650; font-size: 13px;
   background: var(--surface); border: 1px solid var(--line); color: var(--text-dim);
 }
-.chip.on { background: var(--read); border-color: var(--read); color: #05221b; }
+.chip.on { background: var(--read); border-color: var(--read); color: var(--read-ink); }
 .chip .ct { opacity: .7; margin-left: 6px; font-variant-numeric: tabular-nums; }
 
 /* ---------------- table ---------------- */
@@ -249,4 +252,70 @@ h2.h2 { font: 400 22px/1.2 var(--serif); margin: 26px 0 8px; }
 @media (max-width: 760px) {
   .trow.simple { grid-template-columns: 1fr 86px; }
   .trow.simple .sku { display: none; }
+}
+
+/* ---------------- reprice ---------------- */
+details.rules {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-lg); padding: 12px 16px; margin-bottom: 14px;
+}
+details.rules > summary { cursor: pointer; font-weight: 650; padding: 4px 0; }
+.rulerow { display: flex; flex-wrap: wrap; gap: 16px; margin: 12px 0; }
+.rulerow label { display: flex; flex-direction: column; gap: 4px; font-weight: 600; font-size: 13px; }
+.rulerow label.wide { flex: 1 1 100%; }
+.rulerow input[type=number], .rulerow select {
+  width: 130px; padding: 7px 10px; border-radius: 8px;
+  background: var(--bg); border: 1px solid var(--line); color: var(--text);
+}
+.rulerow small { font-weight: 400; color: var(--text-dim); max-width: 230px; }
+table.bands { border-collapse: collapse; margin: 6px 0 10px; }
+table.bands th { font-size: 11px; letter-spacing: .8px; color: var(--text-faint);
+  text-transform: uppercase; text-align: left; padding: 4px 8px 4px 0; font-weight: 700; }
+table.bands td { padding: 3px 8px 3px 0; }
+table.bands input, table.bands select {
+  width: 104px; padding: 6px 9px; border-radius: 8px;
+  background: var(--bg); border: 1px solid var(--line); color: var(--text);
+}
+.thead.rp, .trow.rp {
+  display: grid; grid-template-columns: 130px minmax(200px,2fr) 84px 84px 90px minmax(170px,1.3fr);
+  gap: 10px; align-items: center; padding: 0 14px;
+}
+.trow.rp { height: 40px; border-bottom: 1px solid var(--line-soft); font-variant-numeric: tabular-nums; }
+.trow.rp.dim { opacity: .45; }
+.trow.rp .why { font-size: 12px; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------------- money ---------------- */
+.thead.mo, .trow.mo {
+  display: grid; grid-template-columns: 90px 1fr 1fr 1fr 70px minmax(90px,1.4fr);
+  gap: 10px; align-items: center; padding: 0 14px;
+}
+.trow.mo { height: 38px; border-bottom: 1px solid var(--line-soft); font-variant-numeric: tabular-nums; }
+.bar { height: 7px; border-radius: 4px; background: var(--brand); min-width: 2px; }
+
+@media (max-width: 760px) {
+  .thead.rp, .trow.rp { grid-template-columns: 1fr 76px 82px; }
+  .thead.rp > :nth-child(1), .trow.rp > :nth-child(1),
+  .thead.rp > :nth-child(3), .trow.rp > :nth-child(3),
+  .thead.rp > :nth-child(6), .trow.rp > :nth-child(6) { display: none; }
+  .thead.mo, .trow.mo { grid-template-columns: 70px 1fr 1fr; }
+  .thead.mo > :nth-child(n+4), .trow.mo > :nth-child(n+4) { display: none; }
+}
+
+/* ---------------- phone bottom bar ---------------- */
+.bottombar { display: none; }
+@media (max-width: 760px) {
+  .bottombar {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    background: var(--surface); border-top: 1px solid var(--line);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .bb {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 9px 4px 10px; font-size: 11px; font-weight: 650; color: var(--text-faint);
+  }
+  .bb.on { color: var(--brand-lift); }
+  .bbi { font-size: 17px; line-height: 1.1; }
+  .topbar .tabs { display: none; }   /* the bottom bar replaces it */
 }

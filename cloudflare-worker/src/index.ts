@@ -696,12 +696,13 @@ async function listingsRefresh(request: Request, env: Env) {
     await sql.unsafe(
       `INSERT INTO "${schema}"."listings"
          (item_number, title, sku, current_price, start_date, end_date,
-          watchers, sold_qty, condition, grader, grade, cert_number, updated_at)
+          watchers, sold_qty, condition, grader, grade, cert_number,
+          updated_at, last_seen_at, ended_at)
        SELECT x.item_number, x.title, x.sku, x.current_price,
               nullif(x.start_date,'')::timestamptz,
               nullif(x.end_date,'')::timestamptz,
               x.watchers, x.sold_qty, x.condition, x.grader, x.grade,
-              x.cert_number, now()
+              x.cert_number, now(), now(), NULL
          FROM jsonb_to_recordset($1::text::jsonb) AS x(
               item_number text, title text, sku text, current_price numeric,
               start_date text, end_date text, watchers int, sold_qty int,
@@ -718,7 +719,10 @@ async function listingsRefresh(request: Request, env: Env) {
               grader = excluded.grader,
               grade = excluded.grade,
               cert_number = excluded.cert_number,
-              updated_at = now()`,
+              updated_at = now(),
+              last_seen_at = now(),
+              -- back in the report means it is live again
+              ended_at = NULL`,
       [JSON.stringify(clean)]);
 
     const after = await sql.unsafe(
@@ -738,7 +742,13 @@ async function listingsRefresh(request: Request, env: Env) {
   }
 }
 
-/** Removes listings he has confirmed are gone from eBay (sold or ended). */
+/**
+ * Marks listings gone from eBay as ended. Deliberately NOT a delete: the
+ * row is the only record of what a card was listed at when it sold, and
+ * that history is what the analysis runs on. Marked rows drop out of the
+ * live inventory everywhere, which is what stops a sold card being
+ * relisted — the useful half of deleting, without losing anything.
+ */
 async function listingsRetire(request: Request, env: Env) {
   const sql = getSql(env);
   try {
@@ -748,9 +758,10 @@ async function listingsRetire(request: Request, env: Env) {
       .filter((x: any) => typeof x === 'string' && x).slice(0, 20000);
     if (!ids.length) return err('no item numbers', 400);
     const done = await sql.unsafe(
-      `DELETE FROM "${schema}"."listings"
-        WHERE item_number = ANY($1::text[]) RETURNING item_number`, [ids]);
-    return json({ ok: true, removed: done.length });
+      `UPDATE "${schema}"."listings" SET ended_at = now()
+        WHERE item_number = ANY($1::text[]) AND ended_at IS NULL
+        RETURNING item_number`, [ids]);
+    return json({ ok: true, removed: done.length, ended: done.length });
   } catch (e: any) {
     return err(String(e?.message || e).slice(0, 300), 500);
   } finally {

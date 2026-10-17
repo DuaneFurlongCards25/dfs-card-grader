@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { Expired, fetchListings, getWho, signIn, signOut, type Listing, type Who } from './api';
 import Inventory from './Inventory';
 import Refresh from './Refresh';
+import Reprice from './Reprice';
+import Money from './Money';
 
-const TABS = ['Inventory', 'Refresh', 'Orders', 'Pricing', 'Intake', 'Posts'] as const;
+const TABS = ['Inventory', 'Reprice', 'Money', 'Refresh', 'Intake', 'Posts'] as const;
 type Tab = (typeof TABS)[number];
 
 export default function App() {
@@ -14,6 +16,9 @@ export default function App() {
   const [error, setError] = useState('');
   const [theme, setTheme] = useState(localStorage.getItem('cp_theme') || 'dark');
   const [nonce, setNonce] = useState(0);
+  // Selection lives here so a pick survives moving between tabs —
+  // tick cards on Listings, price them on Reprice.
+  const [sel, setSel] = useState<Set<string>>(new Set());
   const reload = () => { setRows(null); setLoaded(0); setNonce((n) => n + 1); };
 
   useEffect(() => {
@@ -68,7 +73,7 @@ export default function App() {
 
         {tab === 'Inventory' && (
           rows
-            ? <Inventory rows={rows} />
+            ? <Inventory rows={rows} sel={sel} setSel={setSel} />
             : <Loading n={loaded} />
         )}
 
@@ -78,8 +83,29 @@ export default function App() {
             : <Loading n={loaded} />
         )}
 
-        {tab !== 'Inventory' && tab !== 'Refresh' && <Soon tab={tab} />}
+        {tab === 'Reprice' && (
+          rows ? <Reprice rows={rows} selected={sel} onClear={() => setSel(new Set())} />
+               : <Loading n={loaded} />
+        )}
+
+        {tab === 'Money' && <Money />}
+
+        {tab !== 'Inventory' && tab !== 'Refresh' && tab !== 'Reprice' && tab !== 'Money'
+          && <Soon tab={tab} />}
       </main>
+
+      {/* Phone: four shortcuts at the bottom, where a thumb reaches.
+          The top strip scrolls on a phone, which is findable but not fast. */}
+      <nav className="bottombar">
+        {(['Inventory', 'Reprice', 'Money', 'Refresh'] as Tab[]).map((t) => (
+          <button key={t} className={`bb${t === tab ? ' on' : ''}`} onClick={() => setTab(t)}>
+            <span className="bbi">{
+              t === 'Inventory' ? '🗂' : t === 'Reprice' ? '$' : t === 'Money' ? '📊' : '⟳'
+            }</span>
+            {t}
+          </button>
+        ))}
+      </nav>
     </div>
   );
 }
@@ -102,8 +128,6 @@ function Loading({ n }: { n: number }) {
 
 function Soon({ tab }: { tab: string }) {
   const what: Record<string, string> = {
-    Orders:  'Daily sales, the sold-card detector and margins by lot.',
-    Pricing: 'Bands, floors, rounding and a move cap, priced off CardHedger.',
     Intake:  'The phone scanner feeding straight into a draft listing.',
     Posts:   'Instagram and Facebook graphics from a picked card.',
   };
