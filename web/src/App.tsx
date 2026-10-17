@@ -9,6 +9,7 @@ import Intake from './Intake';
 import Settings from './Settings';
 import Dashboard from './Dashboard';
 import Lots from './Lots';
+import Titles from './Titles';
 
 /* ------------------------------------------------------------------ *
  * The shell.
@@ -21,13 +22,14 @@ import Lots from './Lots';
 
 type Tab =
   | 'Home' | 'Inventory' | 'Boxes' | 'Intake' | 'Refresh'
-  | 'Reprice' | 'Money' | 'Lots' | 'Settings';
+  | 'Reprice' | 'Money' | 'Lots' | 'Titles' | 'Settings';
 
 const NAV: { section: string; items: { tab: Tab; label: string }[] }[] = [
   { section: 'Dashboard', items: [{ tab: 'Home', label: 'Overview' }] },
   { section: 'Inventory', items: [
       { tab: 'Inventory', label: 'Listings' },
       { tab: 'Boxes', label: 'Boxes' },
+      { tab: 'Titles', label: 'Titles' },
       { tab: 'Intake', label: 'Intake' },
       { tab: 'Refresh', label: 'Refresh from eBay' },
   ] },
@@ -154,6 +156,7 @@ export default function App() {
         {tab === 'Refresh' && (rows ? <Refresh rows={rows} onDone={reload} /> : <Loading n={loaded} />)}
         {tab === 'Money' && <Money />}
         {tab === 'Lots' && <Lots />}
+        {tab === 'Titles' && (rows ? <Titles rows={rows} selected={sel} /> : <Loading n={loaded} />)}
         {tab === 'Intake' && <Intake />}
         {tab === 'Settings' && <Settings />}
       </main>

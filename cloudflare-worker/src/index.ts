@@ -25,6 +25,7 @@
 
 import postgres from 'postgres';
 import { SCANNER_HTML } from './scanner.gen';
+import { buildTitle, NICKNAMES, readTitle, teamIn } from './titles';
 import {
   ebayAccessToken, ebayCall, ebayConsentUrl, ebayEndOffer, ebayExchangeCode,
   ebayOrders, ebayRevisePrice, ebayWhy, type EbayEnv,
@@ -658,6 +659,77 @@ async function serveImage(env: Env, key: string) {
 
 
 
+
+
+/* ------------------------------------------------------------------ *
+ * Title suggestions.
+ *
+ * The player comes from the catalogue, never from reading the title —
+ * that is guesswork, and the catalogue knows. A card the matcher is not
+ * confident about is reformatted from what the title already says and
+ * marked low confidence, rather than rebuilt around a name that might
+ * belong to someone else.
+ *
+ * Nothing is written. This proposes; the screen decides.
+ * ------------------------------------------------------------------ */
+async function titlesSuggest(request: Request, env: Env) {
+  const sql = getSql(env);
+  try {
+    const schema = await tenantSchema(request, sql);
+    const b = (await request.json()) as any;
+    const ids: string[] = (Array.isArray(b?.item_numbers) ? b.item_numbers : [])
+      .filter((x: any) => typeof x === 'string' && x).slice(0, 25);
+    if (!ids.length) return err('no item numbers', 400);
+
+    const rows = await sql.unsafe(
+      `SELECT item_number, sku, title, grader, grade, sport
+         FROM "${schema}"."listings"
+        WHERE item_number = ANY($1::text[]) AND ended_at IS NULL`, [ids]);
+
+    const out: any[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const row: any = rows[i];
+      const before = String(row.title ?? '');
+      let player = '', confidence = 0;
+
+      if (env.CARDHEDGER_KEY) {
+        if (i > 0) await sleep(850);                 // the same 1.2/sec limit
+        const res = await chPost(env, '/v1/cards/card-match',
+          { query: before, page: 1, page_size: 3 });
+        const m = res?.match;
+        confidence = Number(m?.confidence ?? 0);
+        if (m && confidence >= 0.7) player = String(m.player ?? '').trim();
+      }
+
+      const parts = readTitle(before, player);
+      // A grade on the card beats one read out of the title.
+      const g = [String(row.grader ?? ''), String(row.grade ?? '')]
+        .map((x) => x.trim()).filter((x) => x && x.toLowerCase() !== 'nan');
+      if (g.length === 2) parts.grade = `${g[0].toUpperCase()} ${g[1]}`;
+
+      const team = parts.team || teamIn(before, NICKNAMES);
+      const built = buildTitle(parts, team);
+
+      out.push({
+        item_number: row.item_number, sku: row.sku, before,
+        after: built.title,
+        changed: built.title !== before,
+        length: built.title.length,
+        trimmed: built.trimmed,
+        confidence,
+        player: parts.name || null,
+        needs_team: !team,
+        // Said plainly so the screen can show it beside the row.
+        note: !player && confidence < 0.7
+          ? 'catalogue was not confident — reformatted from what the title already said'
+          : !team ? 'no team in the title; a team cannot be guessed safely' : '',
+      });
+    }
+    return json({ ok: true, suggestions: out });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
+}
 
 /* ------------------------------------------------------------------ *
  * Lots — what a box of cards cost, and what it has made back.
@@ -1649,6 +1721,8 @@ export default {
     if (path === '/api/comps/fetch' && request.method === 'POST')
       return compsFetch(request, env);
     if (path === '/api/dashboard') return dashboard(request, env, url);
+    if (path === '/api/titles/suggest' && request.method === 'POST')
+      return titlesSuggest(request, env);
     if (path === '/api/lots' && request.method === 'GET') return lots(request, env);
     if (path === '/api/lots' && request.method === 'POST') return lotSave(request, env);
     if (path === '/api/lots/spread-cost' && request.method === 'POST') return costSpread(request, env);
