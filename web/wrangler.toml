@@ -1,0 +1,10 @@
+# The web app is static files; Cloudflare serves them from the edge.
+# Deliberately its own Worker, not part of dfs-cards-api: a bad front-end
+# deploy must not be able to take the API down with it.
+name = "cardpulse-web"
+compatibility_date = "2026-09-01"
+
+[assets]
+directory = "./dist"
+# Every path falls through to index.html so deep links work in a SPA.
+not_found_handling = "single-page-application"

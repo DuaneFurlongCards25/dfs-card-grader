@@ -96,7 +96,8 @@ const SHARED_LIST = [...SHARED_TABLES, 'support_log'];
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, X-API-Key, Authorization',
+  'Access-Control-Allow-Headers':
+    'Content-Type, X-API-Key, Authorization, X-DFS-Key, X-DFS-Tenant, X-DFS-Scan',
 };
 
 const json = (data: unknown, status = 200) =>
@@ -139,6 +140,7 @@ function parseFilters(url: URL) {
   const where: string[] = [];
   let orderSql = '';
   let limit: number | null = null;
+  let offset = 0;
 
   for (const [key, value] of url.searchParams) {
     if (key === 'order') {
@@ -151,6 +153,13 @@ function parseFilters(url: URL) {
     if (key === 'limit') {
       const n = parseInt(value, 10);
       if (n > 0 && n <= 10000) limit = n;
+      continue;
+    }
+    // Paging. Without this, `offset` falls through to the filter branch
+    // below and becomes WHERE "offset" = 0 — a column that does not exist.
+    if (key === 'offset') {
+      const n = parseInt(value, 10);
+      if (n > 0) offset = n;
       continue;
     }
     if (key === 'select' || key === 'single') continue;
@@ -191,7 +200,7 @@ function parseFilters(url: URL) {
   }
   return {
     whereSql: where.length ? 'WHERE ' + where.join(' AND ') : '',
-    params, orderSql, limit,
+    params, orderSql, limit, offset,
   };
 }
 
@@ -295,9 +304,9 @@ async function handleDb(request: Request, env: Env, table: string, id: string | 
         const rows = await sql.unsafe(`SELECT * FROM "${schema}"."${table}" WHERE id = $1`, [id]);
         return rows.length ? json(rows[0]) : err('not found', 404);
       }
-      const { whereSql, params, orderSql, limit } = parseFilters(url);
+      const { whereSql, params, orderSql, limit, offset } = parseFilters(url);
       const rows = await sql.unsafe(
-        `SELECT * FROM "${schema}"."${table}" ${whereSql} ${orderSql} LIMIT ${limit || 500}`.trim(),
+        `SELECT * FROM "${schema}"."${table}" ${whereSql} ${orderSql} LIMIT ${limit || 500}${offset ? " OFFSET " + offset : ""}`.trim(),
         params);
       return json({ data: rows, count: rows.length });
     }
@@ -638,6 +647,97 @@ async function serveImage(env: Env, key: string) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Sign-in for the web app.
+ *
+ * Streamlit could hold API_KEY because it runs on a server. The web app at
+ * app.dfscards.com is static files in a browser, so it cannot hold anything
+ * secret — a key shipped to the browser is a published key. Instead the
+ * Worker trades an access code for a short-lived signed token.
+ *
+ * The token carries the ACCESS CODE, not the resolved tenant, so every
+ * request still goes through resolveTenant. That costs one join and buys
+ * something worth more: suspending a code takes effect on the next request
+ * rather than whenever the token happens to expire. "Suspend all logins"
+ * has to mean now.
+ *
+ * The signing key is derived from API_KEY rather than being a secret of its
+ * own — one less thing to rotate, and rotating API_KEY correctly invalidates
+ * every session with it.
+ * ------------------------------------------------------------------ */
+const SESSION_HOURS = 12;
+
+const b64url = (b: ArrayBuffer | Uint8Array) =>
+  btoa(String.fromCharCode(...new Uint8Array(b as any)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+async function signingKey(env: Env): Promise<CryptoKey> {
+  const seed = new TextEncoder().encode((env.API_KEY || '') + '|dfs-session|v1');
+  const raw = await crypto.subtle.digest('SHA-256', seed);
+  return crypto.subtle.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' },
+                                 false, ['sign', 'verify']);
+}
+
+async function mintSession(env: Env, code: string): Promise<string> {
+  const body = b64url(new TextEncoder().encode(JSON.stringify({
+    c: code, exp: Date.now() + SESSION_HOURS * 3600_000,
+  })));
+  const sig = await crypto.subtle.sign('HMAC', await signingKey(env),
+                                       new TextEncoder().encode(body));
+  return `dfsw_${body}.${b64url(sig)}`;
+}
+
+/** Returns the access code a valid token stands for, or null. */
+async function readSession(env: Env, token: string): Promise<string | null> {
+  if (!env.API_KEY || !token.startsWith('dfsw_')) return null;
+  const [body, sig] = token.slice(5).split('.');
+  if (!body || !sig) return null;
+  try {
+    const expect = await crypto.subtle.sign('HMAC', await signingKey(env),
+                                            new TextEncoder().encode(body));
+    if (b64url(expect) !== sig) return null;          // forged or tampered
+    const json = JSON.parse(atob(body.replace(/-/g, '+').replace(/_/g, '/')));
+    if (!json.c || typeof json.exp !== 'number' || json.exp < Date.now()) return null;
+    return String(json.c);
+  } catch { return null; }
+}
+
+async function authLogin(request: Request, env: Env) {
+  if (!env.API_KEY) return err('Worker not configured', 503);
+  let code = '';
+  try { code = String(((await request.json()) as any)?.code || '').trim(); } catch {}
+  if (!code) return err('access code required', 400);
+
+  const sql = getSql(env);
+  try {
+    // Deliberately the same checks resolveTenant makes, so a code that cannot
+    // be used cannot be signed in with either.
+    const [who] = await sql`
+      select t.slug, t.schema_name, t.active as t_active,
+             c.active as c_active, c.expires_at, c.name
+        from access_codes c
+        join tenants t on t.id = c.tenant_id
+       where c.code = ${code} limit 1`;
+    // One message for every failure: a sign-in screen that distinguishes
+    // "no such code" from "suspended" tells a stranger which codes exist.
+    const bad = !who || !who.c_active || !who.t_active ||
+                (who.expires_at && new Date(who.expires_at) < new Date());
+    if (bad) return err('that code will not sign in', 403);
+
+    return json({
+      token: await mintSession(env, code),
+      name: who.name || null,
+      slug: who.slug,
+      is_owner: who.schema_name === 'public',
+      expires_in: SESSION_HOURS * 3600,
+    });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 200), 500);
+  } finally {
+    await sql.end({ timeout: 5 }).catch(() => {});
+  }
+}
+
+/* ------------------------------------------------------------------ *
  * The phone scanner.
  *
  * One phone, one Mac, one person — so this is a single shared key rather
@@ -787,7 +887,29 @@ export default {
       return err(`no route: ${request.method} ${path}`, 404);
     }
 
-    if (!authed(request, env)) {
+    if (path === '/api/auth/login' && request.method === 'POST')
+      return authLogin(request, env);
+
+    // A valid session token stands in for the key AND for X-DFS-Tenant. The
+    // request is rebuilt with that header so every route below — including
+    // the existing /api/db and /api/me — carries on unchanged, and Streamlit,
+    // which sends the key directly, is untouched by any of this.
+    const bearer = (request.headers.get('Authorization') || '').replace(/^Bearer /i, '');
+    let signedIn = false;
+    if (bearer) {
+      const code = await readSession(env, bearer);
+      if (code) {
+        const h = new Headers(request.headers);
+        h.set('X-DFS-Tenant', code);
+        request = new Request(request, { headers: h });
+        signedIn = true;
+      } else {
+        // Say so plainly: the app shows "signed out" rather than a dead screen.
+        return err('session expired', 401);
+      }
+    }
+
+    if (!signedIn && !authed(request, env)) {
       return err(env.API_KEY
         ? 'unauthorized'
         : 'API_KEY not configured on this Worker — run: npx wrangler secret put API_KEY',
