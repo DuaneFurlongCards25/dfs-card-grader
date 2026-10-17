@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Expired, fetchListings, getWho, signIn, signOut, type Listing, type Who } from './api';
 import Inventory from './Inventory';
+import Refresh from './Refresh';
 
-const TABS = ['Inventory', 'Orders', 'Pricing', 'Intake', 'Posts'] as const;
+const TABS = ['Inventory', 'Refresh', 'Orders', 'Pricing', 'Intake', 'Posts'] as const;
 type Tab = (typeof TABS)[number];
 
 export default function App() {
@@ -12,6 +13,8 @@ export default function App() {
   const [loaded, setLoaded] = useState(0);
   const [error, setError] = useState('');
   const [theme, setTheme] = useState(localStorage.getItem('cp_theme') || 'dark');
+  const [nonce, setNonce] = useState(0);
+  const reload = () => { setRows(null); setLoaded(0); setNonce((n) => n + 1); };
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -31,7 +34,7 @@ export default function App() {
         setError(e.message || String(e));
       });
     return () => { live = false; };
-  }, [who]);
+  }, [who, nonce]);
 
   if (!who) return <SignIn onIn={setWho} />;
 
@@ -69,7 +72,13 @@ export default function App() {
             : <Loading n={loaded} />
         )}
 
-        {tab !== 'Inventory' && <Soon tab={tab} />}
+        {tab === 'Refresh' && (
+          rows
+            ? <Refresh rows={rows} onDone={reload} />
+            : <Loading n={loaded} />
+        )}
+
+        {tab !== 'Inventory' && tab !== 'Refresh' && <Soon tab={tab} />}
       </main>
     </div>
   );

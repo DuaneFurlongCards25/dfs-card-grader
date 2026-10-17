@@ -647,6 +647,118 @@ async function serveImage(env: Env, key: string) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Refresh listings from the eBay active-listings report.
+ *
+ * There is no eBay API here and there never will be — the report he
+ * downloads by hand IS the sync. So this takes the parsed rows and makes
+ * the table match them, in two statements rather than 4,500 round trips.
+ *
+ * What is NOT here, deliberately: deleting rows that are missing from the
+ * report. A card absent from the report has sold or been ended, and that
+ * is the single most valuable signal in the whole business — it is what
+ * stops a sold card being relisted. The browser works out that difference
+ * and shows it; nothing is removed without him looking at it first.
+ * ------------------------------------------------------------------ */
+async function listingsRefresh(request: Request, env: Env) {
+  const sql = getSql(env);
+  try {
+    const schema = await tenantSchema(request, sql);
+    const body = (await request.json()) as any;
+    const rows: any[] = Array.isArray(body?.rows) ? body.rows : [];
+    if (!rows.length) return err('no rows', 400);
+    if (rows.length > 20000) return err('too many rows in one go', 413);
+
+    // Only the columns the report actually carries. Everything else on the
+    // row — cost basis, comps, suggested price — is ours and is left alone.
+    const clean = rows
+      .filter((r) => r && typeof r.item_number === 'string' && r.item_number)
+      .map((r) => ({
+        item_number: String(r.item_number).slice(0, 40),
+        title: String(r.title ?? '').slice(0, 500),
+        sku: String(r.sku ?? '').slice(0, 120),
+        current_price: Number.isFinite(+r.current_price) ? +r.current_price : null,
+        start_date: r.start_date || null,
+        end_date: r.end_date || null,
+        watchers: Number.isFinite(+r.watchers) ? Math.trunc(+r.watchers) : 0,
+        sold_qty: Number.isFinite(+r.sold_qty) ? Math.trunc(+r.sold_qty) : 0,
+        condition: String(r.condition ?? '').slice(0, 60),
+        grader: String(r.grader ?? '').slice(0, 60),
+        grade: String(r.grade ?? '').slice(0, 30),
+        cert_number: String(r.cert_number ?? '').slice(0, 60),
+      }));
+    if (!clean.length) return err('nothing usable in those rows', 400);
+
+    const before = await sql.unsafe(
+      `SELECT count(*)::int AS n FROM "${schema}"."listings"`);
+
+    // One statement. ON CONFLICT so a re-run of the same file is a no-op
+    // rather than a duplicate, and so his own columns survive the update.
+    await sql.unsafe(
+      `INSERT INTO "${schema}"."listings"
+         (item_number, title, sku, current_price, start_date, end_date,
+          watchers, sold_qty, condition, grader, grade, cert_number, updated_at)
+       SELECT x.item_number, x.title, x.sku, x.current_price,
+              nullif(x.start_date,'')::timestamptz,
+              nullif(x.end_date,'')::timestamptz,
+              x.watchers, x.sold_qty, x.condition, x.grader, x.grade,
+              x.cert_number, now()
+         FROM jsonb_to_recordset($1::text::jsonb) AS x(
+              item_number text, title text, sku text, current_price numeric,
+              start_date text, end_date text, watchers int, sold_qty int,
+              condition text, grader text, grade text, cert_number text)
+       ON CONFLICT (item_number) DO UPDATE SET
+              title = excluded.title,
+              sku = excluded.sku,
+              current_price = excluded.current_price,
+              start_date = excluded.start_date,
+              end_date = excluded.end_date,
+              watchers = excluded.watchers,
+              sold_qty = excluded.sold_qty,
+              condition = excluded.condition,
+              grader = excluded.grader,
+              grade = excluded.grade,
+              cert_number = excluded.cert_number,
+              updated_at = now()`,
+      [JSON.stringify(clean)]);
+
+    const after = await sql.unsafe(
+      `SELECT count(*)::int AS n FROM "${schema}"."listings"`);
+
+    return json({
+      ok: true,
+      sent: clean.length,
+      added: after[0].n - before[0].n,
+      updated: clean.length - (after[0].n - before[0].n),
+      total: after[0].n,
+    });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  } finally {
+    await sql.end({ timeout: 5 }).catch(() => {});
+  }
+}
+
+/** Removes listings he has confirmed are gone from eBay (sold or ended). */
+async function listingsRetire(request: Request, env: Env) {
+  const sql = getSql(env);
+  try {
+    const schema = await tenantSchema(request, sql);
+    const body = (await request.json()) as any;
+    const ids: string[] = (Array.isArray(body?.item_numbers) ? body.item_numbers : [])
+      .filter((x: any) => typeof x === 'string' && x).slice(0, 20000);
+    if (!ids.length) return err('no item numbers', 400);
+    const done = await sql.unsafe(
+      `DELETE FROM "${schema}"."listings"
+        WHERE item_number = ANY($1::text[]) RETURNING item_number`, [ids]);
+    return json({ ok: true, removed: done.length });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  } finally {
+    await sql.end({ timeout: 5 }).catch(() => {});
+  }
+}
+
+/* ------------------------------------------------------------------ *
  * Sign-in for the web app.
  *
  * Streamlit could hold API_KEY because it runs on a server. The web app at
@@ -917,6 +1029,11 @@ export default {
     }
 
     if (path === '/api/inventory/mirror' && request.method === 'POST') return mirror(request, env);
+
+    if (path === '/api/listings/refresh' && request.method === 'POST')
+      return listingsRefresh(request, env);
+    if (path === '/api/listings/retire' && request.method === 'POST')
+      return listingsRetire(request, env);
 
     if (path === '/api/tenants/delete' && request.method === 'POST')
       return tenantDelete(request, env);

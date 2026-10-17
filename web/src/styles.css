@@ -231,3 +231,22 @@ select.pick {
   .hide-sm { display: none !important; }
   .topbar { gap: 10px; }
 }
+
+/* ---------------- refresh screen ---------------- */
+.drop {
+  display: flex; flex-direction: column; gap: 6px; align-items: center;
+  padding: 34px 20px; border-radius: var(--r-lg); cursor: pointer;
+  border: 2px dashed var(--line); background: var(--surface); text-align: center;
+}
+.drop:hover { border-color: var(--read); }
+.drop b { color: var(--read); font-size: 15px; }
+h2.h2 { font: 400 22px/1.2 var(--serif); margin: 26px 0 8px; }
+.trow.simple {
+  display: grid; grid-template-columns: 180px 1fr 100px;
+  gap: 12px; align-items: center; height: 38px; padding: 0 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+@media (max-width: 760px) {
+  .trow.simple { grid-template-columns: 1fr 86px; }
+  .trow.simple .sku { display: none; }
+}
