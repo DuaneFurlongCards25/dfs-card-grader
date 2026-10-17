@@ -25,12 +25,19 @@
 
 import postgres from 'postgres';
 import { SCANNER_HTML } from './scanner.gen';
+import {
+  ebayAccessToken, ebayCall, ebayConsentUrl, ebayEndOffer, ebayExchangeCode,
+  ebayOrders, ebayRevisePrice, ebayWhy, type EbayEnv,
+} from './ebay';
 
 export interface Env {
   DATABASE_URL: string;
   API_KEY?: string;
   SCAN_KEY?: string;
   CARDHEDGER_KEY?: string;
+  EBAY_APP_ID?: string;
+  EBAY_CERT_ID?: string;
+  EBAY_RU_NAME?: string;
   CARD_IMAGES?: R2Bucket;
   HYPERDRIVE?: { connectionString: string };
 }
@@ -648,6 +655,179 @@ async function serveImage(env: Env, key: string) {
 }
 
 
+
+/* ------------------------------------------------------------------ *
+ * eBay routes.
+ *
+ * Connecting is a browser redirect, so the consent link is minted here
+ * and eBay sends the person back to /api/ebay/callback with a one-time
+ * code. Everything after that is server to server.
+ * ------------------------------------------------------------------ */
+async function ebayStatus(request: Request, env: Env) {
+  const sql = getSql(env);
+  try {
+    const schema = await tenantSchema(request, sql);
+    const configured = !!(env.EBAY_APP_ID && env.EBAY_CERT_ID && env.EBAY_RU_NAME);
+    const [row] = await sql.unsafe(
+      `SELECT connected_at, access_expires FROM "${schema}"."marketplace_tokens"
+        WHERE marketplace = 'ebay'`);
+    const [log] = await sql.unsafe(
+      `SELECT count(*)::int AS n, count(*) FILTER (WHERE NOT ok)::int AS failed
+         FROM "${schema}"."marketplace_log"
+        WHERE marketplace='ebay' AND at > now() - interval '7 days'`);
+    return json({
+      configured,
+      connected: !!row,
+      connected_at: row?.connected_at ?? null,
+      recent_calls: log?.n ?? 0,
+      recent_failures: log?.failed ?? 0,
+      // Said plainly so the screen can tell him what to do next.
+      next_step: !configured
+        ? 'Register the app at developer.ebay.com, then set EBAY_APP_ID, EBAY_CERT_ID and EBAY_RU_NAME on the Worker'
+        : !row ? 'Press Connect eBay' : null,
+    });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
+}
+
+function ebayConnect(request: Request, env: Env, url: URL) {
+  if (!(env.EBAY_APP_ID && env.EBAY_CERT_ID && env.EBAY_RU_NAME))
+    return err('eBay app keys are not set on the Worker yet', 503);
+  const code = (request.headers.get('X-DFS-Tenant') || '').trim();
+  // The tenant code rides in `state` so the callback — which eBay calls
+  // with no headers of ours — knows whose account came back.
+  return json({ url: ebayConsentUrl(env as EbayEnv, code) });
+}
+
+async function ebayCallback(request: Request, env: Env, url: URL) {
+  const code = url.searchParams.get('code');
+  const state = (url.searchParams.get('state') || '').trim();
+  const page = (msg: string, ok: boolean) => new Response(
+    `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+     <body style="background:#0f1117;color:#fafafa;font:16px -apple-system,sans-serif;
+                  display:grid;place-items:center;height:100vh;margin:0;text-align:center;padding:24px">
+     <div><h1 style="color:${ok ? '#2e9e63' : '#e0505f'};font-weight:600">${msg}</h1>
+     <p style="color:#9aa3bd">You can close this tab and go back to CardPulse.</p></div>`,
+    { status: ok ? 200 : 400, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+
+  if (!code) return page('eBay did not send a code back', false);
+  if (!state) return page('That link is missing its account', false);
+
+  const sql = getSql(env);
+  try {
+    const fake = new Request(request.url, { headers: { 'X-DFS-Tenant': state } });
+    const schema = await tenantSchema(fake, sql);
+    const tok = await ebayExchangeCode(env as EbayEnv, code);
+    await sql.unsafe(
+      `INSERT INTO "${schema}"."marketplace_tokens"
+         (marketplace, refresh_token, access_token, access_expires, scopes)
+       VALUES ('ebay', $1, $2, $3, $4)
+       ON CONFLICT (marketplace) DO UPDATE SET
+         refresh_token = excluded.refresh_token,
+         access_token = excluded.access_token,
+         access_expires = excluded.access_expires,
+         updated_at = now()`,
+      [tok.refresh_token, tok.access_token,
+       new Date(Date.now() + (tok.expires_in ?? 7200) * 1000).toISOString(), 'sell']);
+    return page('eBay connected', true);
+  } catch (e: any) {
+    return page(`eBay refused: ${String(e?.message || e).slice(0, 160)}`, false);
+  } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
+}
+
+/** Price changes straight onto live listings — no CSV, no upload. */
+async function ebayPush(request: Request, env: Env) {
+  const sql = getSql(env);
+  try {
+    const schema = await tenantSchema(request, sql);
+    const body = (await request.json()) as any;
+    const changes: { item_number: string; price: number }[] =
+      (Array.isArray(body?.changes) ? body.changes : [])
+        .filter((c: any) => c?.item_number && Number.isFinite(+c.price) && +c.price > 0)
+        .slice(0, 100);
+    if (!changes.length) return err('no changes', 400);
+
+    const token = await ebayAccessToken(env as EbayEnv, sql, schema);
+    const done: any[] = [];
+    for (const c of changes) {
+      // The offer id is what the Inventory API edits; the item number is
+      // what a seller knows. Look one up from the other.
+      const look = await ebayCall(token,
+        `/sell/inventory/v1/offer?sku=${encodeURIComponent(c.item_number)}`);
+      const offerId = look.body?.offers?.[0]?.offerId;
+      let ok = false, detail = '';
+      if (!offerId) {
+        detail = 'no offer on eBay for that SKU — it may have been listed outside CardPulse';
+      } else {
+        const r = await ebayRevisePrice(token, offerId, c.price);
+        ok = r.ok; detail = ok ? `now $${c.price.toFixed(2)}` : ebayWhy(r.body);
+      }
+      done.push({ item_number: c.item_number, ok, detail });
+      await sql.unsafe(
+        `INSERT INTO "${schema}"."marketplace_log"
+           (marketplace, action, item_number, ok, detail)
+         VALUES ('ebay','revise_price',$1,$2,$3)`, [c.item_number, ok, detail]);
+    }
+    return json({ ok: true, changed: done.filter((d) => d.ok).length,
+                  failed: done.filter((d) => !d.ok).length, results: done });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
+}
+
+/** Orders, pulled instead of downloaded. */
+async function ebayPullOrders(request: Request, env: Env, url: URL) {
+  const sql = getSql(env);
+  try {
+    const schema = await tenantSchema(request, sql);
+    const days = Math.min(90, Math.max(1, parseInt(url.searchParams.get('days') || '30', 10)));
+    const since = new Date(Date.now() - days * 86400_000).toISOString();
+    const token = await ebayAccessToken(env as EbayEnv, sql, schema);
+    const r = await ebayOrders(token, since);
+    if (!r.ok) return err(ebayWhy(r.body), r.status);
+
+    const rows: any[] = [];
+    for (const o of (r.body?.orders ?? [])) {
+      for (const li of (o.lineItems ?? [])) {
+        rows.push({
+          source: 'ebay', order_id: o.orderId,
+          sale_date: (o.creationDate || '').slice(0, 10),
+          title: String(li.title ?? '').slice(0, 400),
+          item_number: String(li.legacyItemId ?? ''),
+          sku: String(li.sku ?? '').slice(0, 120),
+          quantity: Number(li.quantity ?? 1),
+          sale_price: Number(li.lineItemCost?.value ?? 0),
+          shipping_collected: Number(li.deliveryCost?.shippingCost?.value ?? 0),
+          // Fees are NOT on an order — they live in the Finances API
+          // (getTransactions). Left at zero rather than guessed; Money
+          // already says on screen where fees are missing.
+          platform_fee: 0,
+          dedup_key: `ebay|${o.orderId}|${li.lineItemId}`,
+        });
+      }
+    }
+    if (rows.length) {
+      await sql.unsafe(
+        `INSERT INTO "${schema}"."sales_records"
+           (source, order_id, sale_date, title, item_number, sku, quantity,
+            sale_price, shipping_collected, gross_revenue, platform_fee,
+            net_proceeds, status, dedup_key)
+         SELECT source, order_id, sale_date::date, title, item_number, sku, quantity,
+                sale_price, shipping_collected, sale_price + shipping_collected,
+                platform_fee, 0, 'sold', dedup_key
+           FROM jsonb_to_recordset($1::text::jsonb) AS x(
+                source text, order_id text, sale_date text, title text,
+                item_number text, sku text, quantity int, sale_price numeric,
+                shipping_collected numeric, platform_fee numeric, dedup_key text)
+         ON CONFLICT (dedup_key) DO NOTHING`, [JSON.stringify(rows)]);
+    }
+    return json({ ok: true, days, order_lines: rows.length });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
+}
+
 /* ------------------------------------------------------------------ *
  * Comps from CardHedger.
  *
@@ -1150,6 +1330,10 @@ export default {
     if (path === '/api/auth/login' && request.method === 'POST')
       return authLogin(request, env);
 
+    // eBay redirects the browser here after consent, carrying no header
+    // of ours — the tenant travels in `state` instead.
+    if (path === '/api/ebay/callback') return ebayCallback(request, env, url);
+
     // A valid session token stands in for the key AND for X-DFS-Tenant. The
     // request is rebuilt with that header so every route below — including
     // the existing /api/db and /api/me — carries on unchanged, and Streamlit,
@@ -1184,6 +1368,11 @@ export default {
       return listingsRetire(request, env);
     if (path === '/api/comps/fetch' && request.method === 'POST')
       return compsFetch(request, env);
+    if (path === '/api/ebay/status') return ebayStatus(request, env);
+    if (path === '/api/ebay/connect') return ebayConnect(request, env, url);
+    if (path === '/api/ebay/push' && request.method === 'POST') return ebayPush(request, env);
+    if (path === '/api/ebay/orders' && request.method === 'POST')
+      return ebayPullOrders(request, env, url);
 
     if (path === '/api/tenants/delete' && request.method === 'POST')
       return tenantDelete(request, env);

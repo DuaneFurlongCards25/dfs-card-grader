@@ -360,3 +360,15 @@ code { font: 12px var(--mono); background: var(--surface-2); padding: 1px 5px; b
   aspect-ratio: 5/7; display: grid; place-items: center; border-radius: 6px;
   background: var(--surface-2); color: var(--watch); font-size: 11px; font-weight: 700;
 }
+
+/* ---------------- settings ---------------- */
+.card2 {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-lg); padding: 16px 18px; margin-bottom: 12px;
+}
+.card2 .lab { font-weight: 650; font-size: 15px; display: flex; align-items: center; gap: 9px; }
+.card2 .sub2 { color: var(--text-dim); font-size: 13.5px; margin-top: 5px; max-width: 620px; }
+.setup { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 4px; }
+ol.steps { margin: 6px 0 4px; padding-left: 20px; color: var(--text-dim); font-size: 13.5px; }
+ol.steps li { margin-bottom: 9px; line-height: 1.55; }
+ol.steps b { color: var(--text); }

@@ -6,8 +6,9 @@ import Reprice from './Reprice';
 import Money from './Money';
 import Boxes from './Boxes';
 import Intake from './Intake';
+import Settings from './Settings';
 
-const TABS = ['Inventory', 'Boxes', 'Reprice', 'Money', 'Refresh', 'Intake'] as const;
+const TABS = ['Inventory', 'Boxes', 'Reprice', 'Money', 'Refresh', 'Intake', 'Settings'] as const;
 type Tab = (typeof TABS)[number];
 
 export default function App() {
@@ -96,7 +97,9 @@ export default function App() {
 
         {tab === 'Intake' && <Intake />}
 
-        {tab !== 'Inventory' && tab !== 'Refresh' && tab !== 'Reprice' && tab !== 'Money' && tab !== 'Boxes' && tab !== 'Intake'
+        {tab === 'Settings' && <Settings />}
+
+        {tab !== 'Inventory' && tab !== 'Refresh' && tab !== 'Reprice' && tab !== 'Money' && tab !== 'Boxes' && tab !== 'Intake' && tab !== 'Settings'
           && <Soon tab={tab} />}
       </main>
 
