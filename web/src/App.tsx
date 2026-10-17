@@ -4,8 +4,10 @@ import Inventory from './Inventory';
 import Refresh from './Refresh';
 import Reprice from './Reprice';
 import Money from './Money';
+import Boxes from './Boxes';
+import Intake from './Intake';
 
-const TABS = ['Inventory', 'Reprice', 'Money', 'Refresh', 'Intake', 'Posts'] as const;
+const TABS = ['Inventory', 'Boxes', 'Reprice', 'Money', 'Refresh', 'Intake'] as const;
 type Tab = (typeof TABS)[number];
 
 export default function App() {
@@ -88,19 +90,23 @@ export default function App() {
                : <Loading n={loaded} />
         )}
 
+        {tab === 'Boxes' && (rows ? <Boxes rows={rows} /> : <Loading n={loaded} />)}
+
         {tab === 'Money' && <Money />}
 
-        {tab !== 'Inventory' && tab !== 'Refresh' && tab !== 'Reprice' && tab !== 'Money'
+        {tab === 'Intake' && <Intake />}
+
+        {tab !== 'Inventory' && tab !== 'Refresh' && tab !== 'Reprice' && tab !== 'Money' && tab !== 'Boxes' && tab !== 'Intake'
           && <Soon tab={tab} />}
       </main>
 
       {/* Phone: four shortcuts at the bottom, where a thumb reaches.
           The top strip scrolls on a phone, which is findable but not fast. */}
       <nav className="bottombar">
-        {(['Inventory', 'Reprice', 'Money', 'Refresh'] as Tab[]).map((t) => (
+        {(['Inventory', 'Boxes', 'Reprice', 'Money'] as Tab[]).map((t) => (
           <button key={t} className={`bb${t === tab ? ' on' : ''}`} onClick={() => setTab(t)}>
             <span className="bbi">{
-              t === 'Inventory' ? '🗂' : t === 'Reprice' ? '$' : t === 'Money' ? '📊' : '⟳'
+              t === 'Inventory' ? '🗂' : t === 'Boxes' ? '📦' : t === 'Reprice' ? '$' : '📊'
             }</span>
             {t}
           </button>

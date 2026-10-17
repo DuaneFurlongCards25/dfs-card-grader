@@ -319,3 +319,44 @@ table.bands input, table.bands select {
   .bbi { font-size: 17px; line-height: 1.1; }
   .topbar .tabs { display: none; }   /* the bottom bar replaces it */
 }
+
+/* ---------------- boxes ---------------- */
+.boxgrid {
+  display: grid; gap: 9px; margin-bottom: 18px;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+}
+.boxcard {
+  text-align: left; padding: 13px 14px; border-radius: var(--r-lg);
+  background: var(--surface); border: 1px solid var(--line);
+}
+.boxcard:hover { border-color: var(--brand); }
+.boxcard.on { border-color: var(--brand); background: color-mix(in srgb, var(--brand) 13%, var(--surface)); }
+.boxcard .bn {
+  font: 600 13px/1.25 var(--mono); color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.boxcard .bc { font: 400 23px/1.2 var(--serif); margin-top: 5px; font-variant-numeric: tabular-nums; }
+.boxcard .bc span { font: 400 12px var(--sans); color: var(--text-dim); margin-left: 4px; }
+.boxcard .bv { font-size: 12.5px; color: var(--fresh); font-variant-numeric: tabular-nums; }
+code { font: 12px var(--mono); background: var(--surface-2); padding: 1px 5px; border-radius: 5px; }
+
+/* ---------------- intake ---------------- */
+.shotgrid {
+  display: grid; gap: 10px; margin-top: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+.shotpair {
+  position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 3px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r); overflow: hidden; padding: 20px 3px 3px;
+}
+.shotpair.bad { border-color: var(--watch); }
+.shotpair img { width: 100%; aspect-ratio: 5/7; object-fit: cover; border-radius: 6px; }
+.shotpair .sp-n {
+  position: absolute; top: 3px; left: 7px;
+  font: 700 11px var(--mono); color: var(--text-dim);
+}
+.sp-missing {
+  aspect-ratio: 5/7; display: grid; place-items: center; border-radius: 6px;
+  background: var(--surface-2); color: var(--watch); font-size: 11px; font-weight: 700;
+}

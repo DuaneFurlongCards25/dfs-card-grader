@@ -3,6 +3,7 @@ import { type Listing, num, text } from './api';
 import { DEFAULT_RULES, nudge, priceOne, type Rules, usd } from './pricing';
 import { download, fileExchangeEnd, fileExchangeRevise, reviewCsv, stamp, workingCsv } from './exports';
 import { post } from './api';
+import { ADD_DEFAULTS, addProblems, ebayAddCsv } from './ebayAdd';
 
 /* ------------------------------------------------------------------ *
  * Reprice — the Sunday job, on one screen.
@@ -262,6 +263,20 @@ export default function Reprice({
             cert: text(l.cert_number),
             days: null, comp: num(l.comp_avg), watchers: l.watchers ?? null,
           }))))}>⬇ Working file (Card Luma / website)</button>
+        <button className="btn write" onClick={() => {
+          const cards = picked.map((l) => ({
+            sku: text(l.sku), title: text(l.title), price: num(l.current_price),
+            sport: text(l.sport), grader: text(l.grader), grade: text(l.grade),
+            cert: text(l.cert_number),
+          }));
+          const bad = addProblems(cards);
+          if (bad.length && !confirm(
+            `${bad.length} of ${cards.length} rows are missing something eBay requires ` +
+            `and will be rejected on upload. For example:\n\n` +
+            bad.slice(0, 5).map((b) => `  ${b.sku} — ${b.why}`).join('\n') +
+            `\n\nBuild the file anyway?`)) return;
+          download(`ebay-list-${stamp()}.csv`, ebayAddCsv(cards, ADD_DEFAULTS));
+        }}>⬆ List on eBay file ({picked.length})</button>
         <button className="btn danger"
           onClick={() => { if (confirm(
             `Make a File Exchange file that ENDS ${picked.length} listings on eBay?\n\n` +

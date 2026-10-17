@@ -731,6 +731,10 @@ async function compsFetch(request: Request, env: Env) {
         WHERE item_number = ANY($1::text[]) AND ended_at IS NULL`, [ids]);
 
     const found: { item_number: string; comp: number }[] = [];
+    // CardHedger names the sport on every match. Cheaper and more
+    // reliable than another regex over the title, and it rides along on
+    // a call already being made.
+    const sports: { item_number: string; sport: string }[] = [];
     const missed: string[] = [];
 
     // One at a time with a gap, because the limit is per second and the
@@ -745,6 +749,9 @@ async function compsFetch(request: Request, env: Env) {
         const match = res?.match ?? res?.cards?.[0] ?? null;
         // A weak match is worse than none: it reprices the wrong card.
         if (!match || Number(match.confidence ?? 0) < 0.7) { missed.push(row.item_number); return; }
+        const cat = String(match.category ?? '').trim();
+        if (cat && (!row.sport || row.sport === 'Unknown' || row.sport === ''))
+          sports.push({ item_number: row.item_number, sport: cat.slice(0, 40) });
         const price = chPickPrice(match, chWantedGrade(row));
         if (price !== null) found.push({ item_number: row.item_number, comp: price });
         else missed.push(row.item_number);
@@ -760,7 +767,15 @@ async function compsFetch(request: Request, env: Env) {
           WHERE l.item_number = x.item_number`,
         [JSON.stringify(found)]);
     }
-    return json({ ok: true, asked: rows.length, found: found.length, missed: missed.length });
+    if (sports.length) {
+      await sql.unsafe(
+        `UPDATE "${schema}"."listings" AS l SET sport = x.sport
+           FROM jsonb_to_recordset($1::text::jsonb) AS x(item_number text, sport text)
+          WHERE l.item_number = x.item_number`,
+        [JSON.stringify(sports)]);
+    }
+    return json({ ok: true, asked: rows.length, found: found.length,
+                  missed: missed.length, sports_named: sports.length });
   } catch (e: any) {
     return err(String(e?.message || e).slice(0, 300), 500);
   } finally {
