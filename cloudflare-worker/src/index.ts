@@ -30,6 +30,7 @@ export interface Env {
   DATABASE_URL: string;
   API_KEY?: string;
   SCAN_KEY?: string;
+  CARDHEDGER_KEY?: string;
   CARD_IMAGES?: R2Bucket;
   HYPERDRIVE?: { connectionString: string };
 }
@@ -646,6 +647,127 @@ async function serveImage(env: Env, key: string) {
   });
 }
 
+
+/* ------------------------------------------------------------------ *
+ * Comps from CardHedger.
+ *
+ * The whole pricing engine reads comp_avg, and until this runs that
+ * column is empty — which is why Reprice priced nothing on day one.
+ *
+ * CardHedger is rate limited and metered, so this takes a batch of cards
+ * the person actually picked rather than walking the whole table, runs
+ * them a few at a time, and writes what it finds. A card it cannot match
+ * is left with no comp rather than a guessed one: an empty cell is
+ * honest, a wrong comp quietly reprices a card to the wrong number.
+ * ------------------------------------------------------------------ */
+const CH_BASE = 'https://api.cardhedger.com';
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * CardHedger allows about 1.2 requests a second. Going faster does not
+ * fail loudly — it returns refusals that look exactly like "no such
+ * card", which is how a throttled run reads as a catalogue full of
+ * unmatched cards. One retry, then give up honestly.
+ */
+async function chPost(env: Env, path: string, body: unknown, tries = 2): Promise<any> {
+  if (!env.CARDHEDGER_KEY) return null;
+  for (let attempt = 0; attempt < tries; attempt++) {
+    try {
+      const r = await fetch(CH_BASE + path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': env.CARDHEDGER_KEY },
+        body: JSON.stringify(body),
+      });
+      if (r.ok) return await r.json();
+      if (r.status === 429 || r.status >= 500) { await sleep(1200); continue; }
+      return null;                       // a real refusal, not a wobble
+    } catch { await sleep(600); }
+  }
+  return null;
+}
+
+/**
+ * Which of CardHedger's prices applies to this card.
+ *
+ * card-match already returns a price per grade, so one call answers the
+ * whole question — the separate FMV call this used to make was a second
+ * round trip that mostly came back empty.
+ */
+function chWantedGrade(row: any): string {
+  const g = String(row.grade ?? '').trim();
+  const grader = String(row.grader ?? '').trim();
+  const bad = (x: string) => !x || x.toLowerCase() === 'nan' || x.toLowerCase() === 'none';
+  if (bad(g) || bad(grader)) return 'Raw';
+  return `${grader.toUpperCase()} ${g}`;
+}
+
+function chPickPrice(match: any, want: string): number | null {
+  const list: any[] = Array.isArray(match?.prices) ? match.prices : [];
+  if (!list.length) return null;
+  const num = (p: any) => { const n = Number(p?.price); return Number.isFinite(n) && n > 0 ? n : null; };
+  const exact = list.find((p) => String(p?.grade ?? '').toUpperCase() === want.toUpperCase());
+  if (exact && num(exact) !== null) return num(exact);
+  // A graded card with no price at its own grade is NOT worth the raw
+  // price — leave it empty rather than pricing a PSA 10 off a raw comp.
+  if (want !== 'Raw') return null;
+  const raw = list.find((p) => String(p?.grade ?? '').toLowerCase() === 'raw');
+  return raw ? num(raw) : null;
+}
+
+async function compsFetch(request: Request, env: Env) {
+  if (!env.CARDHEDGER_KEY)
+    return err('CARDHEDGER_KEY not set — run: npx wrangler secret put CARDHEDGER_KEY', 503);
+  const sql = getSql(env);
+  try {
+    const schema = await tenantSchema(request, sql);
+    const body = (await request.json()) as any;
+    const ids: string[] = (Array.isArray(body?.item_numbers) ? body.item_numbers : [])
+      .filter((x: any) => typeof x === 'string' && x).slice(0, 25);
+    if (!ids.length) return err('no item numbers', 400);
+
+    const rows = await sql.unsafe(
+      `SELECT item_number, title, grader, grade FROM "${schema}"."listings"
+        WHERE item_number = ANY($1::text[]) AND ended_at IS NULL`, [ids]);
+
+    const found: { item_number: string; comp: number }[] = [];
+    const missed: string[] = [];
+
+    // One at a time with a gap, because the limit is per second and the
+    // browser loops over batches — progress stays visible either way.
+    for (let i = 0; i < rows.length; i++) {
+      if (i > 0) await sleep(850);
+      await (async (row: any) => {
+        const title = String(row.title ?? '').trim();
+        if (!title) { missed.push(row.item_number); return; }
+        const res = await chPost(env, '/v1/cards/card-match',
+          { query: title, page: 1, page_size: 5 });
+        const match = res?.match ?? res?.cards?.[0] ?? null;
+        // A weak match is worse than none: it reprices the wrong card.
+        if (!match || Number(match.confidence ?? 0) < 0.7) { missed.push(row.item_number); return; }
+        const price = chPickPrice(match, chWantedGrade(row));
+        if (price !== null) found.push({ item_number: row.item_number, comp: price });
+        else missed.push(row.item_number);
+      })(rows[i]);
+    }
+
+    if (found.length) {
+      await sql.unsafe(
+        `UPDATE "${schema}"."listings" AS l
+            SET comp_avg = x.comp, last_priced_at = now()
+           FROM jsonb_to_recordset($1::text::jsonb)
+                AS x(item_number text, comp numeric)
+          WHERE l.item_number = x.item_number`,
+        [JSON.stringify(found)]);
+    }
+    return json({ ok: true, asked: rows.length, found: found.length, missed: missed.length });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  } finally {
+    await sql.end({ timeout: 5 }).catch(() => {});
+  }
+}
+
 /* ------------------------------------------------------------------ *
  * Refresh listings from the eBay active-listings report.
  *
@@ -1045,6 +1167,8 @@ export default {
       return listingsRefresh(request, env);
     if (path === '/api/listings/retire' && request.method === 'POST')
       return listingsRetire(request, env);
+    if (path === '/api/comps/fetch' && request.method === 'POST')
+      return compsFetch(request, env);
 
     if (path === '/api/tenants/delete' && request.method === 'POST')
       return tenantDelete(request, env);

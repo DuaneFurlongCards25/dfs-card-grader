@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { type Listing, num, text } from './api';
 import { DEFAULT_RULES, nudge, priceOne, type Rules, usd } from './pricing';
 import { download, fileExchangeEnd, fileExchangeRevise, reviewCsv, stamp, workingCsv } from './exports';
+import { post } from './api';
 
 /* ------------------------------------------------------------------ *
  * Reprice — the Sunday job, on one screen.
@@ -19,6 +20,30 @@ export default function Reprice({
 }: { rows: Listing[]; selected: Set<string>; onClear: () => void }) {
   const [rules, setRules] = useState<Rules>(DEFAULT_RULES);
   const [flat, setFlat] = useState<number | null>(null);
+  const [comping, setComping] = useState('');
+
+  /**
+   * Fetch comps for the picked cards, 25 at a time.
+   *
+   * CardHedger is rate limited, so the Worker spaces its calls out and
+   * the browser walks the batches — which also means progress is visible
+   * instead of one long silence.
+   */
+  const getComps = async () => {
+    const need = picked.filter((l) => num(l.comp_avg) === null).map((l) => l.item_number);
+    if (!need.length) { setComping('Every picked card already has a comp.'); return; }
+    let found = 0, done = 0;
+    for (let i = 0; i < need.length; i += 25) {
+      const chunk = need.slice(i, i + 25);
+      setComping(`Looking up ${done + 1}–${done + chunk.length} of ${need.length}…`);
+      try {
+        const r = await post('/api/comps/fetch', { item_numbers: chunk });
+        found += r.found ?? 0;
+      } catch (e: any) { setComping(`Stopped: ${e.message}`); return; }
+      done += chunk.length;
+    }
+    setComping(`${found} of ${need.length} priced. Reload to see them — the rest have no comp anywhere, so price those on age instead.`);
+  };
 
   const picked = useMemo(
     () => rows.filter((l) => selected.has(l.item_number) && !l.ended_at),
@@ -181,14 +206,20 @@ export default function Reprice({
             movers.map((p) => ({ item_number: p.l.item_number, price: p.now! }))))}>
           ⬆ eBay File Exchange ({movers.length})
         </button>
+        <button className="btn" onClick={getComps} disabled={!!comping && comping.endsWith('…')}>
+          ⟳ Get comps ({picked.filter((l) => num(l.comp_avg) === null).length})
+        </button>
         <button className="btn" onClick={onClear}>Clear pick</button>
       </div>
+
+      {comping && <p className="note" style={{ marginTop: 0 }}>{comping}</p>}
 
       {noComp > 0 && (
         <p className="note" style={{ marginTop: 0 }}>
           <b>{noComp.toLocaleString()} of the picked cards have no comp</b>, so they are left exactly
-          as they are rather than guessed at. Run them through CardHedger in Streamlit first if you
-          want them priced.
+          as they are rather than guessed at. Press <b>Get comps</b> to look them up. CardHedger
+          prices about half of ordinary stock and very little of the rare autos and patches —
+          nothing has a price for those, so price them on age with the quick cut above.
         </p>
       )}
 
