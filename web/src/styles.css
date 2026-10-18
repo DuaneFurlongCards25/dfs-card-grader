@@ -582,3 +582,15 @@ ol.steps b { color: var(--text); }
 }
 .hop-pics img { cursor: zoom-in; }
 .hop-pics .btn { grid-column: 1 / -1; justify-content: center; }
+
+/* ---------------- sku setup ---------------- */
+.skufield {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11px; font-weight: 700; letter-spacing: .6px;
+  text-transform: uppercase; color: var(--text-faint);
+}
+.skufield input {
+  padding: 7px 10px; border-radius: 8px; font: 400 13px var(--mono);
+  background: var(--surface); border: 1px solid var(--line); color: var(--text);
+  text-transform: none; letter-spacing: 0; width: 150px;
+}

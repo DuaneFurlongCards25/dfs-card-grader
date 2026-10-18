@@ -63,6 +63,23 @@ export default function Hopper() {
   const [licence, setLicence] = useState('');
   const [degraded, setDegraded] = useState('');
   const [zoom, setZoom] = useState<string | null>(null);   // a photo, full size
+  const [skuPrefix, setSkuPrefix] = useState(
+    localStorage.getItem('cp_sku_prefix') || '');
+  const [skuStart, setSkuStart] = useState(
+    +(localStorage.getItem('cp_sku_start') || 1));
+
+  /**
+   * The SKU. Not decoration — it is the thread that ties everything
+   * together: its prefix is the box on the Boxes screen, it matches the
+   * lot prefix that carries what the card cost, and it is what a sale
+   * comes back on months later. A card listed without one is a card that
+   * cannot be found, costed or reconciled.
+   *
+   * Defaults to the stack name, which is already how he names them:
+   * RBLOT2_10-13-26-229, FEARED-10-16-26-001.
+   */
+  const skuFor = (idx: number) =>
+    `${(skuPrefix || stack || 'CARD').trim()}-${String(skuStart + idx - 1).padStart(3, '0')}`;
 
   /**
    * Crop the saved photos to the card, the way the scanning apps do it —
@@ -139,10 +156,26 @@ export default function Hopper() {
     pairs.set(n, v);
   }
   const list = [...pairs.entries()].sort((a, z) => a[0] - z[0]);
-  const byFront = new Map(cards.map((c) => [c.r2_front, c]));
+  /*
+   * A card is found by EITHER photo key.
+   *
+   * Cropping repoints r2_front at the cropped file, which no longer
+   * matches the original photo sitting in the stack — so a cropped card
+   * dropped out of the list entirely and read as unread. Keeping the
+   * original key in the index is what ties the two together.
+   */
+  const byFront = new Map<string, Card>();
+  for (const c of cards) {
+    if (c.r2_front) byFront.set(c.r2_front, c);
+    if (c.r2_front_orig) byFront.set(c.r2_front_orig, c);
+  }
 
-  const unread = list.filter(([, v]) => v.front && !byFront.has(v.front.key));
-  const read = list.map(([, v]) => v.front && byFront.get(v.front.key)).filter(Boolean) as Card[];
+  const unread = list.filter(([, v]) =>
+    v.front && !byFront.has(v.front.key) && !/-crop\.jpe?g$/i.test(v.front.name));
+  // One row per card, even though two keys can point at it.
+  const read = [...new Set(
+    list.map(([, v]) => v.front && byFront.get(v.front.key)).filter(Boolean) as Card[],
+  )];
   const needReview = read.filter((c) => c.status !== 'ready');
   const ready = read.filter((c) => c.status === 'ready');
 
@@ -196,6 +229,9 @@ export default function Hopper() {
         const r = await post('/api/hopper/identify',
           { stack, idx: n, front, back });
         if (r.degraded) setDegraded(r.degraded);
+        // Give it a SKU straight away — a card without one cannot be
+        // found in a box, costed against a lot, or matched to its sale.
+        if (!r.card?.sku) await post('/api/hopper/save', { id: r.card.id, sku: skuFor(n) });
         // Keep the originals so a bad crop can be undone without reshooting.
         if (front !== origFront || back !== origBack) {
           await post('/api/hopper/save', {
@@ -295,14 +331,33 @@ export default function Hopper() {
           ))}
         </select>
         <button className="btn read" onClick={identify} disabled={!!busy || !unread.length}>
-          {busy || (unread.length ? `Read ${unread.length} new cards` : 'All read')}
+          {busy || (unread.length
+            ? `Read ${unread.length} new card${unread.length === 1 ? '' : 's'}`
+            : 'All read')}
         </button>
         <button className="btn sm" onClick={load}>⟳ Check for scans</button>
+        <label className="skufield">SKU prefix
+          <input value={skuPrefix} placeholder={stack ?? 'stack name'}
+                 onChange={(e) => { setSkuPrefix(e.target.value);
+                   localStorage.setItem('cp_sku_prefix', e.target.value); }} />
+        </label>
+        <label className="skufield">start at
+          <input type="number" min="1" value={skuStart} style={{ width: 70 }}
+                 onChange={(e) => { setSkuStart(+e.target.value || 1);
+                   localStorage.setItem('cp_sku_start', e.target.value); }} />
+        </label>
+        <span className="muted">next: <b className="mono">{skuFor(1)}</b></span>
         <span className="spacer" />
         <button className="btn" disabled={!read.length || !!busy}
           onClick={async () => { for (const c of read) if (!c.cropped_at) await cropPhotos(c); }}
           title="New scans are cropped as they are read; this catches older ones">
           ✂ Crop anything missed
+        </button>
+        <button className="btn" disabled={!read.some((c) => !c.sku) || !!busy}
+          onClick={async () => {
+            for (const c of read) if (!c.sku) await edit(c, { sku: skuFor(c.idx) });
+          }}>
+          # Give SKUs to {read.filter((c) => !c.sku).length}
         </button>
         <button className="btn write" disabled={!ready.length}
           onClick={() => download(`hopper-list-${stamp()}.csv`, ebayAddCsv(
@@ -407,6 +462,10 @@ export default function Hopper() {
                 <label>Sport
                   <input defaultValue={c.sport ?? ''} key={`sp${c.id}`}
                          onBlur={(e) => edit(c, { sport: e.target.value })} /></label>
+                <label className={c.sku ? '' : 'flagged'} style={{ gridColumn: 'span 2' }}>SKU
+                  <input defaultValue={c.sku ?? ''} key={`sk${c.id}`}
+                         placeholder={skuFor(c.idx)}
+                         onBlur={(e) => edit(c, { sku: e.target.value || skuFor(c.idx) })} /></label>
                 <label>Price $
                   <input defaultValue={price?.toFixed(2) ?? ''} key={`pr${c.id}`}
                          onBlur={(e) => edit(c, { price: e.target.value as any })} /></label>
