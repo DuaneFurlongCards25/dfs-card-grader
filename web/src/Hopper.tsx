@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { API, getToken, num, post } from './api';
 import { usd } from './pricing';
 import { download, stamp } from './exports';
-import { ADD_DEFAULTS, ebayAddCsv } from './ebayAdd';
+import { ADD_DEFAULTS, ebayAddCsv, type AddDefaults } from './ebayAdd';
 import { cropToCard } from './cropPhotos';
 import { buildCardTitle, FEATURES, PARALLELS, type Attrs } from './cardTitle';
 
@@ -63,6 +63,9 @@ export default function Hopper() {
   const [licence, setLicence] = useState('');
   const [degraded, setDegraded] = useState('');
   const [zoom, setZoom] = useState<string | null>(null);   // a photo, full size
+  // His saved listing defaults — policies, categories, description.
+  // Falling back to the hardcoded ones meant Listing defaults did nothing.
+  const [defs, setDefs] = useState<AddDefaults>(ADD_DEFAULTS);
   const [skuPrefix, setSkuPrefix] = useState(
     localStorage.getItem('cp_sku_prefix') || '');
   const [skuStart, setSkuStart] = useState(
@@ -146,6 +149,12 @@ export default function Hopper() {
     } catch (e: any) { setError(e.message || String(e)); }
   };
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    fetch(`${API}/api/listing-settings`, { headers: { Authorization: `Bearer ${getToken()}` } })
+      .then((r) => r.json())
+      .then((d) => d?.settings && setDefs({ ...ADD_DEFAULTS, ...d.settings }))
+      .catch(() => {});
+  }, []);
 
   const inStack = photos.filter((p) => p.stack === stack);
   const pairs = new Map<number, { front?: Shot; back?: Shot }>();
@@ -362,11 +371,21 @@ export default function Hopper() {
         <button className="btn write" disabled={!ready.length}
           onClick={() => download(`hopper-list-${stamp()}.csv`, ebayAddCsv(
             ready.map((c) => ({
-              sku: c.sku || `${c.stack_name}-${String(c.idx).padStart(3, '0')}`,
+              sku: c.sku || skuFor(c.idx),
               title: c.title || '', price: num(c.price) ?? num(c.fmv),
               sport: c.sport || '', grader: c.grader || '', grade: c.grade || '',
-              cert: '', picUrl: img(c.r2_front),
-            })), ADD_DEFAULTS))}>
+              cert: (c as any).cert_number || '',
+              // Front first — eBay makes the first photo the gallery image.
+              picUrls: [img(c.r2_front), c.r2_back ? img(c.r2_back) : ''].filter(Boolean),
+              condition: (c as any).condition || defs.conditionDefault,
+              manufacturer: (c as any).manufacturer || '',
+              league: (c as any).league || '',
+              parallel: c.parallel || '', year: c.year || '',
+              cardNumber: c.card_number || '', player: c.player || '',
+              team: c.team || '', setName: c.set_name || '',
+              isRookie: !!(c as any).is_rookie, isAuto: !!(c as any).is_auto,
+              quantity: (c as any).quantity || 1,
+            })), defs))}>
           ⬆ List {ready.length} on eBay
         </button>
       </div>

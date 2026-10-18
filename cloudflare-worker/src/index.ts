@@ -719,6 +719,202 @@ async function keyAge(request: Request, env: Env) {
   } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
 }
 
+
+
+/* ------------------------------------------------------------------ *
+ * Tools.
+ *
+ * Buylist, filing rules and team access are all the same shape — a
+ * small list he edits — so they share one generic handler rather than
+ * three near-identical ones.
+ * ------------------------------------------------------------------ */
+const TOOL_TABLES: Record<string, string[]> = {
+  buylist:      ['bucket', 'priced_as', 'amount', 'at_least', 'note', 'sort'],
+  filing_rules: ['matches', 'field', 'category', 'sort'],
+  team_access:  ['email', 'name', 'areas', 'active'],
+};
+
+async function toolList(request: Request, env: Env, table: string) {
+  const sql = getSql(env);
+  try {
+    if (!TOOL_TABLES[table]) return err('unknown tool', 404);
+    const schema = await tenantSchema(request, sql);
+    const order = table === 'team_access' ? 'email' : 'sort, id';
+    const rows = await sql.unsafe(
+      `SELECT * FROM "${schema}"."${table}" ORDER BY ${order}`);
+    return json({ rows });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
+}
+
+/**
+ * Saves a whole list at once.
+ *
+ * Replace rather than merge: these are short lists edited as a block,
+ * and a row he deleted on screen must actually go. Wrapped in one
+ * transaction so a failure halfway cannot leave the list empty.
+ */
+async function toolSave(request: Request, env: Env, table: string) {
+  const sql = getSql(env);
+  try {
+    const cols = TOOL_TABLES[table];
+    if (!cols) return err('unknown tool', 404);
+    const schema = await tenantSchema(request, sql);
+    const body = (await request.json()) as any;
+    const rows: any[] = Array.isArray(body?.rows) ? body.rows.slice(0, 500) : [];
+
+    await sql.begin(async (tx: any) => {
+      await tx.unsafe(`DELETE FROM "${schema}"."${table}"`);
+      for (const r of rows) {
+        const vals = cols.map((c) => (r[c] === undefined || r[c] === '' ? null : r[c]));
+        const ph = cols.map((_, i) => `$${i + 1}`).join(',');
+        await tx.unsafe(
+          `INSERT INTO "${schema}"."${table}" (${cols.map((c) => `"${c}"`).join(',')})
+           VALUES (${ph})`, vals);
+      }
+    });
+    return json({ ok: true, saved: rows.length });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
+}
+
+/** Everything, searched at once — cards, sales and scans. */
+async function cardSearch(request: Request, env: Env, url: URL) {
+  const sql = getSql(env);
+  try {
+    const schema = await tenantSchema(request, sql);
+    const q = (url.searchParams.get('q') || '').trim();
+    if (q.length < 2) return json({ listings: [], sales: [], scans: [] });
+    const like = `%${q}%`;
+    const [listings, sales, scans] = await Promise.all([
+      sql.unsafe(
+        `SELECT item_number, sku, title, current_price, sport, ended_at, comp_avg
+           FROM "${schema}"."listings"
+          WHERE title ILIKE $1 OR sku ILIKE $1 OR item_number ILIKE $1
+          ORDER BY ended_at NULLS FIRST, current_price DESC LIMIT 60`, [like]),
+      sql.unsafe(
+        `SELECT sale_date, title, sku, gross_revenue, platform_fee, source, order_id
+           FROM "${schema}"."sales_records"
+          WHERE title ILIKE $1 OR sku ILIKE $1 OR item_number ILIKE $1
+          ORDER BY sale_date DESC LIMIT 40`, [like]),
+      sql.unsafe(
+        `SELECT id, stack_name, idx, title, sku, status, r2_front
+           FROM "${schema}"."scan_cards"
+          WHERE (title ILIKE $1 OR sku ILIKE $1) AND r2_front IS NOT NULL
+          ORDER BY updated_at DESC LIMIT 30`, [like]),
+    ]);
+    return json({ listings, sales, scans });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
+}
+
+/**
+ * Listings of the same card, more than once.
+ *
+ * Matched on normalised title because the SKUs differ by definition —
+ * two listings of one card were created separately. Graded slabs are
+ * excluded: two PSA 10s of the same card are genuinely two listings.
+ */
+async function duplicates(request: Request, env: Env) {
+  const sql = getSql(env);
+  try {
+    const schema = await tenantSchema(request, sql);
+    const rows = await sql.unsafe(`
+      WITH norm AS (
+        SELECT item_number, sku, title, current_price, start_date,
+               lower(regexp_replace(title, '[^a-z0-9 ]', '', 'gi')) AS k
+          FROM "${schema}"."listings"
+         WHERE ended_at IS NULL
+           AND coalesce(grader,'') IN ('', 'nan')     -- slabs are not duplicates
+      )
+      SELECT k, count(*)::int AS copies,
+             json_agg(json_build_object(
+               'item_number', item_number, 'sku', sku, 'title', title,
+               'price', current_price, 'listed', start_date)
+               ORDER BY current_price DESC) AS cards
+        FROM norm GROUP BY k HAVING count(*) > 1
+       ORDER BY count(*) DESC, k LIMIT 200`);
+    return json({ groups: rows });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
+}
+
+/* ------------------------------------------------------------------ *
+ * Listing settings.
+ *
+ * Everything eBay needs that is the same on every card: the business
+ * policies, the store categories, where it ships from, the description.
+ * These were constants in the code, which meant changing a shipping
+ * policy meant changing software. They belong to him, so they live in
+ * the database and the listing file reads them.
+ * ------------------------------------------------------------------ */
+const LISTING_DEFAULTS = {
+  category: '261328',                     // Sports Trading Card Singles
+  categoryTcg: '183454',                  // non-sport / TCG singles
+  location: 'Scottsdale, AZ',
+  postalCode: '85255',
+  dispatchDays: '1',
+  duration: 'GTC',
+  quantity: '1',
+  bestOffer: true,
+  immediatePay: true,
+  // Named policies — File Exchange accepts the NAME, which survives a
+  // policy being edited on eBay in a way the numeric id does not.
+  // His actual policies, read off his eBay account.
+  shippingProfile: 'Flat: US_eBayStandardEnvelope $0.99, 2 busines',
+  paymentProfile: 'BIN',
+  returnProfile: 'No Return Accepted',
+  /*
+   * Shipping by price. eBay Standard Envelope is only valid up to $20,
+   * so a card above that needs a tracked policy or the listing is
+   * rejected — or worse, accepted and shipped uninsured.
+   * Lowest band first; a card above every band uses the policy above.
+   */
+  shippingBands: [] as { upTo: number; profile: string }[],
+  returnsAccepted: 'ReturnsNotAccepted',
+  weightMajor: '0',
+  weightMinor: '4',
+  conditionDefault: '400011',             // Excellent
+  description:
+    '{title}<br><br>Shipped in a penny sleeve and top loader, in a bubble mailer.<br>' +
+    'Please see photographs — they are of the exact card you receive.',
+  // sport -> eBay store category name
+  storeCategories: {
+    Baseball: '', Basketball: '', Football: '', Soccer: '', Hockey: '',
+    Pokemon: '', Other: '',
+  } as Record<string, string>,
+};
+
+async function listingSettings(request: Request, env: Env) {
+  const sql = getSql(env);
+  try {
+    const schema = await tenantSchema(request, sql);
+    const T = `"${schema}"."app_settings"`;
+    if (request.method === 'POST') {
+      const body = await request.json();
+      await sql.unsafe(
+        `INSERT INTO ${T} (key, value, updated_at)
+         VALUES ('listing_settings', $1, now())
+         ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = now()`,
+        [JSON.stringify(body)]);
+    }
+    const [row] = await sql.unsafe(
+      `SELECT value FROM ${T} WHERE key = 'listing_settings'`);
+    let saved: any = {};
+    try { saved = row?.value ? JSON.parse(row.value) : {}; } catch {}
+    // Defaults underneath, so a new field appears without him re-saving.
+    return json({ settings: { ...LISTING_DEFAULTS, ...saved,
+      storeCategories: { ...LISTING_DEFAULTS.storeCategories,
+                         ...(saved.storeCategories || {}) } } });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
+}
+
 /* ------------------------------------------------------------------ *
  * The Hopper.
  *
@@ -1928,6 +2124,13 @@ export default {
     if (path === '/api/ai/key-age') return keyAge(request, env);
     if (path === '/api/ai/accept-licence' && request.method === 'POST')
       return aiAccept(request, env);
+    if (path === '/api/listing-settings') return listingSettings(request, env);
+    const tool = path.match(/^\/api\/tools\/([a-z_]+)$/);
+    if (tool) return request.method === 'POST'
+      ? toolSave(request, env, tool[1])
+      : toolList(request, env, tool[1]);
+    if (path === '/api/search') return cardSearch(request, env, url);
+    if (path === '/api/duplicates') return duplicates(request, env);
     if (path === '/api/hopper/cards') return hopperCards(request, env, url);
     if (path === '/api/hopper/identify' && request.method === 'POST')
       return hopperIdentify(request, env);

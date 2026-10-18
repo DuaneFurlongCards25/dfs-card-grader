@@ -11,6 +11,8 @@ import Dashboard from './Dashboard';
 import Lots from './Lots';
 import Titles from './Titles';
 import Hopper from './Hopper';
+import ListingSettings from './ListingSettings';
+import Tools from './Tools';
 
 /* ------------------------------------------------------------------ *
  * The shell.
@@ -23,7 +25,8 @@ import Hopper from './Hopper';
 
 type Tab =
   | 'Home' | 'Inventory' | 'Boxes' | 'Intake' | 'Refresh'
-  | 'Reprice' | 'Money' | 'Lots' | 'Titles' | 'Hopper' | 'Settings';
+  | 'Reprice' | 'Money' | 'Lots' | 'Titles' | 'Hopper' | 'Settings' | 'Listing'
+  | 'Tools';
 
 const NAV: { section: string; items: { tab: Tab; label: string }[] }[] = [
   { section: 'Dashboard', items: [{ tab: 'Home', label: 'Overview' }] },
@@ -36,11 +39,15 @@ const NAV: { section: string; items: { tab: Tab; label: string }[] }[] = [
       { tab: 'Refresh', label: 'Refresh from eBay' },
   ] },
   { section: 'Pricing', items: [{ tab: 'Reprice', label: 'Reprice' }] },
+  { section: 'Tools', items: [{ tab: 'Tools', label: 'Tools' }] },
   { section: 'Money', items: [
       { tab: 'Money', label: 'Sales' },
       { tab: 'Lots', label: 'Lots' },
   ] },
-  { section: 'Settings', items: [{ tab: 'Settings', label: 'Connections' }] },
+  { section: 'Settings', items: [
+      { tab: 'Settings', label: 'Connections' },
+      { tab: 'Listing', label: 'Listing defaults' },
+  ] },
 ];
 
 const sectionOf = (t: Tab) =>
@@ -165,6 +172,8 @@ export default function App() {
         {tab === 'Intake' && <Intake />}
         {tab === 'Hopper' && <Hopper />}
         {tab === 'Settings' && <Settings />}
+        {tab === 'Listing' && <ListingSettings />}
+        {tab === 'Tools' && <Tools />}
       </main>
 
       <nav className="bottombar">

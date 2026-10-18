@@ -38,6 +38,7 @@ export const ADD_HEADER = [
   '*ReturnsAcceptedOption', 'ReturnsWithinOption', 'RefundOption',
   'ShippingCostPaidByOption', 'AdditionalDetails', 'ShippingProfileName',
   'ReturnProfileName', 'PaymentProfileName', 'TakeBackPolicyID',
+  'ShippingProfileID', 'ReturnProfileID', 'PaymentProfileID',
   'ProductCompliancePolicyID', 'ScheduleTime', 'BestOfferEnabled',
   'MinimumBestOfferPrice', 'BestOfferAutoAcceptPrice', '*C:Rookie', '*C:Memorabilia',
 ];
@@ -50,8 +51,30 @@ export type AddDefaults = {
   shippingProfile: string;
   returnProfile: string;
   paymentProfile: string;
+  /*
+   * The numeric ids, preferred over the names.
+   *
+   * His account has TWO policies both called "Flat:
+   * US_eBayStandardEnvelope $0.99, 2 busines" — 332312490021 and
+   * 332312496021. A name that is not unique either rejects the upload or
+   * quietly picks the wrong policy, so where an id is known it wins and
+   * the name is left out entirely.
+   */
+  shippingProfileId?: string;
+  returnProfileId?: string;
+  paymentProfileId?: string;
+  /** Lowest band first; a card above every band uses the policy above. */
+  shippingBands?: { upTo: number; profile: string; profileId?: string }[];
   bestOffer: boolean;
+  immediatePay?: boolean;
   duration: string;
+  quantity?: string;
+  weightMajor?: string;
+  weightMinor?: string;
+  returnsAccepted?: string;
+  conditionDefault?: string;
+  description?: string;
+  storeCategories?: Record<string, string>;
 };
 
 export const ADD_DEFAULTS: AddDefaults = {
@@ -66,6 +89,20 @@ export const ADD_DEFAULTS: AddDefaults = {
   duration: 'GTC',
 };
 
+/**
+ * eBay condition descriptor 40001 for category 261328 — the ungraded
+ * card condition. eBay REJECTS an ungraded listing without it, which is
+ * why it has to be a real field and not a default nobody sees.
+ * Ids confirmed from the eBay template, Aug 2026.
+ */
+export const CARD_CONDITIONS: { id: string; label: string }[] = [
+  { id: '400010', label: 'Near mint or better' },
+  { id: '400011', label: 'Excellent' },
+  { id: '400012', label: 'Very good' },
+  { id: '400013', label: 'Poor' },
+];
+export const CONDITION_DEFAULT = '400011';
+
 export type AddCard = {
   sku: string;
   title: string;
@@ -74,7 +111,21 @@ export type AddCard = {
   grader: string;
   grade: string;
   cert: string;
-  picUrl?: string;
+  /** Front first — eBay makes the first photo the gallery image. */
+  picUrls?: string[];
+  condition?: string;      // one of CARD_CONDITIONS ids, ungraded only
+  manufacturer?: string;
+  league?: string;
+  parallel?: string;
+  year?: string;
+  cardNumber?: string;
+  player?: string;
+  team?: string;
+  setName?: string;
+  isRookie?: boolean;
+  isAuto?: boolean;
+  quantity?: number;
+  description?: string;
 };
 
 /**
@@ -109,50 +160,74 @@ const LEAGUE: Record<string, string> = {
 
 export function ebayAddCsv(cards: AddCard[], d: AddDefaults): string {
   const rows = cards.map((c) => {
+    // A dearer card needs a tracked policy — eBay Standard Envelope is
+    // only valid up to $20, and a $300 card posted in one is uninsured.
+    const band = (d.shippingBands ?? [])
+      .slice()
+      .sort((a, b) => a.upTo - b.upTo)
+      .find((b) => (c.price ?? 0) <= b.upTo);
+    const shipName = band?.profile || d.shippingProfile;
+    const shipId = band?.profileId || d.shippingProfileId;
+    // Prefer what a person entered; fall back to reading the title.
     const f = fromTitle(c.title);
     const graded = c.grader && c.grade ? 'Yes' : 'No';
+    const pics = (c.picUrls ?? []).filter(Boolean);
     const cell: Record<string, string> = Object.fromEntries(ADD_HEADER.map((h) => [h, '']));
     Object.assign(cell, {
       [ADD_HEADER[0]]: 'Add',
       CustomLabel: c.sku,
       '*Category': d.category,
-      StoreCategory: '0',
       '*Title': c.title.slice(0, 80),
       '*ConditionID': graded === 'Yes' ? '2750' : '4000',
       '*C:Graded': graded,
       '*C:Sport': c.sport || '',
-      '*C:Player/Athlete': f.player,
-      '*C:Manufacturer': f.mfr,
-      'C:Season': f.year,
-      '*C:League': LEAGUE[c.sport] || '',
-      '*C:Autographed': f.auto,
-      '*C:Card Name': f.player,
-      '*C:Card Number': f.number,
+      '*C:Player/Athlete': (c.player || f.player).slice(0, 65),
+      '*C:Manufacturer': c.manufacturer || f.mfr,
+      'C:Season': c.year || f.year,
+      '*C:League': c.league || LEAGUE[c.sport] || '',
+      '*C:Autographed': c.isAuto ? 'Yes' : f.auto,
+      '*C:Card Name': (c.player || f.player).slice(0, 65),
+      '*C:Card Number': (c.cardNumber || f.number).replace(/^#/, ''),
+      '*C:Parallel/Variety': c.parallel || '',
+      '*C:Set': c.setName || '',
+      '*C:Team': c.team || '',
       '*C:Type': 'Sports Trading Card',
-      'C:Year Manufactured': f.year,
+      'C:Year Manufactured': c.year || f.year,
       'CD:Grade - (ID: 27502)': graded === 'Yes' ? c.grade : '',
       'CD:Professional Grader - (ID: 27501)': graded === 'Yes' ? c.grader : '',
       'CDA:Certification Number - (ID: 27503)': graded === 'Yes' ? c.cert : '',
-      'CD:Card Condition - (ID: 40001)': graded === 'Yes' ? '' : '400011',
-      PicURL: c.picUrl || '',
-      GalleryType: c.picUrl ? 'Gallery' : '',
-      '*Description': `${c.title}<br><br>Ships in a penny sleeve and top loader.`,
+      // eBay rejects an ungraded card with no condition descriptor.
+      'CD:Card Condition - (ID: 40001)':
+        graded === 'Yes' ? '' : (c.condition || d.conditionDefault || CONDITION_DEFAULT),
+      // Front and back. eBay takes them pipe-separated and makes the
+      // first one the gallery image.
+      PicURL: pics.join('|'),
+      GalleryType: pics.length ? 'Gallery' : '',
+      '*Description': c.description ||
+        (d.description || '{title}<br><br>Ships in a penny sleeve and top loader.')
+          .replace(/\{title\}/g, c.title),
       '*Format': 'FixedPrice',
       '*Duration': d.duration,
+      '*ReturnsAcceptedOption': d.returnsAccepted || 'ReturnsNotAccepted',
+      WeightMajor: d.weightMajor ?? '0',
+      WeightMinor: d.weightMinor ?? '4',
+      ImmediatePayRequired: d.immediatePay === false ? '0' : '1',
       '*StartPrice': c.price?.toFixed(2) ?? '',
-      '*Quantity': '1',
-      ImmediatePayRequired: '1',
+      '*Quantity': String(c.quantity ?? d.quantity ?? 1),
       '*Location': d.location,
       PostalCode: d.postalCode,
-      WeightMajor: '0',
-      WeightMinor: '4',
       '*DispatchTimeMax': d.dispatchDays,
-      '*ReturnsAcceptedOption': 'ReturnsNotAccepted',
-      ShippingProfileName: d.shippingProfile,
-      ReturnProfileName: d.returnProfile,
-      PaymentProfileName: d.paymentProfile,
+      // Id where we have it, name only as a fallback — never both, or
+      // eBay has two ways to resolve the same policy and may disagree.
+      ShippingProfileID: shipId || '',
+      ShippingProfileName: shipId ? '' : shipName,
+      ReturnProfileID: d.returnProfileId || '',
+      ReturnProfileName: d.returnProfileId ? '' : d.returnProfile,
+      PaymentProfileID: d.paymentProfileId || '',
+      PaymentProfileName: d.paymentProfileId ? '' : d.paymentProfile,
+      StoreCategory: (d.storeCategories ?? {})[c.sport] || '0',
       BestOfferEnabled: d.bestOffer ? '1' : '0',
-      '*C:Rookie': f.rookie,
+      '*C:Rookie': c.isRookie ? 'Yes' : f.rookie,
       '*C:Memorabilia': 'No',
     });
     return ADD_HEADER.map((h) => cell[h]);
@@ -165,6 +240,13 @@ export function ebayAddCsv(cards: AddCard[], d: AddDefaults): string {
 }
 
 /** Rows eBay will reject, named before the upload rather than after. */
+/**
+ * What eBay will reject, named before the upload rather than after.
+ *
+ * Everything here is a field eBay actually requires for category 261328.
+ * Finding out from a rejected File Exchange report is a slow way to
+ * learn that a sport was blank.
+ */
 export function addProblems(cards: AddCard[]): { sku: string; why: string }[] {
   const out: { sku: string; why: string }[] = [];
   for (const c of cards) {
@@ -173,9 +255,15 @@ export function addProblems(cards: AddCard[]): { sku: string; why: string }[] {
     if (!c.title.trim()) miss.push('no title');
     if (c.title.length > 80) miss.push(`title is ${c.title.length} characters, eBay allows 80`);
     if (c.price === null || c.price <= 0) miss.push('no price');
+    if (!c.sku) miss.push('no SKU — it cannot be found or costed later');
     if (!c.sport) miss.push('no sport');
-    if (!f.player) miss.push('player not readable from the title');
-    if (!f.year) miss.push('no year in the title');
+    if (!(c.player || f.player)) miss.push('no player');
+    if (!(c.year || f.year)) miss.push('no year');
+    if (!(c.cardNumber || f.number)) miss.push('no card number');
+    if (!(c.picUrls ?? []).length) miss.push('no photo');
+    const graded = !!(c.grader && c.grade);
+    if (graded && !c.cert) miss.push('graded but no certification number');
+    if (!graded && !c.condition) miss.push('no card condition (eBay requires it for ungraded)');
     if (miss.length) out.push({ sku: c.sku || c.title.slice(0, 30), why: miss.join(' · ') });
   }
   return out;

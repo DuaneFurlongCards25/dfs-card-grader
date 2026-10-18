@@ -594,3 +594,39 @@ ol.steps b { color: var(--text); }
   background: var(--surface); border: 1px solid var(--line); color: var(--text);
   text-transform: none; letter-spacing: 0; width: 150px;
 }
+
+/* ---------------- listing settings ---------------- */
+.rulerow-item { display: flex; flex-direction: column; gap: 4px;
+  font-size: 11px; font-weight: 700; letter-spacing: .6px;
+  text-transform: uppercase; color: var(--text-faint); }
+.rulerow-item input, .rulerow-item select {
+  padding: 8px 10px; border-radius: 8px; font: 400 13.5px var(--sans);
+  background: var(--bg); border: 1px solid var(--line); color: var(--text);
+  text-transform: none; letter-spacing: 0; min-width: 150px;
+}
+.rulerow-item small { font-weight: 400; text-transform: none; letter-spacing: 0;
+  color: var(--text-dim); max-width: 280px; }
+.rulerow-item span { font-weight: 600; text-transform: none; letter-spacing: 0;
+  color: var(--text); font-size: 13.5px; }
+.descbox {
+  width: 100%; padding: 11px 13px; border-radius: 10px; margin-top: 8px;
+  background: var(--bg); border: 1px solid var(--line); color: var(--text);
+  font: 400 13px/1.6 var(--mono); resize: vertical;
+}
+.linkish { color: var(--brand-lift); text-decoration: underline; font: inherit; }
+
+/* ---------------- tools tables ---------------- */
+.thead.buy, .trow.buy {
+  display: grid; gap: 8px; align-items: center; padding: 6px 14px;
+  grid-template-columns: minmax(150px,1.4fr) 130px 100px 110px minmax(140px,1.2fr) 36px;
+}
+.trow.buy { border-bottom: 1px solid var(--line-soft); }
+.trow.buy input, .trow.buy select {
+  padding: 7px 9px; border-radius: 8px; font: 400 13px var(--sans);
+  background: var(--bg); border: 1px solid var(--line); color: var(--text); width: 100%;
+}
+.trow.buy input.right { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) {
+  .thead.buy, .trow.buy { grid-template-columns: 1fr 1fr; }
+  .thead.buy > :nth-child(n+3), .trow.buy > :nth-child(n+5) { display: none; }
+}
