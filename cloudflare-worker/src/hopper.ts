@@ -85,7 +85,14 @@ function readJson(text: string): any {
 }
 
 function shape(d: any): Identified {
-  const str = (v: unknown) => (v === null || v === undefined ? '' : String(v)).trim().slice(0, 120);
+  // Models write "none", "N/A" and "null" as strings when a field is
+  // absent. Left alone they end up printed in the title — one came back
+  // as "... /99 NONE None RC AU Royals".
+  const EMPTY = /^(none|n\/a|na|null|unknown|not visible|not specified|-{1,2}|)$/i;
+  const str = (v: unknown) => {
+    const x = (v === null || v === undefined ? '' : String(v)).trim();
+    return EMPTY.test(x) ? '' : x.slice(0, 120);
+  };
   return {
     player: str(d.player), year: str(d.year), set_name: str(d.set_name),
     card_number: str(d.card_number), parallel: str(d.parallel), serial: str(d.serial),
