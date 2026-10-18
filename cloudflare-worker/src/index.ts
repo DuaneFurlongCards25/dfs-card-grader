@@ -774,10 +774,13 @@ async function hopperIdentify(request: Request, env: Env) {
       [stackId, idx, stack, frontKey, backKey || null, card.player, title, card.year,
        card.set_name, card.card_number, card.parallel, card.serial, card.grader,
        card.grade, card.team, card.sport, card.is_rookie, card.is_auto,
-       card.confidence, card.unsure.join(', '), fmv,
+       card.confidence,
+       [...card.unsure, (card as any).degraded ? 'READ BY THE BASIC MODEL' : '']
+         .filter(Boolean).join(', '),
+       fmv,
        card.confidence >= 0.8 && card.unsure.length === 0 ? 'identified' : 'needs_review']);
 
-    return json({ ok: true, card: saved });
+    return json({ ok: true, card: saved, degraded: (card as any).degraded ?? null });
   } catch (e: any) {
     return err(String(e?.message || e).slice(0, 300), 500);
   } finally { await sql.end({ timeout: 5 }).catch(() => {}); }

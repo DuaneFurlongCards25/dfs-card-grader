@@ -33,11 +33,17 @@ export type Env2 = {
   AI?: { run: (model: string, input: any) => Promise<any> };
 };
 
+/** Which reader answered, so the screen can say so rather than imply. */
+export type ReadBy = 'claude' | 'basic';
+
 export type Identified = {
   player: string; year: string; set_name: string; card_number: string;
   parallel: string; serial: string; grader: string; grade: string;
   team: string; sport: string; is_rookie: boolean; is_auto: boolean;
   confidence: number; unsure: string[];
+  read_by: ReadBy;
+  /** Set when the good reader was meant to run and could not. */
+  degraded?: string;
 };
 
 const SYSTEM = `You identify trading cards from photographs for a card seller's inventory system.
@@ -100,6 +106,7 @@ function shape(d: any): Identified {
     is_rookie: !!d.is_rookie, is_auto: !!d.is_auto,
     confidence: Number.isFinite(+d.confidence) ? Math.max(0, Math.min(1, +d.confidence)) : 0,
     unsure: Array.isArray(d.unsure) ? d.unsure.map(str).filter(Boolean).slice(0, 12) : [],
+    read_by: 'claude',
   };
 }
 
@@ -131,13 +138,14 @@ async function identifyWithWorkersAI(
   let out: Identified;
   if (payload && typeof payload === 'object') {
     out = shape(payload);
+    out.read_by = 'basic';
   } else {
     const raw = String(payload ?? '');
     if (/must submit the prompt 'agree'/i.test(raw))
       throw new Error("Meta's licence has not been accepted — press Accept on the Hopper");
     if (!raw.trim())
       throw new Error(`the reader returned nothing: ${JSON.stringify(r).slice(0, 200)}`);
-    try { out = shape(readJson(raw)); }
+    try { out = shape(readJson(raw)); out.read_by = 'basic'; }
     catch { throw new Error(`the reader did not answer with a card: ${raw.slice(0, 220)}`); }
   }
   out.confidence = Math.min(out.confidence, 0.6);
@@ -165,9 +173,27 @@ const ESCALATE_UNDER = 0.85;
 export async function identifyCard(
   env: Env2, front: ArrayBuffer, back: ArrayBuffer | null, frontType = 'image/jpeg',
 ): Promise<Identified> {
-  if (!env.ANTHROPIC_API_KEY) return identifyWithWorkersAI(env, front);
+  // A dead key must be loud. Falling back silently means cards keep
+  // being read — worse — and nobody finds out until the listings are
+  // wrong, which is the exact failure this whole screen exists to stop.
+  if (!env.ANTHROPIC_API_KEY) {
+    const out = await identifyWithWorkersAI(env, front);
+    out.degraded = 'No Anthropic key is set, so the basic reader was used.';
+    return out;
+  }
 
-  const first = await askClaude(env, FIRST_MODEL, front, back, frontType);
+  let first: Identified;
+  try {
+    first = await askClaude(env, FIRST_MODEL, front, back, frontType);
+  } catch (e: any) {
+    const why = String(e?.message || e);
+    const out = await identifyWithWorkersAI(env, front);
+    out.degraded = /api-key|authentication|credit|balance/i.test(why)
+      ? `Claude refused the key — ${why.slice(0, 120)}. The basic reader was used instead.`
+      : `Claude could not be reached — ${why.slice(0, 120)}. The basic reader was used instead.`;
+    return out;
+  }
+
   if (first.confidence >= ESCALATE_UNDER && first.unsure.length === 0) return first;
 
   // Worth the extra two and a half cents: a wrong parallel costs more.

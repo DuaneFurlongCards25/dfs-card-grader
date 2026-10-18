@@ -39,6 +39,7 @@ export default function Hopper() {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [licence, setLicence] = useState('');
+  const [degraded, setDegraded] = useState('');
 
   const load = async () => {
     setError('');
@@ -72,14 +73,17 @@ export default function Hopper() {
   const ready = read.filter((c) => c.status === 'ready');
 
   const identify = async () => {
-    setError(''); setLicence('');
+    setError(''); setLicence(''); setDegraded('');
     let done = 0;
     for (const [n, v] of list) {
       if (!v.front || byFront.has(v.front.key)) continue;
       setBusy(`Reading card ${n} — ${++done} of ${unread.length}…`);
       try {
-        await post('/api/hopper/identify',
+        const r = await post('/api/hopper/identify',
           { stack, idx: n, front: v.front.key, back: v.back?.key ?? '' });
+        // A degraded read is reported, not swallowed: carrying on quietly
+        // with a worse reader is how a whole batch goes out wrong.
+        if (r.degraded) setDegraded(r.degraded);
       } catch (e: any) {
         const m = e.message || String(e);
         if (/licence|agree/i.test(m)) { setLicence(m); setBusy(''); return; }
@@ -123,6 +127,15 @@ export default function Hopper() {
           <button className="btn write" onClick={acceptLicence} disabled={!!busy}>
             I accept it
           </button>
+        </div>
+      )}
+
+      {degraded && (
+        <div className="legend" style={{ borderColor: 'var(--watch)' }}>
+          <span style={{ color: 'var(--watch)' }}>⚠ {degraded}</span>
+          <span className="muted">
+            These reads are guesses — check every field before marking any card ready.
+          </span>
         </div>
       )}
 
