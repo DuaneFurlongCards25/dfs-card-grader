@@ -221,6 +221,23 @@ select{-webkit-appearance:none;background-image:none}
     <button class="done" data-close>Done</button>
   </header>
   <div class="body">
+    <label class="field">Zoom: <span id="vZoom">1.00×</span></label>
+    <input type="range" id="rZoom" min="1" max="5" step="0.01" value="1">
+    <div class="muted" id="noZoom">Uses the lens where the phone allows it, otherwise crops in.
+      Either way the saved photo is cropped to match what you see.</div>
+
+    <label class="field">Exposure: <span id="vExp">0.0 EV</span></label>
+    <input type="range" id="rExp" min="-2" max="2" step="0.1" value="0">
+    <div class="muted" id="noExp">Brightens or darkens the shot. Tap the preview to re-meter the camera.</div>
+
+    <!-- Directly under the two sliders that change it, so the effect of a
+         drag is visible in the same glance as the number. -->
+    <div id="peekwrap">
+      <video id="peek" playsinline muted autoplay></video>
+      <div id="peekguide"></div>
+    </div>
+
+
 
     <div class="card">
       <div class="row">
@@ -265,15 +282,6 @@ select{-webkit-appearance:none;background-image:none}
       </div>
     </div>
 
-    <label class="field">Zoom: <span id="vZoom">1.00×</span></label>
-    <input type="range" id="rZoom" min="1" max="5" step="0.01" value="1">
-    <div class="muted" id="noZoom">Uses the lens where the phone allows it, otherwise crops in.
-      Either way the saved photo is cropped to match what you see.</div>
-
-    <label class="field">Exposure: <span id="vExp">0.0 EV</span></label>
-    <input type="range" id="rExp" min="-2" max="2" step="0.1" value="0">
-    <div class="muted" id="noExp">Brightens or darkens the shot. Tap the preview to re-meter the camera.</div>
-
     <label class="field">Sharpness check: <span id="vSharp">on</span></label>
     <div class="muted">Warns you when a shot comes out soft, before it is sent.</div>
     <div class="sw on" id="swSharp" style="margin-top:10px"></div>
@@ -294,13 +302,6 @@ select{-webkit-appearance:none;background-image:none}
     <label class="field">JPEG quality: <span id="vQ">92%</span></label>
     <input type="range" id="rQ" min="60" max="100" step="1" value="92">
 
-    <!-- The picture, under the sliders. Adjusting zoom with the preview
-         hidden behind this sheet is the same as not having the slider. -->
-    <label class="field">What the camera sees</label>
-    <div id="peekwrap">
-      <video id="peek" playsinline muted autoplay></video>
-      <div id="peekguide"></div>
-    </div>
   </div>
 </div>
 
