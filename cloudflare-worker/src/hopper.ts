@@ -145,10 +145,45 @@ async function identifyWithWorkersAI(
   return out;
 }
 
+/**
+ * Reading a card is transcription, not reasoning, so the cheap model goes
+ * first and the expensive one only sees the cards it struggled with.
+ *
+ * Measured on his own 2974x3960 scans, front and back: Haiku $0.0066 a
+ * card against Opus at $0.0332. At one in five escalating that is about
+ * $0.013 a card — 500 cards for roughly six dollars rather than sixteen.
+ *
+ * Anthropic scales anything over 1568px down before billing, so sending
+ * the full-size photo costs the same as sending a resized one. Nothing
+ * is resized here; it would only lose detail for no saving.
+ */
+const FIRST_MODEL  = 'claude-haiku-4-5';
+const SECOND_MODEL = 'claude-opus-5';
+/** Below this, the cheap read is not trusted and the good model re-reads. */
+const ESCALATE_UNDER = 0.85;
+
 export async function identifyCard(
   env: Env2, front: ArrayBuffer, back: ArrayBuffer | null, frontType = 'image/jpeg',
 ): Promise<Identified> {
   if (!env.ANTHROPIC_API_KEY) return identifyWithWorkersAI(env, front);
+
+  const first = await askClaude(env, FIRST_MODEL, front, back, frontType);
+  if (first.confidence >= ESCALATE_UNDER && first.unsure.length === 0) return first;
+
+  // Worth the extra two and a half cents: a wrong parallel costs more.
+  try {
+    const second = await askClaude(env, SECOND_MODEL, front, back, frontType);
+    return second.confidence >= first.confidence ? second : first;
+  } catch {
+    return first;                       // the cheap read is better than none
+  }
+}
+
+async function askClaude(
+  env: Env2, model: string, front: ArrayBuffer, back: ArrayBuffer | null, frontType: string,
+): Promise<Identified> {
+  const key = env.ANTHROPIC_API_KEY;
+  if (!key) throw new Error('no Anthropic key');
 
   const content: any[] = [
     { type: 'text', text: 'Front of the card:' },
@@ -163,14 +198,15 @@ export async function identifyCard(
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
-      'x-api-key': env.ANTHROPIC_API_KEY,
+      'x-api-key': key,
       'anthropic-version': '2023-06-01',
       'content-type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'claude-opus-5',
+      model,
       max_tokens: 1200,
-      thinking: { type: 'adaptive' },
+      // No extended thinking: this is reading printed text off a card,
+      // and thinking tokens bill at the output rate for no gain here.
       system: SYSTEM,
       messages: [{ role: 'user', content }],
     }),
