@@ -17,7 +17,15 @@ export type Attrs = {
   is_memorabilia?: boolean | null; is_sp?: boolean | null;
 };
 
-const clean = (v: unknown) => (v ?? '').toString().trim();
+/**
+ * "Base" means a card with no parallel, not a parallel called Base.
+ * It was ending up in titles: "#BCP-MS Base RC AU Nationals".
+ */
+const NOT_A_VALUE = /^(base|base card|none|n\/a|na|null|standard|regular|raw|not numbered)$/i;
+const clean = (v: unknown) => {
+  const x = (v ?? '').toString().trim();
+  return NOT_A_VALUE.test(x) ? '' : x;
+};
 
 export function buildCardTitle(a: Attrs): string {
   const num = clean(a.card_number);

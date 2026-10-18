@@ -3,6 +3,7 @@ import { API, getToken, num, post } from './api';
 import { usd } from './pricing';
 import { download, stamp } from './exports';
 import { ADD_DEFAULTS, ebayAddCsv } from './ebayAdd';
+import { cropToCard } from './cropPhotos';
 import { buildCardTitle, FEATURES, PARALLELS, type Attrs } from './cardTitle';
 
 /**
@@ -38,6 +39,8 @@ type Card = {
   is_rookie: boolean | null; is_auto: boolean | null;
   is_memorabilia: boolean | null; is_sp: boolean | null;
   title_locked: boolean | null;
+  r2_front_orig: string | null; r2_back_orig: string | null;
+  cropped_at: string | null;
 };
 
 const img = (key: string) => `${API}/api/scan/img/${encodeURIComponent(key)}`;
@@ -59,6 +62,58 @@ export default function Hopper() {
   const [error, setError] = useState('');
   const [licence, setLicence] = useState('');
   const [degraded, setDegraded] = useState('');
+  const [zoom, setZoom] = useState<string | null>(null);   // a photo, full size
+
+  /**
+   * Crop the saved photos to the card, the way the scanning apps do it —
+   * shoot the whole frame, crop afterwards in software. Better order:
+   * the camera keeps every pixel and the crop can be undone.
+   *
+   * The original is kept, so Undo is real rather than a reshoot.
+   */
+  const cropPhotos = async (c: Card) => {
+    setBusy(`Cropping card ${c.idx}…`);
+    try {
+      let changed = 0;
+      for (const side of ['front', 'back'] as const) {
+        const key = side === 'front' ? c.r2_front : c.r2_back;
+        if (!key) continue;
+        const blob = await cropToCard(img(key));
+        if (!blob) continue;                       // already right; leave it
+        const cropped = key.replace(/\.jpe?g$/i, '') + '-crop.jpg';
+        const r = await fetch(
+          `${API}/api/scan/upload?stack=${encodeURIComponent(c.stack_name)}` +
+          `&name=${encodeURIComponent(cropped.split('/').pop()!)}`,
+          { method: 'POST',
+            headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'image/jpeg' },
+            body: blob });
+        if (!r.ok) throw new Error((await r.json())?.error || `HTTP ${r.status}`);
+        const saved = (await r.json()).key as string;
+        await post('/api/hopper/save', {
+          id: c.id,
+          [side === 'front' ? 'r2_front_orig' : 'r2_back_orig']: key,
+          [side === 'front' ? 'r2_front' : 'r2_back']: saved,
+          cropped_at: new Date().toISOString(),
+        });
+        changed++;
+      }
+      await load();
+      setBusy('');
+      if (!changed) setError('Those photos are already framed tightly — nothing to crop.');
+    } catch (e: any) { setError(e.message || String(e)); setBusy(''); }
+  };
+
+  const undoCrop = async (c: Card) => {
+    try {
+      await post('/api/hopper/save', {
+        id: c.id,
+        r2_front: c.r2_front_orig ?? c.r2_front,
+        r2_back: c.r2_back_orig ?? c.r2_back,
+        r2_front_orig: '', r2_back_orig: '', cropped_at: '',
+      });
+      await load();
+    } catch (e: any) { setError(e.message || String(e)); }
+  };
 
   const load = async () => {
     setError('');
@@ -198,6 +253,10 @@ export default function Hopper() {
         </button>
         <button className="btn sm" onClick={load}>⟳ Check for scans</button>
         <span className="spacer" />
+        <button className="btn" disabled={!read.length || !!busy}
+          onClick={async () => { for (const c of read) if (!c.cropped_at) await cropPhotos(c); }}>
+          ✂ Crop all photos
+        </button>
         <button className="btn write" disabled={!ready.length}
           onClick={() => download(`hopper-list-${stamp()}.csv`, ebayAddCsv(
             ready.map((c) => ({
@@ -234,8 +293,22 @@ export default function Hopper() {
         return (
           <div key={c.id} className={`hop${c.status === 'ready' ? ' ok' : ''}`}>
             <div className="hop-pics">
-              <img src={img(c.r2_front)} alt="front" loading="lazy" />
-              {c.r2_back && <img src={img(c.r2_back)} alt="back" loading="lazy" />}
+              {/* Click either one to see it full size — the card number and
+                  the parallel are the fields worth checking against the
+                  photograph, and both are small print. */}
+              <img src={img(c.r2_front)} alt="front" loading="lazy"
+                   title="Click to see it full size"
+                   onClick={() => setZoom(img(c.r2_front))} />
+              {c.r2_back && (
+                <img src={img(c.r2_back)} alt="back" loading="lazy"
+                     title="Click to see it full size"
+                     onClick={() => setZoom(img(c.r2_back!))} />
+              )}
+              {c.cropped_at
+                ? <button className="btn sm" onClick={() => undoCrop(c)}>↶ Undo crop</button>
+                : <button className="btn sm" onClick={() => cropPhotos(c)} disabled={!!busy}>
+                    ✂ Crop to card
+                  </button>}
             </div>
             <div className="hop-body">
               <div className="hop-titlerow">
@@ -332,6 +405,14 @@ export default function Hopper() {
       <datalist id="parallels">
         {PARALLELS.map((p) => <option key={p} value={p} />)}
       </datalist>
+
+      {zoom && (
+        <div className="lightbox" onClick={() => setZoom(null)}>
+          <img src={zoom} alt="" onClick={(e) => e.stopPropagation()} />
+          <button className="icon2" onClick={() => setZoom(null)} aria-label="Close">×</button>
+          <div className="lb-note">Pinch or scroll to zoom · click outside to close</div>
+        </div>
+      )}
 
       {!read.length && !busy && (
         <div className="drop" style={{ cursor: 'default', marginTop: 14 }}>
