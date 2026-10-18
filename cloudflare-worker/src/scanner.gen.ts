@@ -210,8 +210,17 @@ select{-webkit-appearance:none;background-image:none}
 
     <div class="card">
       <div class="row">
+        <div style="flex:1"><div class="lab">Find the card</div>
+          <div class="sub">Crops tight to the card's own edges after the shot,
+            so it fills the photo however you held the phone.</div></div>
+        <div class="sw on" id="swAuto2"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
         <div style="flex:1"><div class="lab">Crop to the frame</div>
-          <div class="sub">Saves just the card — smaller files, bigger card.</div></div>
+          <div class="sub">Falls back to the dashed guide when the card cannot be found.</div></div>
         <div class="sw on" id="swCrop"></div>
       </div>
     </div>
@@ -236,6 +245,16 @@ select{-webkit-appearance:none;background-image:none}
     <label class="field">Sharpness check: <span id="vSharp">on</span></label>
     <div class="muted">Warns you when a shot comes out soft, before it is sent.</div>
     <div class="sw on" id="swSharp" style="margin-top:10px"></div>
+
+    <label class="field">Turn the picture</label>
+    <div class="lensrow" id="rotrow">
+      <button class="lens" data-rot="0">none</button>
+      <button class="lens" data-rot="90">90°</button>
+      <button class="lens" data-rot="180">upside down</button>
+      <button class="lens" data-rot="270">270°</button>
+    </div>
+    <div class="muted">A pedestal that holds the phone upside down gives upside-down
+      photos. This turns them the right way up as they are saved.</div>
 
     <label class="field">Lens</label>
     <div class="lensrow" id="lenses"></div>
@@ -302,7 +321,7 @@ var LS = {
 };
 
 var S = Object.assign({
-  auto:false, guide:true, crop:true, low:false, sharp:true,
+  auto:false, guide:true, crop:true, low:false, sharp:true, findCard:true, rot:0,
   zoom:1, exp:0, q:92, lens:null
 }, JSON.parse(localStorage.getItem(LS.set) || '{}'));
 function saveS(){ localStorage.setItem(LS.set, JSON.stringify(S)); }
@@ -452,7 +471,10 @@ function expFilter(ev){ return ev ? 'brightness(' + Math.pow(2, ev).toFixed(3) +
 
 /** Applies whatever the camera would not do itself. */
 function paintPreview(){
-  video.style.transform = (!nativeZoom && S.zoom > 1) ? 'scale(' + S.zoom + ')' : 'none';
+  var t = [];
+  if (S.rot) t.push('rotate(' + S.rot + 'deg)');
+  if (!nativeZoom && S.zoom > 1) t.push('scale(' + S.zoom + ')');
+  video.style.transform = t.length ? t.join(' ') : 'none';
   video.style.filter = nativeExp ? 'none' : expFilter(S.exp);
 }
 function wireTorch(){ $('#btnTorch').style.opacity = caps.torch ? 1 : .35; }
@@ -537,8 +559,93 @@ function sharpness(canvas){
   return n ? (sq / n - (sum / n) * (sum / n)) : 0;
 }
 
+/* ---------------- finding the card ---------------- */
+/*
+ * The pedestal shot puts a bright card on a dark background, so the card
+ * is the big bright rectangle. Rather than trust framing — which costs
+ * tokens on empty background and gives the reader less to work with —
+ * the card's own edges are found after the shot and the photo cropped
+ * to them.
+ *
+ * Works the other way round too: a dark card on a light surface is
+ * detected by looking for the dark region instead, decided by comparing
+ * the border of the frame to its middle.
+ */
+var fc = document.createElement('canvas'), fx = fc.getContext('2d', { willReadFrequently:true });
+
+function findCard(canvas){
+  var W = 220, H = Math.max(1, Math.round(canvas.height / canvas.width * W));
+  fc.width = W; fc.height = H;
+  fx.drawImage(canvas, 0, 0, W, H);
+  var d = fx.getImageData(0, 0, W, H).data;
+  var lum = new Float32Array(W * H);
+  for (var i = 0, p = 0; i < d.length; i += 4, p++)
+    lum[p] = d[i] * 0.299 + d[i+1] * 0.587 + d[i+2] * 0.114;
+
+  // Is the card lighter or darker than what it sits on?
+  var edge = 0, edgeN = 0, mid = 0, midN = 0;
+  for (var y = 0; y < H; y++) for (var x = 0; x < W; x++){
+    var v = lum[y * W + x];
+    if (x < W*0.06 || x > W*0.94 || y < H*0.06 || y > H*0.94){ edge += v; edgeN++; }
+    else if (x > W*0.35 && x < W*0.65 && y > H*0.35 && y < H*0.65){ mid += v; midN++; }
+  }
+  var cardIsLighter = (mid / Math.max(1,midN)) > (edge / Math.max(1,edgeN));
+  var cut = ((mid / Math.max(1,midN)) + (edge / Math.max(1,edgeN))) / 2;
+
+  // Rows and columns that are mostly card.
+  var colHit = new Uint16Array(W), rowHit = new Uint16Array(H);
+  for (var y2 = 0; y2 < H; y2++) for (var x2 = 0; x2 < W; x2++){
+    var on = cardIsLighter ? lum[y2*W+x2] > cut : lum[y2*W+x2] < cut;
+    if (on){ colHit[x2]++; rowHit[y2]++; }
+  }
+  function span(hits, n, other){
+    var need = other * 0.30, best = null, run = null;
+    for (var i = 0; i < n; i++){
+      if (hits[i] >= need){ if (run === null) run = i; }
+      else if (run !== null){
+        if (!best || (i - run) > (best[1] - best[0])) best = [run, i];
+        run = null;
+      }
+    }
+    if (run !== null && (!best || (n - run) > (best[1] - best[0]))) best = [run, n];
+    return best;
+  }
+  var cs = span(colHit, W, H), rs = span(rowHit, H, W);
+  if (!cs || !rs) return null;
+
+  var sx = cs[0] / W, ex = cs[1] / W, sy = rs[0] / H, ey = rs[1] / H;
+  var fw = ex - sx, fh = ey - sy;
+
+  /*
+   * Three guards, every one of them earned.
+   *
+   * A test shot of a card that already filled 95% of the frame came back
+   * wanting a crop to 52% height — a light card on a cream background,
+   * where the detector latched onto the darker middle and would have
+   * sliced the card in half. Cropping is only ever an improvement when
+   * there is clearly space to lose, so:
+   */
+  // 1. Nothing to gain. The card already fills the frame; leave it alone.
+  if (fw * fh > 0.55) return null;
+  // 2. Not card-shaped. A card is 2.5 x 3.5, about 0.71 wide for tall.
+  //    Anything far off that is a shadow, a hand or a glare patch.
+  var ratio = (fw * canvas.width) / Math.max(1, fh * canvas.height);
+  if (ratio < 0.45 || ratio > 1.05) return null;
+  // 3. Too small to be the subject — probably a highlight, not the card.
+  if (fw < 0.15 || fh < 0.15) return null;
+
+  var pad = 0.035;
+  sx = Math.max(0, sx - pad); sy = Math.max(0, sy - pad);
+  ex = Math.min(1, ex + pad); ey = Math.min(1, ey + pad);
+  return {
+    x: Math.round(sx * canvas.width), y: Math.round(sy * canvas.height),
+    w: Math.round((ex - sx) * canvas.width), h: Math.round((ey - sy) * canvas.height),
+    fill: fw * fh,
+  };
+}
+
 /* ---------------- capture ---------------- */
-var cap = document.createElement('canvas');
+var capBase = document.createElement('canvas');
 async function shoot(){
   if (busy || !track || !video.videoWidth) return;
   busy = true;
@@ -555,6 +662,7 @@ async function shoot(){
     }
     var maxW = S.low ? 1200 : 2400;
     var scale = Math.min(1, maxW / sw);
+    var cap = capBase;
     cap.width = Math.round(sw * scale); cap.height = Math.round(sh * scale);
     var cx = cap.getContext('2d');
     // Same brightness the preview showed, baked into the file.
@@ -562,10 +670,41 @@ async function shoot(){
     cx.drawImage(video, sx, sy, sw, sh, 0, 0, cap.width, cap.height);
     cx.filter = 'none';
 
+    // Crop to the card itself. This is where most of the win is: the
+    // reader sees a card instead of a card lost in a dark background,
+    // and the file is a fraction of the size, which is a fraction of
+    // the tokens it costs to read.
+    var found = null;
+    if (S.findCard){
+      found = findCard(cap);
+      window.__foundCard = !!found;
+      if (found){
+        var c2 = document.createElement('canvas');
+        c2.width = found.w; c2.height = found.h;
+        c2.getContext('2d').drawImage(cap, found.x, found.y, found.w, found.h,
+                                      0, 0, found.w, found.h);
+        cap = c2;
+      }
+    }
+
     var soft = false;
     if (S.sharp){ var v = sharpness(cap); soft = v < 60; }
 
     var q = (S.low ? 0.72 : S.q / 100);
+    // Turn it the right way up before saving, so every downstream thing —
+    // the reader, the listing photo, the website — gets it upright.
+    if (S.rot){
+      var rc = document.createElement('canvas');
+      var swap = (S.rot === 90 || S.rot === 270);
+      rc.width = swap ? cap.height : cap.width;
+      rc.height = swap ? cap.width : cap.height;
+      var rx = rc.getContext('2d');
+      rx.translate(rc.width / 2, rc.height / 2);
+      rx.rotate(S.rot * Math.PI / 180);
+      rx.drawImage(cap, -cap.width / 2, -cap.height / 2);
+      cap = rc;
+    }
+
     var blob = await new Promise(function(res){ cap.toBlob(res, 'image/jpeg', q); });
     if (!blob) throw new Error('could not encode the photo');
 
@@ -843,6 +982,7 @@ toggle('#swGuide', 'guide', sizeGuide);
 toggle('#swCrop', 'crop');
 toggle('#swLow', 'low');
 toggle('#swSharp', 'sharp', function(){ $('#vSharp').textContent = S.sharp ? 'on' : 'off'; });
+toggle('#swAuto2', 'findCard');
 
 function paintRange(r){
   var pct = ((r.value - r.min) / ((r.max - r.min) || 1)) * 100;
@@ -852,6 +992,19 @@ $('#rZoom').oninput = function(){ S.zoom = +this.value; $('#vZoom').textContent 
   paintRange(this); saveS(); paintPreview(); applyLens(); };
 $('#rExp').oninput = function(){ S.exp = +this.value; $('#vExp').textContent = S.exp.toFixed(1) + ' EV';
   paintRange(this); saveS(); paintPreview(); applyLens(); };
+// The preview turns too, so what you frame is what you get.
+function paintRot(){
+  document.querySelectorAll('#rotrow .lens').forEach(function(b){
+    b.classList.toggle('on', +b.dataset.rot === S.rot);
+  });
+  var el = $('#cam');
+  el.style.setProperty('--rot', S.rot + 'deg');
+  video.style.setProperty('--vrot', S.rot + 'deg');
+}
+document.querySelectorAll('#rotrow .lens').forEach(function(b){
+  b.onclick = function(){ S.rot = +b.dataset.rot; saveS(); paintRot(); paintPreview(); };
+});
+
 $('#rQ').value = S.q;
 $('#rQ').oninput = function(){ S.q = +this.value; $('#vQ').textContent = S.q + '%'; paintRange(this); saveS(); };
 
@@ -879,7 +1032,7 @@ $('#thumb').onclick = function(){ if (stack) openStack(stack); };
 
 /* ---------------- go ---------------- */
 (async function(){
-  paintAuto();
+  paintAuto(); paintRot();
   $('#vQ').textContent = S.q + '%';
   $('#vSharp').textContent = S.sharp ? 'on' : 'off';
   ['#rZoom','#rExp','#rQ'].forEach(function(s){ paintRange($(s)); });
