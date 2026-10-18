@@ -3,6 +3,7 @@ import { API, getToken, num, post } from './api';
 import { usd } from './pricing';
 import { download, stamp } from './exports';
 import { ADD_DEFAULTS, ebayAddCsv } from './ebayAdd';
+import { buildCardTitle, FEATURES, PARALLELS, type Attrs } from './cardTitle';
 
 /**
  * eBay's own sold-and-completed search for a card.
@@ -34,6 +35,9 @@ type Card = {
   grader: string | null; grade: string | null; team: string | null; sport: string | null;
   confidence: string | null; unsure: string | null; fmv: string | null;
   price: string | null; sku: string | null; status: string | null;
+  is_rookie: boolean | null; is_auto: boolean | null;
+  is_memorabilia: boolean | null; is_sp: boolean | null;
+  title_locked: boolean | null;
 };
 
 const img = (key: string) => `${API}/api/scan/img/${encodeURIComponent(key)}`;
@@ -41,6 +45,10 @@ const pairOf = (name: string) => {
   const m = name.match(/-(\d{3})-(front|back)\.jpe?g$/i);
   return m ? { n: +m[1], side: m[2].toLowerCase() } : { n: 0, side: '' };
 };
+
+/** Marks a field amber when the reader said it was unsure of it. */
+const flag = (unsure: string[], field: string) =>
+  unsure.some((u) => u.toLowerCase().includes(field)) ? 'flagged' : '';
 
 export default function Hopper() {
   const [stacks, setStacks] = useState<{ name: string; photos: number }[]>([]);
@@ -111,9 +119,28 @@ export default function Hopper() {
     catch (e: any) { setError(e.message || String(e)); setBusy(''); }
   };
 
-  const edit = async (c: Card, field: string, value: string) => {
+  /**
+   * Change an attribute and the title follows — the way Card Luma does
+   * it, and the reason a missed parallel is a two-second fix rather than
+   * a retyped title.
+   *
+   * Unless the title has been edited by hand: then it is locked and the
+   * attributes stop overwriting his wording.
+   */
+  const edit = async (c: Card, patch: Partial<Card>) => {
+    const next = { ...c, ...patch };
+    const body: any = { id: c.id, ...patch };
+
+    if (!next.title_locked && !('title' in patch)) {
+      const rebuilt = buildCardTitle(next as Attrs);
+      if (rebuilt && rebuilt !== next.title) body.title = rebuilt;
+    }
+    // Typing in the title box is a decision; stop rewriting it after that.
+    if ('title' in patch) body.title_locked = true;
+
+    setCards((all) => all.map((x) => (x.id === c.id ? { ...next, ...body } : x)));
     try {
-      const r = await post('/api/hopper/save', { id: c.id, [field]: value });
+      const r = await post('/api/hopper/save', body);
       setCards((all) => all.map((x) => (x.id === c.id ? r.card : x)));
     } catch (e: any) { setError(e.message || String(e)); }
   };
@@ -211,26 +238,72 @@ export default function Hopper() {
               {c.r2_back && <img src={img(c.r2_back)} alt="back" loading="lazy" />}
             </div>
             <div className="hop-body">
-              <input className="hop-title" value={c.title ?? ''}
-                     onChange={(e) => setCards((all) => all.map((x) =>
-                       x.id === c.id ? { ...x, title: e.target.value } : x))}
-                     onBlur={(e) => edit(c, 'title', e.target.value)} />
-              <div className="hop-fields">
-                {([['year','Year'],['set_name','Set'],['card_number','Card #'],
-                   ['parallel','Parallel'],['serial','Serial'],['team','Team'],
-                   ['sport','Sport'],['grade','Grade']] as const).map(([f, label]) => (
-                  <label key={f} className={unsure.some((u) => u.toLowerCase().includes(f.split('_')[0]))
-                                            ? 'flagged' : ''}>
-                    {label}
-                    <input defaultValue={(c as any)[f] ?? ''}
-                           onBlur={(e) => edit(c, f, e.target.value)} />
-                  </label>
-                ))}
-                <label>Price
-                  <input defaultValue={price?.toFixed(2) ?? ''}
-                         onBlur={(e) => edit(c, 'price', e.target.value)} />
-                </label>
+              <div className="hop-titlerow">
+                <input className="hop-title" value={c.title ?? ''}
+                       onChange={(e) => setCards((all) => all.map((x) =>
+                         x.id === c.id ? { ...x, title: e.target.value } : x))}
+                       onBlur={(e) => edit(c, { title: e.target.value })} />
+                <span className={`len${(c.title ?? '').length > 80 ? ' bad' : ''}`}>
+                  {(c.title ?? '').length}
+                </span>
+                {c.title_locked && (
+                  <button className="btn sm" title="Let the attributes rebuild it again"
+                          onClick={() => edit(c, { title_locked: false })}>
+                    🔒 edited
+                  </button>
+                )}
               </div>
+
+              <div className="attr-label">Card attributes — change one and the title follows</div>
+              <div className="hop-fields">
+                <label className={flag(unsure, 'year')}>Year
+                  <input defaultValue={c.year ?? ''} key={`y${c.id}`}
+                         onBlur={(e) => edit(c, { year: e.target.value })} /></label>
+                <label className={flag(unsure, 'set')} style={{ gridColumn: 'span 2' }}>Set
+                  <input defaultValue={c.set_name ?? ''} key={`s${c.id}`}
+                         onBlur={(e) => edit(c, { set_name: e.target.value })} /></label>
+                <label className={flag(unsure, 'number')}>Card #
+                  <input defaultValue={c.card_number ?? ''} key={`n${c.id}`}
+                         onBlur={(e) => edit(c, { card_number: e.target.value })} /></label>
+                <label className={flag(unsure, 'parallel')} style={{ gridColumn: 'span 2' }}>
+                  Parallel
+                  <input list="parallels" defaultValue={c.parallel ?? ''} key={`p${c.id}`}
+                         placeholder="base — none printed"
+                         onBlur={(e) => edit(c, { parallel: e.target.value })} /></label>
+                <label className={flag(unsure, 'serial')}>Serial /
+                  <input defaultValue={(c.serial ?? '').replace(/^\//, '')} key={`se${c.id}`}
+                         placeholder="not numbered"
+                         onBlur={(e) => edit(c, { serial: e.target.value })} /></label>
+                <label className={flag(unsure, 'team')}>Team
+                  <input defaultValue={c.team ?? ''} key={`t${c.id}`}
+                         onBlur={(e) => edit(c, { team: e.target.value })} /></label>
+                <label>Grade
+                  <input defaultValue={[c.grader, c.grade].filter(Boolean).join(' ')} key={`g${c.id}`}
+                         placeholder="raw"
+                         onBlur={(e) => {
+                           const [gr, ...rest] = e.target.value.trim().split(/\s+/);
+                           edit(c, { grader: gr || '', grade: rest.join(' ') || '' });
+                         }} /></label>
+                <label>Sport
+                  <input defaultValue={c.sport ?? ''} key={`sp${c.id}`}
+                         onBlur={(e) => edit(c, { sport: e.target.value })} /></label>
+                <label>Price $
+                  <input defaultValue={price?.toFixed(2) ?? ''} key={`pr${c.id}`}
+                         onBlur={(e) => edit(c, { price: e.target.value as any })} /></label>
+              </div>
+
+              <div className="chips2">
+                {FEATURES.map((f) => {
+                  const on = !!(c as any)[f.key];
+                  return (
+                    <button key={String(f.key)} className={`chip${on ? ' on' : ''}`}
+                            onClick={() => edit(c, { [f.key]: !on } as any)}>
+                      {f.label}{on ? ' ×' : ''}
+                    </button>
+                  );
+                })}
+              </div>
+
               <div className="hop-foot">
                 <span className={`pill ${conf >= 0.8 ? 'fresh' : conf >= 0.5 ? 'watch' : 'stale'}`}>
                   {Math.round(conf * 100)}% sure
@@ -244,10 +317,10 @@ export default function Hopper() {
                   What it sold for ↗
                 </a>
                 {c.status === 'ready'
-                  ? <button className="btn sm" onClick={() => edit(c, 'status', 'needs_review')}>
+                  ? <button className="btn sm" onClick={() => edit(c, { status: 'needs_review' })}>
                       Put back
                     </button>
-                  : <button className="btn sm read" onClick={() => edit(c, 'status', 'ready')}>
+                  : <button className="btn sm read" onClick={() => edit(c, { status: 'ready' })}>
                       ✓ Ready to list
                     </button>}
               </div>
@@ -255,6 +328,10 @@ export default function Hopper() {
           </div>
         );
       })}
+
+      <datalist id="parallels">
+        {PARALLELS.map((p) => <option key={p} value={p} />)}
+      </datalist>
 
       {!read.length && !busy && (
         <div className="drop" style={{ cursor: 'default', marginTop: 14 }}>

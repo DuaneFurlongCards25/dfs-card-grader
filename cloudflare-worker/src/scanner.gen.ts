@@ -39,7 +39,8 @@ header{display:flex;align-items:center;gap:10px;padding:10px 14px;flex:0 0 auto}
 
 /* ---- camera ---- */
 #cam{position:relative;flex:1 1 auto;min-height:0;background:#000;overflow:hidden}
-#video{width:100%;height:100%;object-fit:cover;display:block}
+#video{width:100%;height:100%;object-fit:cover;display:block;
+  transform-origin:center center;transition:transform .08s linear}
 #guide{position:absolute;inset:0;pointer-events:none}
 #guide .box{position:absolute;border:2px dashed rgba(255,255,255,.78);border-radius:10px;
   box-shadow:0 0 0 9999px rgba(0,0,0,.34)}
@@ -225,11 +226,12 @@ select{-webkit-appearance:none;background-image:none}
 
     <label class="field">Zoom: <span id="vZoom">1.00×</span></label>
     <input type="range" id="rZoom" min="1" max="5" step="0.01" value="1">
-    <div class="muted hide" id="noZoom">This lens does not report zoom — pick a different lens below.</div>
+    <div class="muted" id="noZoom">Uses the lens where the phone allows it, otherwise crops in.
+      Either way the saved photo is cropped to match what you see.</div>
 
     <label class="field">Exposure: <span id="vExp">0.0 EV</span></label>
     <input type="range" id="rExp" min="-2" max="2" step="0.1" value="0">
-    <div class="muted hide" id="noExp">This phone does not let a web app set exposure. Tap the preview to re-meter.</div>
+    <div class="muted" id="noExp">Brightens or darkens the shot. Tap the preview to re-meter the camera.</div>
 
     <label class="field">Sharpness check: <span id="vSharp">on</span></label>
     <div class="muted">Warns you when a shot comes out soft, before it is sent.</div>
@@ -405,39 +407,67 @@ async function start(){
   sizeGuide();
 }
 
+/*
+ * Zoom and exposure, which iOS Safari mostly refuses to hand over.
+ *
+ * The first build asked the camera for both and hid the slider when it
+ * said no — which on an iPhone is nearly always, so the controls simply
+ * were not there. Now the slider always works: the lens is used when the
+ * phone allows it, and when it does not the preview is scaled and the
+ * capture cropped to match, so the photo is what you framed either way.
+ */
+var nativeZoom = false, nativeExp = false;
+
 function wireZoom(){
   var r = $('#rZoom');
-  if (caps.zoom){
-    $('#noZoom').classList.add('hide'); r.classList.remove('hide');
-    r.min = caps.zoom.min; r.max = caps.zoom.max;
+  nativeZoom = !!caps.zoom;
+  r.min = 1; r.max = 5; r.step = 0.01;
+  if (nativeZoom){
+    r.min = caps.zoom.min; r.max = Math.min(caps.zoom.max, 8);
     r.step = caps.zoom.step || 0.01;
-    if (S.zoom < caps.zoom.min || S.zoom > caps.zoom.max) S.zoom = caps.zoom.min;
-    r.value = S.zoom;
-  } else {
-    $('#noZoom').classList.remove('hide'); r.classList.add('hide');
   }
+  if (S.zoom < +r.min || S.zoom > +r.max) S.zoom = +r.min;
+  r.value = S.zoom;
   paintRange(r); $('#vZoom').textContent = (+r.value).toFixed(2) + '×';
+  $('#noZoom').textContent = nativeZoom
+    ? 'Using the camera\\u2019s own zoom.'
+    : 'This phone will not let a web app drive the lens, so the preview crops in instead. The saved photo matches what you see.';
 }
+
 function wireExp(){
   var r = $('#rExp'), c = caps.exposureCompensation;
-  if (c){
-    $('#noExp').classList.add('hide'); r.classList.remove('hide');
-    r.min = c.min; r.max = c.max; r.step = c.step || 0.1;
-    if (S.exp < c.min || S.exp > c.max) S.exp = 0;
-    r.value = S.exp;
-  } else {
-    $('#noExp').classList.remove('hide'); r.classList.add('hide');
-  }
+  nativeExp = !!c;
+  r.min = -2; r.max = 2; r.step = 0.1;
+  if (nativeExp){ r.min = c.min; r.max = c.max; r.step = c.step || 0.1; }
+  if (S.exp < +r.min || S.exp > +r.max) S.exp = 0;
+  r.value = S.exp;
   paintRange(r); $('#vExp').textContent = (+r.value).toFixed(1) + ' EV';
+  $('#noExp').textContent = nativeExp
+    ? 'Using the camera\\u2019s own exposure.'
+    : 'This phone will not let a web app set exposure, so the shot is brightened here instead. Tap the preview to re-meter.';
+}
+
+/** One EV is a doubling of light, which is what the preview shows. */
+function expFilter(ev){ return ev ? 'brightness(' + Math.pow(2, ev).toFixed(3) + ')' : 'none'; }
+
+/** Applies whatever the camera would not do itself. */
+function paintPreview(){
+  video.style.transform = (!nativeZoom && S.zoom > 1) ? 'scale(' + S.zoom + ')' : 'none';
+  video.style.filter = nativeExp ? 'none' : expFilter(S.exp);
 }
 function wireTorch(){ $('#btnTorch').style.opacity = caps.torch ? 1 : .35; }
 
 async function applyLens(){
+  paintPreview();
   var adv = [];
-  if (caps.zoom) adv.push({ zoom:S.zoom });
-  if (caps.exposureCompensation) adv.push({ exposureCompensation:S.exp });
-  if (!adv.length) return;
-  try { await track.applyConstraints({ advanced:adv }); } catch(e){}
+  if (nativeZoom) adv.push({ zoom:S.zoom });
+  if (nativeExp) adv.push({ exposureCompensation:S.exp });
+  if (!adv.length || !track) return;
+  try { await track.applyConstraints({ advanced:adv }); }
+  catch(e){
+    // The camera changed its mind. Fall back rather than losing the control.
+    nativeZoom = false; nativeExp = false; paintPreview();
+  }
 }
 
 /* tap the preview to re-meter / re-focus where you tapped */
@@ -516,10 +546,21 @@ async function shoot(){
     var r = S.crop ? guideRect() : null;
     var sx = r ? r.x : 0, sy = r ? r.y : 0;
     var sw = r ? r.w : video.videoWidth, sh = r ? r.h : video.videoHeight;
+
+    // Software zoom is a crop: take the middle 1/zoom of whatever was
+    // going to be captured, so the photo matches the framed preview.
+    if (!nativeZoom && S.zoom > 1){
+      var zw = sw / S.zoom, zh = sh / S.zoom;
+      sx += (sw - zw) / 2; sy += (sh - zh) / 2; sw = zw; sh = zh;
+    }
     var maxW = S.low ? 1200 : 2400;
     var scale = Math.min(1, maxW / sw);
     cap.width = Math.round(sw * scale); cap.height = Math.round(sh * scale);
-    cap.getContext('2d').drawImage(video, sx, sy, sw, sh, 0, 0, cap.width, cap.height);
+    var cx = cap.getContext('2d');
+    // Same brightness the preview showed, baked into the file.
+    cx.filter = nativeExp ? 'none' : expFilter(S.exp);
+    cx.drawImage(video, sx, sy, sw, sh, 0, 0, cap.width, cap.height);
+    cx.filter = 'none';
 
     var soft = false;
     if (S.sharp){ var v = sharpness(cap); soft = v < 60; }
@@ -808,9 +849,9 @@ function paintRange(r){
   r.style.setProperty('--fill', pct + '%');
 }
 $('#rZoom').oninput = function(){ S.zoom = +this.value; $('#vZoom').textContent = S.zoom.toFixed(2) + '×';
-  paintRange(this); saveS(); applyLens(); };
+  paintRange(this); saveS(); paintPreview(); applyLens(); };
 $('#rExp').oninput = function(){ S.exp = +this.value; $('#vExp').textContent = S.exp.toFixed(1) + ' EV';
-  paintRange(this); saveS(); applyLens(); };
+  paintRange(this); saveS(); paintPreview(); applyLens(); };
 $('#rQ').value = S.q;
 $('#rQ').oninput = function(){ S.q = +this.value; $('#vQ').textContent = S.q + '%'; paintRange(this); saveS(); };
 

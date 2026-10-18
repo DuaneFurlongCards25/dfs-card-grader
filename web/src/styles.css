@@ -549,3 +549,18 @@ ol.steps b { color: var(--text); }
 }
 .hop-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12.5px; }
 @media (max-width: 760px) { .hop { grid-template-columns: 1fr; } }
+
+/* ---------------- hopper attributes ---------------- */
+.hop-titlerow { display: flex; align-items: center; gap: 8px; }
+.hop-titlerow .hop-title { flex: 1; }
+.hop-titlerow .len {
+  font: 600 11px var(--mono); color: var(--text-faint);
+  background: var(--surface-2); border-radius: 5px; padding: 3px 7px; flex: 0 0 auto;
+}
+.hop-titlerow .len.bad { color: var(--danger); background: color-mix(in srgb, var(--danger) 16%, transparent); }
+.attr-label {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase;
+  color: var(--read); margin: 12px 0 6px;
+}
+.chips2 { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.chips2 .chip { padding: 5px 11px; font-size: 12px; }

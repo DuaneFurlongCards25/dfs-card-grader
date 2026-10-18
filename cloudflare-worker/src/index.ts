@@ -831,7 +831,8 @@ async function hopperSave(request: Request, env: Env) {
     if (!Number.isFinite(id)) return err('which card?', 400);
 
     const ok = ['player','title','year','set_name','card_number','parallel','serial',
-                'grader','grade','team','sport','price','sku','status','notes'];
+                'grader','grade','team','sport','price','sku','status','notes',
+                'is_rookie','is_auto','is_memorabilia','is_sp','title_locked'];
     const sets: string[] = [];
     const vals: any[] = [];
     for (const k of ok) {
@@ -1835,9 +1836,15 @@ export default {
       }
     }
 
-    // Browser-fetched, cannot carry a header — see `authed` above.
+    // Browser-fetched, cannot carry a header — see `authed` above. The
+    // same is true of scan photos: they are shown in <img> tags on the
+    // Hopper and Intake screens, which cannot send an Authorization
+    // header, so a GET of one is open. The keys are long and
+    // unguessable, and they are photographs of cards, not costs.
     const img = path.match(/^\/api\/inventory\/img\/(.+)$/);
     if (img && request.method === 'GET') return serveImage(env, decodeURIComponent(img[1]));
+    const simg = path.match(/^\/api\/scan\/img\/(.+)$/);
+    if (simg && request.method === 'GET') return scanGet(env, decodeURIComponent(simg[1]));
 
     // ---- phone scanner ----
     // The page itself carries no secret; the key is typed in on the phone
