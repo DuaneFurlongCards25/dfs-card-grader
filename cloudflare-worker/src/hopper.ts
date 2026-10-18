@@ -94,7 +94,9 @@ function shape(d: any): Identified {
   // Models write "none", "N/A" and "null" as strings when a field is
   // absent. Left alone they end up printed in the title — one came back
   // as "... /99 NONE None RC AU Royals".
-  const EMPTY = /^(none|n\/a|na|null|unknown|not visible|not specified|-{1,2}|)$/i;
+  // "base" means no parallel, not a parallel called Base — it was being
+  // printed into titles as "#CPA-MS base AU Nationals".
+  const EMPTY = /^(none|n\/a|na|null|unknown|not visible|not specified|base|base card|standard|regular|-{1,2}|)$/i;
   const str = (v: unknown) => {
     const x = (v === null || v === undefined ? '' : String(v)).trim();
     return EMPTY.test(x) ? '' : x.slice(0, 120);

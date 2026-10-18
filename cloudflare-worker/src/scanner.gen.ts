@@ -627,10 +627,14 @@ function findCard(canvas){
    */
   // 1. Nothing to gain. The card already fills the frame; leave it alone.
   if (fw * fh > 0.55) return null;
-  // 2. Not card-shaped. A card is 2.5 x 3.5, about 0.71 wide for tall.
-  //    Anything far off that is a shadow, a hand or a glare patch.
+  // 2. Not card-shaped. A card is 2.5 x 3.5 — about 0.71 wide for tall
+  //    standing up, or 1.4 lying on its side, which is how it sits on a
+  //    pedestal that holds the phone sideways. Both count; anything
+  //    between or outside them is a shadow, a hand or a glare patch.
   var ratio = (fw * canvas.width) / Math.max(1, fh * canvas.height);
-  if (ratio < 0.45 || ratio > 1.05) return null;
+  var portrait = ratio > 0.45 && ratio < 0.95;
+  var landscape = ratio > 1.05 && ratio < 2.2;
+  if (!portrait && !landscape) return null;
   // 3. Too small to be the subject — probably a highlight, not the card.
   if (fw < 0.15 || fh < 0.15) return null;
 
