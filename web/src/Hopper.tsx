@@ -146,18 +146,64 @@ export default function Hopper() {
   const needReview = read.filter((c) => c.status !== 'ready');
   const ready = read.filter((c) => c.status === 'ready');
 
+  /**
+   * Read a stack: crop first, then identify.
+   *
+   * Cropping before the read rather than after is the whole point — the
+   * model sees a card filling the frame instead of a card lost in a dark
+   * pedestal, which is both a better read and a fraction of the tokens.
+   * The listing photo comes out right at the same time, with no button
+   * to remember.
+   */
   const identify = async () => {
     setError(''); setLicence(''); setDegraded('');
     let done = 0;
     for (const [n, v] of list) {
       if (!v.front || byFront.has(v.front.key)) continue;
-      setBusy(`Reading card ${n} — ${++done} of ${unread.length}…`);
+      done++;
+
+      let front = v.front.key, back = v.back?.key ?? '';
+      const origFront = front, origBack = back;
+
+      // 1. Crop to the card. Skipped silently where the photo is already
+      //    tight — cropping a good photo is how one gets ruined.
+      setBusy(`Cropping card ${n} — ${done} of ${unread.length}…`);
+      try {
+        for (const side of ['front', 'back'] as const) {
+          const key = side === 'front' ? front : back;
+          if (!key) continue;
+          const blob = await cropToCard(img(key));
+          if (!blob) continue;
+          const name = key.replace(/\.jpe?g$/i, '').split('/').pop()! + '-crop.jpg';
+          const r = await fetch(
+            `${API}/api/scan/upload?stack=${encodeURIComponent(stack ?? '')}` +
+            `&name=${encodeURIComponent(name)}`,
+            { method: 'POST',
+              headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'image/jpeg' },
+              body: blob });
+          if (!r.ok) throw new Error((await r.json())?.error || `HTTP ${r.status}`);
+          const saved = (await r.json()).key as string;
+          if (side === 'front') front = saved; else back = saved;
+        }
+      } catch (e: any) {
+        // A failed crop must not cost the card — read the original.
+        console.warn('crop failed, reading the original', e);
+      }
+
+      // 2. Read it.
+      setBusy(`Reading card ${n} — ${done} of ${unread.length}…`);
       try {
         const r = await post('/api/hopper/identify',
-          { stack, idx: n, front: v.front.key, back: v.back?.key ?? '' });
-        // A degraded read is reported, not swallowed: carrying on quietly
-        // with a worse reader is how a whole batch goes out wrong.
+          { stack, idx: n, front, back });
         if (r.degraded) setDegraded(r.degraded);
+        // Keep the originals so a bad crop can be undone without reshooting.
+        if (front !== origFront || back !== origBack) {
+          await post('/api/hopper/save', {
+            id: r.card.id,
+            r2_front_orig: origFront, r2_back_orig: origBack,
+            cropped_at: new Date().toISOString(),
+          });
+        }
       } catch (e: any) {
         const m = e.message || String(e);
         if (/licence|agree/i.test(m)) { setLicence(m); setBusy(''); return; }
@@ -254,8 +300,9 @@ export default function Hopper() {
         <button className="btn sm" onClick={load}>⟳ Check for scans</button>
         <span className="spacer" />
         <button className="btn" disabled={!read.length || !!busy}
-          onClick={async () => { for (const c of read) if (!c.cropped_at) await cropPhotos(c); }}>
-          ✂ Crop all photos
+          onClick={async () => { for (const c of read) if (!c.cropped_at) await cropPhotos(c); }}
+          title="New scans are cropped as they are read; this catches older ones">
+          ✂ Crop anything missed
         </button>
         <button className="btn write" disabled={!ready.length}
           onClick={() => download(`hopper-list-${stamp()}.csv`, ebayAddCsv(

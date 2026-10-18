@@ -836,7 +836,11 @@ async function hopperSave(request: Request, env: Env) {
 
     const ok = ['player','title','year','set_name','card_number','parallel','serial',
                 'grader','grade','team','sport','price','sku','status','notes',
-                'is_rookie','is_auto','is_memorabilia','is_sp','title_locked'];
+                'is_rookie','is_auto','is_memorabilia','is_sp','title_locked',
+                // Cropping rewrites which photo a card points at and keeps
+                // the original, so these have to be settable too — leaving
+                // them out made every crop fail with 'nothing to change'.
+                'r2_front','r2_back','r2_front_orig','r2_back_orig','cropped_at'];
     const sets: string[] = [];
     const vals: any[] = [];
     for (const k of ok) {
