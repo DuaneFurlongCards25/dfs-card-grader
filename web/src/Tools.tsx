@@ -141,10 +141,18 @@ function Search() {
 function Dupes() {
   const [groups, setGroups] = useState<any[] | null>(null);
   const [busy, setBusy] = useState(false);
+  // Which listing survives each merge, by group index.
+  const [keep, setKeep] = useState<Record<number, string>>({});
+  const keepCount = Object.values(keep).filter(Boolean).length;
 
   const scan = () => {
     setBusy(true);
-    api('/api/duplicates').then((d) => setGroups(d.groups ?? [])).finally(() => setBusy(false));
+    api('/api/duplicates').then((d) => {
+      const g = d.groups ?? [];
+      setGroups(g);
+      // Default to keeping the dearest, which is usually the better listing.
+      setKeep(Object.fromEntries(g.map((x: any, i: number) => [i, x.cards[0]?.item_number ?? ''])));
+    }).finally(() => setBusy(false));
   };
 
   const total = (groups ?? []).reduce((a, g) => a + (g.copies - 1), 0);
@@ -155,6 +163,11 @@ function Dupes() {
         The same card listed more than once. Matched on the title, because two listings of one
         card were made separately and have different SKUs by definition.
         <b> Graded slabs are left out</b> — two PSA 10s of a card are genuinely two listings.
+      </p>
+      <p className="note" style={{ marginTop: 0 }}>
+        Combining makes <b>two</b> files, on purpose: one raises the kept listing's quantity,
+        the other ends the extras. Upload the quantity file first — the other way round leaves
+        the card unlisted in between.
       </p>
       <div className="toolbar">
         <button className="btn read" onClick={scan} disabled={busy}>
@@ -178,14 +191,55 @@ function Dupes() {
         )}
       </div>
 
+      {!!groups?.length && (
+        <div className="selbar">
+          <span className="n">{keepCount} groups marked to combine</span>
+          <span className="spacer" />
+          <button className="btn write" disabled={!keepCount}
+            onClick={() => {
+              /*
+               * Combining is two File Exchange actions, not one: raise the
+               * kept listing's quantity, then end the others. Done the
+               * other way round the card is briefly unlisted, and done as
+               * one file eBay applies them in an order nobody controls.
+               */
+              const head = 'Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)';
+              const revise: any[] = [], ends: any[] = [];
+              groups.forEach((g, i) => {
+                const keepId = keep[i];
+                if (!keepId) return;
+                const kept = g.cards.find((c: any) => c.item_number === keepId);
+                const others = g.cards.filter((c: any) => c.item_number !== keepId);
+                if (!kept || !others.length) return;
+                revise.push(['Revise', keepId, String(g.copies)]);
+                others.forEach((c: any) => ends.push(['End', c.item_number, 'NotAvailable']));
+              });
+              download(`combine-1-raise-quantity-${stamp()}.csv`,
+                toCsv([head, 'ItemID', 'Quantity'], revise));
+              setTimeout(() => download(`combine-2-end-extras-${stamp()}.csv`,
+                toCsv([head, 'ItemID', 'EndCode'], ends)), 600);
+            }}>
+            ⬆ Make the combine files ({keepCount})
+          </button>
+        </div>
+      )}
+
       {groups?.map((g, i) => (
         <div key={i} className="card2">
-          <div className="lab">{g.cards[0].title} <span className="pill watch">{g.copies} listings</span></div>
+          <div className="lab">
+            {g.cards[0].title} <span className="pill watch">{g.copies} listings</span>
+          </div>
+          <div className="sub2">Pick the one to keep — the others are ended and its
+            quantity becomes {g.copies}.</div>
           <div className="tablewrap" style={{ marginTop: 8 }}>
             {g.cards.map((c: any) => (
-              <div key={c.item_number} className="trow simple">
-                <div className="sku">{c.sku || c.item_number}</div>
-                <div className="cell-title muted">{(c.listed || '').slice(0, 10)}</div>
+              <div key={c.item_number}
+                   className={`trow simple click${keep[i] === c.item_number ? ' sel' : ''}`}
+                   onClick={() => setKeep({ ...keep, [i]: keep[i] === c.item_number ? '' : c.item_number })}>
+                <div className="sku">
+                  {keep[i] === c.item_number ? '✓ keep ' : ''}{c.sku || c.item_number}
+                </div>
+                <div className="cell-title muted">listed {(c.listed || '').slice(0, 10)}</div>
                 <div className="right">{usd(num(c.price) ?? 0)}</div>
               </div>
             ))}

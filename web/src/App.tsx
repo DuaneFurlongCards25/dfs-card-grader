@@ -13,6 +13,7 @@ import Titles from './Titles';
 import Hopper from './Hopper';
 import ListingSettings from './ListingSettings';
 import Tools from './Tools';
+import Templates from './Templates';
 
 /* ------------------------------------------------------------------ *
  * The shell.
@@ -26,7 +27,7 @@ import Tools from './Tools';
 type Tab =
   | 'Home' | 'Inventory' | 'Boxes' | 'Intake' | 'Refresh'
   | 'Reprice' | 'Money' | 'Lots' | 'Titles' | 'Hopper' | 'Settings' | 'Listing'
-  | 'Tools';
+  | 'Tools' | 'Templates';
 
 const NAV: { section: string; items: { tab: Tab; label: string }[] }[] = [
   { section: 'Dashboard', items: [{ tab: 'Home', label: 'Overview' }] },
@@ -39,7 +40,10 @@ const NAV: { section: string; items: { tab: Tab; label: string }[] }[] = [
       { tab: 'Refresh', label: 'Refresh from eBay' },
   ] },
   { section: 'Pricing', items: [{ tab: 'Reprice', label: 'Reprice' }] },
-  { section: 'Tools', items: [{ tab: 'Tools', label: 'Tools' }] },
+  { section: 'Tools', items: [
+      { tab: 'Tools', label: 'Tools' },
+      { tab: 'Templates', label: 'Listing templates' },
+  ] },
   { section: 'Money', items: [
       { tab: 'Money', label: 'Sales' },
       { tab: 'Lots', label: 'Lots' },
@@ -174,6 +178,7 @@ export default function App() {
         {tab === 'Settings' && <Settings />}
         {tab === 'Listing' && <ListingSettings />}
         {tab === 'Tools' && <Tools />}
+        {tab === 'Templates' && <Templates />}
       </main>
 
       <nav className="bottombar">
