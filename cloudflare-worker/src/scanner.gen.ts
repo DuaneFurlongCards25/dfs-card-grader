@@ -286,6 +286,15 @@ select{-webkit-appearance:none;background-image:none}
     <div class="muted">Warns you when a shot comes out soft, before it is sent.</div>
     <div class="sw on" id="swSharp" style="margin-top:10px"></div>
 
+    <div class="card">
+      <div class="row">
+        <div style="flex:1"><div class="lab">Stand the card up</div>
+          <div class="sub">A photo that comes out wider than it is tall is turned
+            upright on its own, however the card was lying.</div></div>
+        <div class="sw on" id="swUpright"></div>
+      </div>
+    </div>
+
     <label class="field">Turn the picture</label>
     <div class="lensrow" id="rotrow">
       <button class="lens" data-rot="0">none</button>
@@ -362,7 +371,7 @@ var LS = {
 };
 
 var S = Object.assign({
-  auto:false, guide:true, crop:true, low:false, sharp:true, findCard:true, rot:0,
+  auto:false, guide:true, crop:true, low:false, sharp:true, findCard:true, rot:0, upright:true,
   zoom:1, exp:0, q:92, lens:null
 }, JSON.parse(localStorage.getItem(LS.set) || '{}'));
 function saveS(){ localStorage.setItem(LS.set, JSON.stringify(S)); }
@@ -625,10 +634,14 @@ window.addEventListener('resize', sizeGuide);
 window.addEventListener('orientationchange', function(){ setTimeout(sizeGuide, 350); });
 
 function guideRect(){
-  // same geometry, expressed in the video's own pixels
+  // Same geometry, expressed in the video's own pixels — including the
+  // software zoom, because the preview is scaled and the dashed box
+  // therefore covers a smaller piece of the video than it would at 1x.
+  // Leaving that out was what made a zoomed shot crop twice.
   var el = $('#cam'), W = el.clientWidth, H = el.clientHeight;
   var vw = video.videoWidth, vh = video.videoHeight;
   if (!vw || !vh) return null;
+  var zoomCrop = (!nativeZoom && S.zoom > 1) ? S.zoom : 1;
   // object-fit: cover — the video is scaled to the larger ratio and centred
   var sc = Math.max(W / vw, H / vh);
   var dw = vw * sc, dh = vh * sc, ox = (W - dw) / 2, oy = (H - dh) / 2;
@@ -638,6 +651,13 @@ function guideRect(){
   var pad = 0.06;                                  // breathing room around the card
   var rx = (x - ox) / sc, ry = (y - oy) / sc, rw = w / sc, rh = h / sc;
   rx -= rw * pad; ry -= rh * pad; rw *= (1 + pad * 2); rh *= (1 + pad * 2);
+  if (zoomCrop > 1){
+    // Shrink toward the centre of the frame by the zoom factor.
+    var cxv = vw / 2, cyv = vh / 2;
+    rx = cxv + (rx - cxv) / zoomCrop;
+    ry = cyv + (ry - cyv) / zoomCrop;
+    rw /= zoomCrop; rh /= zoomCrop;
+  }
   rx = Math.max(0, rx); ry = Math.max(0, ry);
   rw = Math.min(vw - rx, rw); rh = Math.min(vh - ry, rh);
   return { x:Math.round(rx), y:Math.round(ry), w:Math.round(rw), h:Math.round(rh) };
@@ -759,16 +779,26 @@ async function shoot(){
   if (busy || !track || !video.videoWidth) return;
   busy = true;
   try {
-    var r = S.crop ? guideRect() : null;
+    /*
+     * ONE crop, never three.
+     *
+     * Zoom, the dashed guide and find-the-card are each a crop, and the
+     * first version applied all three in turn — a zoomed shot came back
+     * as a close-up of the middle of the card. guideRect already folds
+     * the software zoom in, and find-the-card runs instead of the guide
+     * rather than after it.
+     */
+    var r = null;
+    if (S.crop){
+      r = guideRect();
+    } else if (!nativeZoom && S.zoom > 1){
+      // No guide, but still zoomed: take the middle 1/zoom.
+      var vw0 = video.videoWidth, vh0 = video.videoHeight;
+      var zw = vw0 / S.zoom, zh = vh0 / S.zoom;
+      r = { x:(vw0 - zw) / 2, y:(vh0 - zh) / 2, w:zw, h:zh };
+    }
     var sx = r ? r.x : 0, sy = r ? r.y : 0;
     var sw = r ? r.w : video.videoWidth, sh = r ? r.h : video.videoHeight;
-
-    // Software zoom is a crop: take the middle 1/zoom of whatever was
-    // going to be captured, so the photo matches the framed preview.
-    if (!nativeZoom && S.zoom > 1){
-      var zw = sw / S.zoom, zh = sh / S.zoom;
-      sx += (sw - zw) / 2; sy += (sh - zh) / 2; sw = zw; sh = zh;
-    }
     var maxW = S.low ? 1200 : 2400;
     var scale = Math.min(1, maxW / sw);
     var cap = capBase;
@@ -779,12 +809,10 @@ async function shoot(){
     cx.drawImage(video, sx, sy, sw, sh, 0, 0, cap.width, cap.height);
     cx.filter = 'none';
 
-    // Crop to the card itself. This is where most of the win is: the
-    // reader sees a card instead of a card lost in a dark background,
-    // and the file is a fraction of the size, which is a fraction of
-    // the tokens it costs to read.
+    // Find the card — but only when the guide did not already frame it.
+    // Running both takes a crop of a crop.
     var found = null;
-    if (S.findCard){
+    if (S.findCard && !S.crop){
       found = findCard(cap);
       window.__foundCard = !!found;
       if (found){
@@ -800,6 +828,26 @@ async function shoot(){
     if (S.sharp){ var v = sharpness(cap); soft = v < 60; }
 
     var q = (S.low ? 0.72 : S.q / 100);
+    /*
+     * Stand the card up.
+     *
+     * He turns the card between the front and the back shot, so one came
+     * out 180 and the other 90 — no single rotation setting can fix
+     * both. A card is taller than it is wide, so anything that lands
+     * landscape is lying down and gets turned upright on its own. The
+     * manual setting below still handles upside-down, which no shape can
+     * tell you about.
+     */
+    if (S.upright && cap.width > cap.height){
+      var uc = document.createElement('canvas');
+      uc.width = cap.height; uc.height = cap.width;
+      var ux = uc.getContext('2d');
+      ux.translate(uc.width / 2, uc.height / 2);
+      ux.rotate(-Math.PI / 2);
+      ux.drawImage(cap, -cap.width / 2, -cap.height / 2);
+      cap = uc;
+    }
+
     // Turn it the right way up before saving, so every downstream thing —
     // the reader, the listing photo, the website — gets it upright.
     if (S.rot){
@@ -1097,6 +1145,7 @@ toggle('#swCrop', 'crop');
 toggle('#swLow', 'low');
 toggle('#swSharp', 'sharp', function(){ $('#vSharp').textContent = S.sharp ? 'on' : 'off'; });
 toggle('#swAuto2', 'findCard');
+toggle('#swUpright', 'upright');
 
 function paintRange(r){
   var pct = ((r.value - r.min) / ((r.max - r.min) || 1)) * 100;
