@@ -56,6 +56,21 @@ header{display:flex;align-items:center;gap:10px;padding:10px 14px;flex:0 0 auto}
 #camerr{position:absolute;inset:0;display:grid;place-items:center;padding:28px;
   text-align:center;color:var(--dim);font-size:14px}
 
+/* live controls over the preview */
+#live{position:absolute;left:0;right:0;bottom:0;padding:10px 14px 12px;
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  background:linear-gradient(transparent,rgba(0,0,0,.62))}
+.livetab{background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.22);
+  border-radius:999px;padding:6px 13px;font-size:13px;color:rgba(255,255,255,.8)}
+.livetab.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.livetab b{font-variant-numeric:tabular-nums;margin-left:3px}
+#liveSlider{flex:1 1 100%;margin:0;height:34px}
+#liveSlider::-webkit-slider-runnable-track{height:5px;border-radius:3px;
+  background:linear-gradient(var(--blue),var(--blue)) no-repeat,rgba(255,255,255,.25);
+  background-size:var(--fill,0%) 100%}
+#liveSlider::-webkit-slider-thumb{-webkit-appearance:none;width:30px;height:30px;
+  border-radius:50%;background:#fff;margin-top:-13px;box-shadow:0 2px 6px rgba(0,0,0,.6)}
+
 /* ---- shutter row ---- */
 .shutterbar{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;
   padding:14px 22px 18px;gap:14px}
@@ -102,6 +117,14 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:28px;heigh
 input[type=text],select{width:100%;padding:13px 14px;border-radius:12px;font-size:16px;
   background:var(--panel);border:1px solid var(--line);color:var(--text)}
 select{-webkit-appearance:none;background-image:none}
+
+#peekwrap{position:relative;border-radius:var(--r);overflow:hidden;background:#000;
+  aspect-ratio:3/4;margin-bottom:10px}
+#peek{width:100%;height:100%;object-fit:cover;display:block;
+  transform-origin:center center}
+#peekguide{position:absolute;inset:0;pointer-events:none;
+  border:2px dashed rgba(255,255,255,.4);border-radius:var(--r);
+  margin:9% 17%}
 
 .lensrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
 .lens{padding:10px 15px;border-radius:12px;background:var(--panel);border:1px solid var(--line);
@@ -163,6 +186,15 @@ select{-webkit-appearance:none;background-image:none}
   <div id="side">FRONT</div>
   <div id="still" class="hide">hold still…</div>
   <div id="flash"></div>
+
+  <!-- Over the preview, not behind a sheet: adjusting zoom while you
+       cannot see the picture is the same as not having the control. -->
+  <div id="live">
+    <button class="livetab" id="tabZoom">⤢ <b id="liveZoomV">1.0×</b></button>
+    <button class="livetab" id="tabExp">☀ <b id="liveExpV">0.0</b></button>
+    <input type="range" id="liveSlider" min="1" max="5" step="0.01" value="1">
+  </div>
+
   <div id="camerr" class="hide"></div>
 </div>
 
@@ -260,6 +292,14 @@ select{-webkit-appearance:none;background-image:none}
 
     <label class="field">JPEG quality: <span id="vQ">92%</span></label>
     <input type="range" id="rQ" min="60" max="100" step="1" value="92">
+
+    <!-- The picture, under the sliders. Adjusting zoom with the preview
+         hidden behind this sheet is the same as not having the slider. -->
+    <label class="field">What the camera sees</label>
+    <div id="peekwrap">
+      <video id="peek" playsinline muted autoplay></video>
+      <div id="peekguide"></div>
+    </div>
   </div>
 </div>
 
@@ -417,6 +457,7 @@ async function start(){
     return;
   }
   video.srcObject = stream;
+  var peek0 = $('#peek'); if (peek0) peek0.srcObject = stream;
   track = stream.getVideoTracks()[0];
   caps = (track.getCapabilities ? track.getCapabilities() : {}) || {};
   await listLenses();
@@ -447,6 +488,7 @@ function wireZoom(){
   if (S.zoom < +r.min || S.zoom > +r.max) S.zoom = +r.min;
   r.value = S.zoom;
   paintRange(r); $('#vZoom').textContent = (+r.value).toFixed(2) + '×';
+  syncLive();
   $('#noZoom').textContent = nativeZoom
     ? 'Using the camera\u2019s own zoom.'
     : 'This phone will not let a web app drive the lens, so the preview crops in instead. The saved photo matches what you see.';
@@ -460,6 +502,7 @@ function wireExp(){
   if (S.exp < +r.min || S.exp > +r.max) S.exp = 0;
   r.value = S.exp;
   paintRange(r); $('#vExp').textContent = (+r.value).toFixed(1) + ' EV';
+  syncLive();
   $('#noExp').textContent = nativeExp
     ? 'Using the camera\u2019s own exposure.'
     : 'This phone will not let a web app set exposure, so the shot is brightened here instead. Tap the preview to re-meter.';
@@ -470,11 +513,16 @@ function expFilter(ev){ return ev ? 'brightness(' + Math.pow(2, ev).toFixed(3) +
 
 /** Applies whatever the camera would not do itself. */
 function paintPreview(){
+  var peek = $('#peek');
+  if (peek && !peek.srcObject && stream) peek.srcObject = stream;
   var t = [];
   if (S.rot) t.push('rotate(' + S.rot + 'deg)');
   if (!nativeZoom && S.zoom > 1) t.push('scale(' + S.zoom + ')');
-  video.style.transform = t.length ? t.join(' ') : 'none';
+  var tr = t.length ? t.join(' ') : 'none';
+  video.style.transform = tr;
+  if (peek){ peek.style.transform = tr; peek.style.filter = video.style.filter; }
   video.style.filter = nativeExp ? 'none' : expFilter(S.exp);
+  if (peek) peek.style.filter = video.style.filter;
 }
 function wireTorch(){ $('#btnTorch').style.opacity = caps.torch ? 1 : .35; }
 
@@ -494,12 +542,68 @@ async function applyLens(){
 /* tap the preview to re-meter / re-focus where you tapped */
 $('#cam').addEventListener('click', async function(e){
   if (!track) return;
+  if (e.target.closest('#live')) return;        // that was a control, not a tap
   var adv = [];
   if (caps.focusMode && caps.focusMode.indexOf('single-shot') >= 0) adv.push({ focusMode:'single-shot' });
   if (caps.exposureMode && caps.exposureMode.indexOf('single-shot') >= 0) adv.push({ exposureMode:'single-shot' });
   if (!adv.length) return;
   try { await track.applyConstraints({ advanced:adv }); toast('Refocused'); } catch(err){}
 });
+
+/* ---------------- live controls ---------------- */
+/*
+ * Zoom and exposure where the picture is.
+ *
+ * They were only in the settings sheet, which covers the camera — so
+ * adjusting zoom meant dragging a slider with the preview hidden behind
+ * it, then closing the sheet to see what happened. That is the same as
+ * not having the control.
+ */
+var liveMode = 'zoom';
+
+function syncLive(){
+  var r = $('#liveSlider'), rz = $('#rZoom'), re = $('#rExp');
+  var src = liveMode === 'zoom' ? rz : re;
+  r.min = src.min; r.max = src.max; r.step = src.step;
+  r.value = liveMode === 'zoom' ? S.zoom : S.exp;
+  paintRange(r);
+  $('#tabZoom').classList.toggle('on', liveMode === 'zoom');
+  $('#tabExp').classList.toggle('on', liveMode === 'exp');
+  $('#liveZoomV').textContent = S.zoom.toFixed(1) + '×';
+  $('#liveExpV').textContent = (S.exp >= 0 ? '+' : '') + S.exp.toFixed(1);
+}
+$('#tabZoom').onclick = function(){ liveMode = 'zoom'; syncLive(); };
+$('#tabExp').onclick  = function(){ liveMode = 'exp';  syncLive(); };
+$('#liveSlider').oninput = function(){
+  var v = +this.value;
+  if (liveMode === 'zoom'){ S.zoom = v; $('#rZoom').value = v; $('#vZoom').textContent = v.toFixed(2) + '×'; paintRange($('#rZoom')); }
+  else { S.exp = v; $('#rExp').value = v; $('#vExp').textContent = v.toFixed(1) + ' EV'; paintRange($('#rExp')); }
+  paintRange(this); syncLive(); saveS(); paintPreview(); applyLens();
+};
+
+/* Pinch to zoom, because that is what a thumb reaches for first. */
+var pinch0 = null, pinchZoom0 = 1;
+$('#cam').addEventListener('touchstart', function(e){
+  if (e.touches.length === 2){
+    pinch0 = Math.hypot(e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY);
+    pinchZoom0 = S.zoom;
+  }
+}, { passive:true });
+$('#cam').addEventListener('touchmove', function(e){
+  if (pinch0 && e.touches.length === 2){
+    e.preventDefault();
+    var d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX,
+                       e.touches[0].clientY - e.touches[1].clientY);
+    var want = pinchZoom0 * (d / pinch0);
+    var r = $('#rZoom');
+    S.zoom = Math.max(+r.min, Math.min(+r.max, want));
+    liveMode = 'zoom'; syncLive(); saveS(); paintPreview(); applyLens();
+  }
+}, { passive:false });
+$('#cam').addEventListener('touchend', function(e){
+  if (e.touches.length < 2) pinch0 = null;
+}, { passive:true });
 
 /* ---------------- guide box ---------------- */
 function sizeGuide(){
@@ -936,7 +1040,12 @@ function shotMenu(s, url){
 function show(sel){ $(sel).classList.remove('hide'); }
 function hideAll(){ document.querySelectorAll('.sheet').forEach(function(s){ s.classList.add('hide'); }); }
 document.querySelectorAll('[data-close]').forEach(function(b){ b.onclick = hideAll; });
-$('#btnSettings').onclick = function(){ show('#shSettings'); };
+$('#btnSettings').onclick = function(){
+  show('#shSettings');
+  var peek = $('#peek');
+  if (peek && stream){ peek.srcObject = stream; peek.play().catch(function(){}); }
+  paintPreview();
+};
 $('#btnMenu').onclick = function(){ renderStacks(); show('#shMenu'); };
 $('#chipStack').onclick = function(){ renderStacks(); show('#shMenu'); };
 $('#btnCreate').onclick = function(){ var v = $('#newStack').value; $('#newStack').value = '';
@@ -1035,7 +1144,7 @@ $('#thumb').onclick = function(){ if (stack) openStack(stack); };
 
 /* ---------------- go ---------------- */
 (async function(){
-  paintAuto(); paintRot();
+  paintAuto(); paintRot(); syncLive();
   $('#vQ').textContent = S.q + '%';
   $('#vSharp').textContent = S.sharp ? 'on' : 'off';
   ['#rZoom','#rExp','#rQ'].forEach(function(s){ paintRange($(s)); });
