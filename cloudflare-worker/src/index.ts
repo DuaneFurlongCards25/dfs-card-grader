@@ -736,7 +736,11 @@ async function hopperCards(request: Request, env: Env, url: URL) {
       ? await sql.unsafe(
           `SELECT * FROM "${schema}"."scan_cards" WHERE stack_name = $1 ORDER BY idx`, [stack])
       : await sql.unsafe(
-          `SELECT * FROM "${schema}"."scan_cards" ORDER BY updated_at DESC NULLS LAST LIMIT 500`);
+          // Rows with no photo came from the old Streamlit scanner and
+          // cannot be reviewed here; they are history, not work.
+          `SELECT * FROM "${schema}"."scan_cards"
+            WHERE r2_front IS NOT NULL AND coalesce(status,'') <> 'archived'
+            ORDER BY updated_at DESC NULLS LAST LIMIT 500`);
     return json({ cards: rows });
   } catch (e: any) {
     return err(String(e?.message || e).slice(0, 300), 500);

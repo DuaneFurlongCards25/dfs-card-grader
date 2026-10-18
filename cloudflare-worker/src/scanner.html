@@ -238,6 +238,21 @@ select{-webkit-appearance:none;background-image:none}
 
 
 
+    <!-- The ONE's shutter button almost certainly pairs as a Bluetooth
+         keyboard. Which key it sends varies by remote, so rather than
+         guess, it learns the one yours sends. -->
+    <div class="card">
+      <div class="row">
+        <div style="flex:1">
+          <div class="lab">Pedestal shutter button</div>
+          <div class="sub" id="shutKeyNote">Not set up. Press Learn, then press the
+            button on your stand.</div>
+        </div>
+        <button class="done" id="btnLearnKey">Learn</button>
+      </div>
+      <div class="muted" id="learnSays" style="margin-top:8px"></div>
+    </div>
+
     <div class="card">
       <div class="row">
         <div style="flex:1">
@@ -245,6 +260,15 @@ select{-webkit-appearance:none;background-image:none}
           <div class="sub" id="autoSub">Shoots on its own once the card is still.</div>
         </div>
         <div class="sw" id="swAuto"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <div style="flex:1"><div class="lab">Tap the picture to shoot</div>
+          <div class="sub">The whole preview becomes the shutter — easier than
+            reaching for the button with a card in your other hand.</div></div>
+        <div class="sw" id="swTapShoot"></div>
       </div>
     </div>
 
@@ -370,7 +394,7 @@ var LS = {
 };
 
 var S = Object.assign({
-  auto:false, guide:true, crop:true, low:false, sharp:true, findCard:true, rot:0, upright:true,
+  auto:false, guide:true, crop:true, low:false, sharp:true, findCard:true, rot:0, upright:true, shutKey:'', tapShoot:false,
   zoom:1, exp:0, q:92, lens:null
 }, JSON.parse(localStorage.getItem(LS.set) || '{}'));
 function saveS(){ localStorage.setItem(LS.set, JSON.stringify(S)); }
@@ -553,11 +577,67 @@ async function applyLens(){
 $('#cam').addEventListener('click', async function(e){
   if (!track) return;
   if (e.target.closest('#live')) return;        // that was a control, not a tap
+  if (S.tapShoot){ shoot(); return; }           // the whole preview is the shutter
   var adv = [];
   if (caps.focusMode && caps.focusMode.indexOf('single-shot') >= 0) adv.push({ focusMode:'single-shot' });
   if (caps.exposureMode && caps.exposureMode.indexOf('single-shot') >= 0) adv.push({ exposureMode:'single-shot' });
   if (!adv.length) return;
   try { await track.applyConstraints({ advanced:adv }); toast('Refocused'); } catch(err){}
+});
+
+/* ---------------- the pedestal's shutter button ---------------- */
+/*
+ * A Bluetooth camera remote pairs as a keyboard and sends a keypress —
+ * which key depends on the remote. Volume keys never reach a web page on
+ * iOS, but Enter, Space and the arrows do, and most remotes send one of
+ * those. Rather than guess, it learns whichever key yours sends.
+ */
+var learning = false;
+
+function shutterNote(){
+  var n = $('#shutKeyNote');
+  n.textContent = S.shutKey
+    ? 'Listening for "' + S.shutKey + '". Press Learn again to change it.'
+    : 'Not set up. Press Learn, then press the button on your stand.';
+}
+
+$('#btnLearnKey').onclick = function(){
+  learning = true;
+  $('#learnSays').textContent = 'Press the button on your stand now…';
+  $('#learnSays').style.color = 'var(--blue-lift)';
+  setTimeout(function(){
+    if (learning){
+      learning = false;
+      $('#learnSays').style.color = '';
+      $('#learnSays').textContent =
+        'Nothing came through, which means your remote is sending Volume Up. ' +
+        'iOS never passes the volume buttons to a web page — that is Apple\u2019s rule, ' +
+        'not this app. If your remote has an iOS/Android switch, try Android mode: ' +
+        'those usually send Enter, which does come through. Otherwise use hands-free ' +
+        'capture or tap-to-shoot.';
+    }
+  }, 12000);
+};
+
+window.addEventListener('keydown', function(e){
+  if (learning){
+    e.preventDefault();
+    learning = false;
+    S.shutKey = e.key === ' ' ? 'Space' : e.key;
+    saveS(); shutterNote();
+    $('#learnSays').style.color = 'var(--good)';
+    $('#learnSays').textContent = 'Got it — "' + S.shutKey + '" now takes a photo.';
+    return;
+  }
+  // Not while typing a stack name.
+  var t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+  // Sheets are open: the button should not fire behind them.
+  if (!document.querySelector('.sheet:not(.hide)') === false) return;
+  var key = e.key === ' ' ? 'Space' : e.key;
+  if (S.shutKey && key === S.shutKey){ e.preventDefault(); shoot(); return; }
+  // Enter and Space work with no setup at all, since most remotes send one.
+  if (!S.shutKey && (key === 'Enter' || key === 'Space')){ e.preventDefault(); shoot(); }
 });
 
 /* ---------------- live controls ---------------- */
@@ -1145,6 +1225,7 @@ toggle('#swLow', 'low');
 toggle('#swSharp', 'sharp', function(){ $('#vSharp').textContent = S.sharp ? 'on' : 'off'; });
 toggle('#swAuto2', 'findCard');
 toggle('#swUpright', 'upright');
+toggle('#swTapShoot', 'tapShoot');
 
 function paintRange(r){
   var pct = ((r.value - r.min) / ((r.max - r.min) || 1)) * 100;
@@ -1194,7 +1275,7 @@ $('#thumb').onclick = function(){ if (stack) openStack(stack); };
 
 /* ---------------- go ---------------- */
 (async function(){
-  paintAuto(); paintRot(); syncLive();
+  paintAuto(); paintRot(); syncLive(); shutterNote();
   $('#vQ').textContent = S.q + '%';
   $('#vSharp').textContent = S.sharp ? 'on' : 'off';
   ['#rZoom','#rExp','#rQ'].forEach(function(s){ paintRange($(s)); });
