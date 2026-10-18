@@ -244,7 +244,12 @@ export default function Reprice({
                   </b>
                 )}
               </div>
-              <div className="why">{p.why}</div>
+              <div className="why">
+                <a target="_blank" rel="noreferrer" title="eBay sold listings for this card"
+                   href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(text(p.l.title))}&_sacat=261328&LH_Sold=1&LH_Complete=1&_sop=13`}
+                   onClick={(e) => e.stopPropagation()}>sold ↗</a>
+                <span style={{ marginLeft: 8 }}>{p.why}</span>
+              </div>
             </div>
           ))}
         </div>

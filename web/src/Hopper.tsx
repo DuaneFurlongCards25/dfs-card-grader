@@ -4,6 +4,17 @@ import { usd } from './pricing';
 import { download, stamp } from './exports';
 import { ADD_DEFAULTS, ebayAddCsv } from './ebayAdd';
 
+/**
+ * eBay's own sold-and-completed search for a card.
+ *
+ * A link, not a scrape: eBay's terms forbid using their sold data as a
+ * price feed, which is why no card app prices off it. Opening the search
+ * in a tab is him looking at eBay, which is just browsing.
+ */
+const soldSearch = (title: string) =>
+  `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(title)}` +
+  `&_sacat=261328&LH_Sold=1&LH_Complete=1&_sop=13`;
+
 /* ------------------------------------------------------------------ *
  * The Hopper — photographs become listable cards.
  *
@@ -227,6 +238,11 @@ export default function Hopper() {
                 {num(c.fmv) !== null && <span className="muted">comp {usd(num(c.fmv)!)}</span>}
                 {!!unsure.length && <span className="t-note">unsure: {unsure.join(', ')}</span>}
                 <span className="spacer" />
+                <a className="btn sm" target="_blank" rel="noreferrer"
+                   href={soldSearch(c.title || '')}
+                   title="eBay's sold and completed listings for this card">
+                  What it sold for ↗
+                </a>
                 {c.status === 'ready'
                   ? <button className="btn sm" onClick={() => edit(c, 'status', 'needs_review')}>
                       Put back

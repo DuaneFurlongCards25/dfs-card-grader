@@ -684,6 +684,41 @@ async function aiAccept(request: Request, env: Env) {
   }
 }
 
+
+/**
+ * When the Anthropic key was last set, so Settings can warn before a
+ * 30-day key lapses mid-scan rather than after.
+ *
+ * Only the DATE is stored. The key itself lives in a Worker secret and
+ * is never written anywhere this could read it back.
+ */
+async function keyAge(request: Request, env: Env) {
+  const sql = getSql(env);
+  try {
+    const schema = await tenantSchema(request, sql);
+    const T = `"${schema}"."app_settings"`;
+    if (request.method === 'POST') {
+      await sql.unsafe(
+        `INSERT INTO ${T} (key, value, updated_at) VALUES ('anthropic_key_set', now()::text, now())
+         ON CONFLICT (key) DO UPDATE SET value = now()::text, updated_at = now()`);
+    }
+    const [row] = await sql.unsafe(
+      `SELECT updated_at FROM ${T} WHERE key = 'anthropic_key_set'`);
+    const set = row?.updated_at ? new Date(row.updated_at) : null;
+    const days = set ? Math.floor((Date.now() - set.getTime()) / 86400_000) : null;
+    return json({
+      configured: !!env.ANTHROPIC_API_KEY,
+      set_at: set?.toISOString() ?? null,
+      days_old: days,
+      // He chose a 30-day key; warn with a week to spare.
+      renew_soon: days !== null && days >= 23,
+      expired_likely: days !== null && days >= 30,
+    });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
+}
+
 /* ------------------------------------------------------------------ *
  * The Hopper.
  *
@@ -1875,6 +1910,7 @@ export default {
     if (path === '/api/comps/fetch' && request.method === 'POST')
       return compsFetch(request, env);
     if (path === '/api/dashboard') return dashboard(request, env, url);
+    if (path === '/api/ai/key-age') return keyAge(request, env);
     if (path === '/api/ai/accept-licence' && request.method === 'POST')
       return aiAccept(request, env);
     if (path === '/api/hopper/cards') return hopperCards(request, env, url);
