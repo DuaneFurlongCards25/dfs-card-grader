@@ -119,6 +119,7 @@ export type AddCard = {
   parallel?: string;
   year?: string;
   cardNumber?: string;
+  serial?: string;
   player?: string;
   team?: string;
   setName?: string;
@@ -186,9 +187,24 @@ export function ebayAddCsv(cards: AddCard[], d: AddDefaults): string {
       'C:Season': c.year || f.year,
       '*C:League': c.league || LEAGUE[c.sport] || '',
       '*C:Autographed': c.isAuto ? 'Yes' : f.auto,
+      // Also required, and also rejected when blank. Derived from what
+      // the card actually is rather than left for someone to type.
+      '*C:Features': [
+        (c.isRookie ?? f.rookie === 'Yes') ? 'Rookie' : '',
+        (c.isAuto ?? f.auto === 'Yes') ? 'Autograph' : '',
+        c.serial ? 'Serial Numbered' : '',
+        c.parallel ? 'Parallel/Variety' : '',
+        graded === 'Yes' ? 'Graded' : '',
+      ].filter(Boolean).join(',') || 'Base Set',
       '*C:Card Name': (c.player || f.player).slice(0, 65),
       '*C:Card Number': (c.cardNumber || f.number).replace(/^#/, ''),
-      '*C:Parallel/Variety': c.parallel || '',
+      /*
+       * eBay REQUIRES this specific even on a card with no parallel, so
+       * a blank rejects the row. "Base" is the right answer in the
+       * specific — and the opposite of the right answer in the title,
+       * where it is noise. The two fields want different things.
+       */
+      '*C:Parallel/Variety': c.parallel || 'Base',
       '*C:Set': c.setName || '',
       '*C:Team': c.team || '',
       '*C:Type': 'Sports Trading Card',
@@ -205,7 +221,8 @@ export function ebayAddCsv(cards: AddCard[], d: AddDefaults): string {
       GalleryType: pics.length ? 'Gallery' : '',
       '*Description': c.description ||
         (d.description || '{title}<br><br>Ships in a penny sleeve and top loader.')
-          .replace(/\{title\}/g, c.title),
+          .replace(/\{title\}/g, c.title)
+          .replace(/\{front_image\}/g, pics[0] ?? ''),
       '*Format': 'FixedPrice',
       '*Duration': d.duration,
       '*ReturnsAcceptedOption': d.returnsAccepted || 'ReturnsNotAccepted',

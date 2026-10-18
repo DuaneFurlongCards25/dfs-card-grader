@@ -879,9 +879,29 @@ const LISTING_DEFAULTS = {
   weightMajor: '0',
   weightMinor: '4',
   conditionDefault: '400011',             // Excellent
+  /*
+   * His own template, built in Haystack: card image left, title and
+   * policy bullets right. The default used to be one plain line, which
+   * meant every listing went out plain unless he happened to open
+   * Listing templates and press Save.
+   */
   description:
-    '{title}<br><br>Shipped in a penny sleeve and top loader, in a bubble mailer.<br>' +
-    'Please see photographs — they are of the exact card you receive.',
+    '<div style="font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;">' +
+    '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;"><tr>' +
+    '<td valign="top" style="width:180px;padding-right:20px;">' +
+    '<img src="{front_image}" alt="{title}" style="width:100%;max-width:180px;' +
+    'border-radius:12px;border:1px solid #e5e7eb;" /></td><td valign="top">' +
+    '<h2 style="margin:0 0 12px;font-size:24px;text-transform:uppercase;">{title}</h2>' +
+    '<ol style="margin:0 0 20px;padding-left:20px;">' +
+    '<li style="margin-bottom:10px;">All cards are scanned. If you see any lines, ' +
+    'if you want more pictures, just ask!</li>' +
+    '<li style="margin-bottom:10px;">I send all cards over $20 with tracking, and all mem ' +
+    'patches are sent ground advantage to prevent damage.</li>' +
+    '<li style="margin-bottom:10px;">All cards valued over $100 will have insurance added, ' +
+    'which protects you as the buyer.</li></ol>' +
+    '<p style="margin:0;">My goal is to have you receive the card in tip-top shape. ' +
+    'No Returns Accepted. Questions, please ask!!!</p>' +
+    '</td></tr></table></div>',
   // sport -> eBay store category name
   storeCategories: {
     Baseball: '', Basketball: '', Football: '', Soccer: '', Hockey: '',

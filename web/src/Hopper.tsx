@@ -53,6 +53,9 @@ const pairOf = (name: string) => {
 const flag = (unsure: string[], field: string) =>
   unsure.some((u) => u.toLowerCase().includes(field)) ? 'flagged' : '';
 
+/** Thrown to skip cropping without it looking like a failure. */
+class SkipCrop extends Error {}
+
 export default function Hopper() {
   const [stacks, setStacks] = useState<{ name: string; photos: number }[]>([]);
   const [photos, setPhotos] = useState<Shot[]>([]);
@@ -66,6 +69,9 @@ export default function Hopper() {
   // His saved listing defaults — policies, categories, description.
   // Falling back to the hardcoded ones meant Listing defaults did nothing.
   const [defs, setDefs] = useState<AddDefaults>(ADD_DEFAULTS);
+  // Off by default. See the note in identify().
+  const [autoCrop, setAutoCrop] = useState(
+    localStorage.getItem('cp_autocrop') === 'yes');
   const [skuPrefix, setSkuPrefix] = useState(
     localStorage.getItem('cp_sku_prefix') || '');
   const [skuStart, setSkuStart] = useState(
@@ -207,10 +213,22 @@ export default function Hopper() {
       let front = v.front.key, back = v.back?.key ?? '';
       const origFront = front, origBack = back;
 
-      // 1. Crop to the card. Skipped silently where the photo is already
-      //    tight — cropping a good photo is how one gets ruined.
-      setBusy(`Cropping card ${n} — ${done} of ${unread.length}…`);
+      /*
+       * Cropping is OFF unless asked for.
+       *
+       * It ruined a photo he had framed perfectly — the detector found
+       * the white signature panel instead of the card and cut a slice
+       * out of the middle. My guards did not catch it because they
+       * measure the region the detector found, so a wrong detection
+       * produces a wrong fill and a wrong shape that both look fine.
+       *
+       * He frames well. An automatic step that is right most of the time
+       * and silently destroys the rest is worse than no step at all,
+       * because the failures arrive already uploaded.
+       */
+      setBusy(autoCrop ? `Cropping card ${n} — ${done} of ${unread.length}…` : '');
       try {
+        if (!autoCrop) throw new SkipCrop();
         for (const side of ['front', 'back'] as const) {
           const key = side === 'front' ? front : back;
           if (!key) continue;
@@ -228,8 +246,9 @@ export default function Hopper() {
           if (side === 'front') front = saved; else back = saved;
         }
       } catch (e: any) {
-        // A failed crop must not cost the card — read the original.
-        console.warn('crop failed, reading the original', e);
+        // A failed or skipped crop must not cost the card.
+        if (!(e instanceof SkipCrop)) console.warn('crop failed, reading the original', e);
+        front = origFront; back = origBack;
       }
 
       // 2. Read it.
@@ -357,11 +376,12 @@ export default function Hopper() {
         </label>
         <span className="muted">next: <b className="mono">{skuFor(1)}</b></span>
         <span className="spacer" />
-        <button className="btn" disabled={!read.length || !!busy}
-          onClick={async () => { for (const c of read) if (!c.cropped_at) await cropPhotos(c); }}
-          title="New scans are cropped as they are read; this catches older ones">
-          ✂ Crop anything missed
-        </button>
+        <label className="skufield" title="Only helps when the card is small in the frame">
+          <input type="checkbox" checked={autoCrop}
+                 onChange={(e) => { setAutoCrop(e.target.checked);
+                   localStorage.setItem('cp_autocrop', e.target.checked ? 'yes' : 'no'); }} />
+          auto-crop
+        </label>
         <button className="btn" disabled={!read.some((c) => !c.sku) || !!busy}
           onClick={async () => {
             for (const c of read) if (!c.sku) await edit(c, { sku: skuFor(c.idx) });
@@ -381,7 +401,8 @@ export default function Hopper() {
               manufacturer: (c as any).manufacturer || '',
               league: (c as any).league || '',
               parallel: c.parallel || '', year: c.year || '',
-              cardNumber: c.card_number || '', player: c.player || '',
+              cardNumber: c.card_number || '', serial: c.serial || '',
+              player: c.player || '',
               team: c.team || '', setName: c.set_name || '',
               isRookie: !!(c as any).is_rookie, isAuto: !!(c as any).is_auto,
               quantity: (c as any).quantity || 1,
