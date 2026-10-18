@@ -20,3 +20,8 @@ bucket_name = "dfs-card-images"
 
 # Secrets (set once, never committed):
 #   npx wrangler secret put DATABASE_URL   — the same Neon connection string
+
+# Cloudflare's own vision model, used by the Hopper to read a card from
+# its photographs. Bound rather than keyed, so it works without a secret.
+[ai]
+binding = "AI"

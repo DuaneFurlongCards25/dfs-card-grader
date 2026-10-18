@@ -26,6 +26,7 @@
 import postgres from 'postgres';
 import { SCANNER_HTML } from './scanner.gen';
 import { buildTitle, NICKNAMES, readTitle, teamIn } from './titles';
+import { identifyCard, titleFrom, VISION_MODEL } from './hopper';
 import {
   ebayAccessToken, ebayCall, ebayConsentUrl, ebayEndOffer, ebayExchangeCode,
   ebayOrders, ebayRevisePrice, ebayWhy, type EbayEnv,
@@ -36,6 +37,8 @@ export interface Env {
   API_KEY?: string;
   SCAN_KEY?: string;
   CARDHEDGER_KEY?: string;
+  ANTHROPIC_API_KEY?: string;
+  AI?: { run: (model: string, input: any) => Promise<any> };
   EBAY_APP_ID?: string;
   EBAY_CERT_ID?: string;
   EBAY_RU_NAME?: string;
@@ -660,6 +663,152 @@ async function serveImage(env: Env, key: string) {
 
 
 
+
+
+
+/**
+ * Accepts Meta's community licence for the vision model.
+ *
+ * Deliberately its own endpoint behind its own button: agreeing to a
+ * licence is the account owner's act. Cloudflare records the acceptance
+ * when the literal prompt "agree" is sent once.
+ */
+async function aiAccept(request: Request, env: Env) {
+  if (!env.AI) return err('no AI binding on this Worker', 503);
+  try {
+    const r = await env.AI.run(VISION_MODEL, { prompt: 'agree' });
+    const said = String((r as any)?.response ?? '');
+    return json({ ok: true, model: VISION_MODEL, said: said.slice(0, 200) });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * The Hopper.
+ *
+ * Photos in, listable cards out. Identify reads one pair at a time so
+ * progress is visible and a failure costs one card, not a batch.
+ * ------------------------------------------------------------------ */
+
+/** Everything the Hopper holds for a stack, identified or not. */
+async function hopperCards(request: Request, env: Env, url: URL) {
+  const sql = getSql(env);
+  try {
+    const schema = await tenantSchema(request, sql);
+    const stack = (url.searchParams.get('stack') || '').trim();
+    const rows = stack
+      ? await sql.unsafe(
+          `SELECT * FROM "${schema}"."scan_cards" WHERE stack_name = $1 ORDER BY idx`, [stack])
+      : await sql.unsafe(
+          `SELECT * FROM "${schema}"."scan_cards" ORDER BY updated_at DESC NULLS LAST LIMIT 500`);
+    return json({ cards: rows });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
+}
+
+async function hopperIdentify(request: Request, env: Env) {
+  if (!env.CARD_IMAGES) return err('image bucket not bound', 500);
+  const sql = getSql(env);
+  try {
+    const schema = await tenantSchema(request, sql);
+    const b = (await request.json()) as any;
+    const frontKey = String(b?.front ?? '').trim();
+    const backKey = String(b?.back ?? '').trim();
+    const stack = String(b?.stack ?? '').trim();
+    const idx = Number(b?.idx) || 0;
+    if (!frontKey.startsWith('scan/')) return err('a front photo is required', 400);
+
+    const fo = await env.CARD_IMAGES.get(frontKey);
+    if (!fo) return err('that photo is no longer in the bucket', 404);
+    const front = await fo.arrayBuffer();
+    let back: ArrayBuffer | null = null;
+    if (backKey.startsWith('scan/')) {
+      const bo = await env.CARD_IMAGES.get(backKey);
+      if (bo) back = await bo.arrayBuffer();
+    }
+
+    const card = await identifyCard(env, front, back,
+      fo.httpMetadata?.contentType || 'image/jpeg');
+    const title = titleFrom(card);
+
+    // Price it while we are here: a card with no price is not listable,
+    // and the comp lookup is one more call on a card already in hand.
+    let fmv: number | null = null;
+    if (env.CARDHEDGER_KEY && card.confidence >= 0.5 && title) {
+      const res = await chPost(env, '/v1/cards/card-match',
+        { query: title, page: 1, page_size: 3 });
+      const m = res?.match;
+      if (m && Number(m.confidence ?? 0) >= 0.7) {
+        const want = card.grader && card.grade
+          ? `${card.grader.toUpperCase()} ${card.grade}` : 'Raw';
+        fmv = chPickPrice(m, want);
+      }
+    }
+
+    // One stack row per name, so a re-scan does not pile up duplicates.
+    const [st] = await sql.unsafe(
+      `INSERT INTO "${schema}"."scan_stacks" (name) VALUES ($1)
+       ON CONFLICT DO NOTHING RETURNING id`, [stack || 'loose']);
+    const stackId = st?.id ?? (await sql.unsafe(
+      `SELECT id FROM "${schema}"."scan_stacks" WHERE name = $1 LIMIT 1`,
+      [stack || 'loose']))[0]?.id;
+
+    const [saved] = await sql.unsafe(
+      `INSERT INTO "${schema}"."scan_cards"
+         (stack_id, idx, stack_name, r2_front, r2_back, player, title, year,
+          set_name, card_number, parallel, serial, grader, grade, team, sport,
+          is_rookie, is_auto, confidence, unsure, fmv, price, status, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$21,
+               $22, now())
+       ON CONFLICT (r2_front) DO UPDATE SET
+         player=excluded.player, title=excluded.title, year=excluded.year,
+         set_name=excluded.set_name, card_number=excluded.card_number,
+         parallel=excluded.parallel, serial=excluded.serial, grader=excluded.grader,
+         grade=excluded.grade, team=excluded.team, sport=excluded.sport,
+         is_rookie=excluded.is_rookie, is_auto=excluded.is_auto,
+         confidence=excluded.confidence, unsure=excluded.unsure,
+         fmv=excluded.fmv, status=excluded.status, updated_at=now()
+       RETURNING *`,
+      [stackId, idx, stack, frontKey, backKey || null, card.player, title, card.year,
+       card.set_name, card.card_number, card.parallel, card.serial, card.grader,
+       card.grade, card.team, card.sport, card.is_rookie, card.is_auto,
+       card.confidence, card.unsure.join(', '), fmv,
+       card.confidence >= 0.8 && card.unsure.length === 0 ? 'identified' : 'needs_review']);
+
+    return json({ ok: true, card: saved });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
+}
+
+/** Review edits — whatever a person corrects wins over what was read. */
+async function hopperSave(request: Request, env: Env) {
+  const sql = getSql(env);
+  try {
+    const schema = await tenantSchema(request, sql);
+    const b = (await request.json()) as any;
+    const id = Number(b?.id);
+    if (!Number.isFinite(id)) return err('which card?', 400);
+
+    const ok = ['player','title','year','set_name','card_number','parallel','serial',
+                'grader','grade','team','sport','price','sku','status','notes'];
+    const sets: string[] = [];
+    const vals: any[] = [];
+    for (const k of ok) {
+      if (k in b) { vals.push(b[k] === '' ? null : b[k]); sets.push(`"${k}" = $${vals.length}`); }
+    }
+    if (!sets.length) return err('nothing to change', 400);
+    vals.push(id);
+    const [row] = await sql.unsafe(
+      `UPDATE "${schema}"."scan_cards" SET ${sets.join(', ')}, updated_at = now()
+        WHERE id = $${vals.length} RETURNING *`, vals);
+    return json({ ok: true, card: row });
+  } catch (e: any) {
+    return err(String(e?.message || e).slice(0, 300), 500);
+  } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
+}
 
 /* ------------------------------------------------------------------ *
  * Title suggestions.
@@ -1664,8 +1813,29 @@ export default {
         headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' },
       });
     }
+    // A valid session token stands in for the key AND for X-DFS-Tenant. The
+    // request is rebuilt with that header so every route below — including
+    // the existing /api/db and /api/me — carries on unchanged, and Streamlit,
+    // which sends the key directly, is untouched by any of this.
+    const bearer = (request.headers.get('Authorization') || '').replace(/^Bearer /i, '');
+    let signedIn = false;
+    if (bearer) {
+      const code = await readSession(env, bearer);
+      if (code) {
+        const h = new Headers(request.headers);
+        h.set('X-DFS-Tenant', code);
+        request = new Request(request, { headers: h });
+        signedIn = true;
+      } else {
+        // Say so plainly: the app shows "signed out" rather than a dead screen.
+        return err('session expired', 401);
+      }
+    }
+
     if (path.startsWith('/api/scan')) {
-      if (!scanAuthed(request, env) && !authed(request, env)) {
+      // The phone has the scan key; the app has a session. Both are
+      // him, and the Hopper reads the same bucket the phone writes.
+      if (!signedIn && !scanAuthed(request, env) && !authed(request, env)) {
         return err(env.SCAN_KEY
           ? 'unauthorized'
           : 'SCAN_KEY not configured — run: npx wrangler secret put SCAN_KEY',
@@ -1686,25 +1856,6 @@ export default {
     // of ours — the tenant travels in `state` instead.
     if (path === '/api/ebay/callback') return ebayCallback(request, env, url);
 
-    // A valid session token stands in for the key AND for X-DFS-Tenant. The
-    // request is rebuilt with that header so every route below — including
-    // the existing /api/db and /api/me — carries on unchanged, and Streamlit,
-    // which sends the key directly, is untouched by any of this.
-    const bearer = (request.headers.get('Authorization') || '').replace(/^Bearer /i, '');
-    let signedIn = false;
-    if (bearer) {
-      const code = await readSession(env, bearer);
-      if (code) {
-        const h = new Headers(request.headers);
-        h.set('X-DFS-Tenant', code);
-        request = new Request(request, { headers: h });
-        signedIn = true;
-      } else {
-        // Say so plainly: the app shows "signed out" rather than a dead screen.
-        return err('session expired', 401);
-      }
-    }
-
     if (!signedIn && !authed(request, env)) {
       return err(env.API_KEY
         ? 'unauthorized'
@@ -1721,6 +1872,13 @@ export default {
     if (path === '/api/comps/fetch' && request.method === 'POST')
       return compsFetch(request, env);
     if (path === '/api/dashboard') return dashboard(request, env, url);
+    if (path === '/api/ai/accept-licence' && request.method === 'POST')
+      return aiAccept(request, env);
+    if (path === '/api/hopper/cards') return hopperCards(request, env, url);
+    if (path === '/api/hopper/identify' && request.method === 'POST')
+      return hopperIdentify(request, env);
+    if (path === '/api/hopper/save' && request.method === 'POST')
+      return hopperSave(request, env);
     if (path === '/api/titles/suggest' && request.method === 'POST')
       return titlesSuggest(request, env);
     if (path === '/api/lots' && request.method === 'GET') return lots(request, env);

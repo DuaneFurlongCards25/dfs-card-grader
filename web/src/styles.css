@@ -412,8 +412,10 @@ ol.steps b { color: var(--text); }
 .app.shut .section { font-size: 0; padding: 9px 0; text-align: center; }
 .app.shut .section::first-letter { font-size: 18px; }
 
-.subs { display: grid; gap: 1px; margin: 2px 0 8px 12px;
+.subs { display: grid; gap: 1px; margin: 2px 0 10px 12px;
         border-left: 1px solid var(--line); padding-left: 10px; }
+/* The section heading is a label when its children are all on show. */
+.section { margin-bottom: 2px; }
 .sub {
   text-align: left; padding: 7px 10px; border-radius: 7px;
   font-size: 13.5px; font-weight: 600; color: var(--text-dim); white-space: nowrap;
@@ -517,3 +519,33 @@ ol.steps b { color: var(--text); }
 }
 .t-after .len.bad { color: var(--danger); background: color-mix(in srgb, var(--danger) 16%, transparent); }
 .t-note { font-size: 12px; color: var(--watch); margin-top: 3px; }
+
+/* ---------------- hopper ---------------- */
+.hop {
+  display: grid; grid-template-columns: 180px 1fr; gap: 16px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-lg); padding: 14px; margin-bottom: 12px;
+}
+.hop.ok { border-color: var(--fresh); }
+.hop-pics { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; align-content: start; }
+.hop-pics img { width: 100%; aspect-ratio: 5/7; object-fit: cover; border-radius: 8px;
+                background: var(--surface-2); }
+.hop-title {
+  width: 100%; font: 600 15px/1.35 var(--sans); padding: 8px 10px;
+  border-radius: 9px; background: var(--bg); border: 1px solid var(--line); color: var(--text);
+}
+.hop-fields {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 8px; margin: 10px 0;
+}
+.hop-fields label { display: flex; flex-direction: column; gap: 3px;
+                    font-size: 11px; font-weight: 700; letter-spacing: .6px;
+                    text-transform: uppercase; color: var(--text-faint); }
+.hop-fields label.flagged { color: var(--watch); }
+.hop-fields label.flagged input { border-color: var(--watch); }
+.hop-fields input {
+  padding: 7px 9px; border-radius: 8px; font: 400 13px var(--sans);
+  background: var(--bg); border: 1px solid var(--line); color: var(--text);
+}
+.hop-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12.5px; }
+@media (max-width: 760px) { .hop { grid-template-columns: 1fr; } }

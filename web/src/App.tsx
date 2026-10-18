@@ -10,6 +10,7 @@ import Settings from './Settings';
 import Dashboard from './Dashboard';
 import Lots from './Lots';
 import Titles from './Titles';
+import Hopper from './Hopper';
 
 /* ------------------------------------------------------------------ *
  * The shell.
@@ -22,7 +23,7 @@ import Titles from './Titles';
 
 type Tab =
   | 'Home' | 'Inventory' | 'Boxes' | 'Intake' | 'Refresh'
-  | 'Reprice' | 'Money' | 'Lots' | 'Titles' | 'Settings';
+  | 'Reprice' | 'Money' | 'Lots' | 'Titles' | 'Hopper' | 'Settings';
 
 const NAV: { section: string; items: { tab: Tab; label: string }[] }[] = [
   { section: 'Dashboard', items: [{ tab: 'Home', label: 'Overview' }] },
@@ -30,7 +31,8 @@ const NAV: { section: string; items: { tab: Tab; label: string }[] }[] = [
       { tab: 'Inventory', label: 'Listings' },
       { tab: 'Boxes', label: 'Boxes' },
       { tab: 'Titles', label: 'Titles' },
-      { tab: 'Intake', label: 'Intake' },
+      { tab: 'Hopper', label: 'Hopper' },
+      { tab: 'Intake', label: 'Scans' },
       { tab: 'Refresh', label: 'Refresh from eBay' },
   ] },
   { section: 'Pricing', items: [{ tab: 'Reprice', label: 'Reprice' }] },
@@ -105,7 +107,10 @@ export default function App() {
                         onClick={() => setTab(s.items[0].tab)}>
                   {s.section}
                 </button>
-                {on && s.items.length > 1 && (
+                {/* Always shown, not just for the open section. Hidden
+                    sub-items mean you cannot find a screen without first
+                    guessing which section it lives under. */}
+                {s.items.length > 1 && (
                   <div className="subs">
                     {s.items.map((i) => (
                       <button key={i.tab}
@@ -158,6 +163,7 @@ export default function App() {
         {tab === 'Lots' && <Lots />}
         {tab === 'Titles' && (rows ? <Titles rows={rows} selected={sel} /> : <Loading n={loaded} />)}
         {tab === 'Intake' && <Intake />}
+        {tab === 'Hopper' && <Hopper />}
         {tab === 'Settings' && <Settings />}
       </main>
 
